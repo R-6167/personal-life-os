@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 
 import type { EventRecorder } from '../core/event-recorder.js';
 import type { Goal, Habit } from '../types.js';
-import type { GoalRepository, HabitRepository } from '../repositories/task-repository.js';
+import type { GoalRepository } from '../repositories/task-repository.js';
+import type { HabitRepository } from '../repositories/habit-repository.js';
 
 export class GoalService {
   constructor(

@@ -4,22 +4,18 @@ import { createDatabase } from './db/Database.js';
 import { EventRecorder } from './core/event-recorder.js';
 import { GoalRepository, TaskRepository } from './repositories/task-repository.js';
 import { HabitRepository } from './repositories/habit-repository.js';
-import { GoalService, HabitService, TaskService } from './services/index.js';
 import { ContextBuilder } from './services/context-builder.js';
+import { TaskService, GoalService, HabitService } from './services/task-service.js';
 
 const db = createDatabase();
 
-const existingUser = db
-  .prepare('SELECT COUNT(*) as count FROM users WHERE id = ?')
-  .get('demo-user') as { count: number };
+const existingUser = db.prepare('SELECT COUNT(*) as count FROM users WHERE id = ?').get('demo-user') as { count: number };
 
 if (existingUser.count === 0) {
   const now = Date.now();
   db.prepare(
-    `
-    INSERT INTO users (id, name, display_name, timezone, locale, currency, week_start_day, created_at, updated_at)
-    VALUES (@id, @name, @display_name, @timezone, @locale, @currency, @week_start_day, @created_at, @updated_at)
-    `
+    `INSERT INTO users (id, name, display_name, timezone, locale, currency, week_start_day, created_at, updated_at)
+     VALUES (@id, @name, @display_name, @timezone, @locale, @currency, @week_start_day, @created_at, @updated_at)`
   ).run({
     id: 'demo-user',
     name: 'Demo User',
