@@ -14,12 +14,15 @@ export type EventType =
   | 'GOAL_CREATED'
   | 'GOAL_PROGRESS_CHANGED'
   | 'GOAL_COMPLETED'
+  | 'HABIT_CREATED'
   | 'HABIT_COMPLETED'
   | 'HABIT_SKIPPED'
   | 'HABIT_MISSED'
   | 'PROJECT_CREATED'
   | 'PROJECT_STARTED'
-  | 'PROJECT_COMPLETED';
+  | 'PROJECT_COMPLETED'
+  | 'EXPENSE_RECORDED'
+  | 'INCOME_RECORDED';
 
 export interface User {
   id: string;
@@ -135,6 +138,37 @@ export interface ActivityEvent {
   source: string;
   external_id?: string | null;
   metadata?: string | null;
+}
+
+export interface FinancialAccount {
+  id: string;
+  owner_id: string;
+  name: string;
+  type: string;
+  currency: string;
+  current_balance?: number | null;
+  institution?: string | null;
+  account_identifier?: string | null;
+  is_tracked: number;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+  archived_at?: number | null;
+}
+
+export interface Income {
+  id: string;
+  owner_id: string;
+  account_id?: string | null;
+  category_id?: string | null;
+  source: string;
+  amount: number;
+  currency: string;
+  occurred_at: Timestamp;
+  description?: string | null;
+  project_id?: string | null;
+  goal_id?: string | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
 }
 
 export interface Expense {
