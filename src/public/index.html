@@ -116,6 +116,13 @@
         border-radius: 12px;
         padding: 12px 14px;
         margin-bottom: 10px;
+        cursor: pointer;
+        transition: all 200ms ease;
+      }
+
+      li:hover {
+        background: rgba(30, 41, 59, 0.8);
+        border-color: var(--accent);
       }
 
       .task-title, .goal-title {
@@ -143,8 +150,162 @@
       .pill.planned { background: rgba(251, 191, 36, 0.12); color: #fcd34d; }
       .pill.overdue { background: rgba(248, 113, 113, 0.12); color: #fca5a5; }
 
+      .btn {
+        display: inline-block;
+        border: 1px solid var(--line);
+        background: rgba(56, 189, 248, 0.1);
+        color: var(--accent);
+        padding: 8px 14px;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        cursor: pointer;
+        transition: all 150ms ease;
+      }
+
+      .btn:hover {
+        background: rgba(56, 189, 248, 0.2);
+        border-color: var(--accent);
+      }
+
+      .btn-primary {
+        background: var(--accent);
+        color: var(--bg);
+        border-color: var(--accent);
+        font-weight: 600;
+      }
+
+      .btn-primary:hover {
+        background: #22d3ee;
+        border-color: #22d3ee;
+      }
+
+      /* Modal styles */
+      .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.6);
+        display: none;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+      }
+
+      .modal-overlay.active {
+        display: flex;
+      }
+
+      .modal {
+        background: rgba(17, 24, 39, 0.98);
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        padding: 28px;
+        max-width: 500px;
+        width: 90%;
+        max-height: 90vh;
+        overflow-y: auto;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+      }
+
+      .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 24px;
+      }
+
+      .modal-header h3 {
+        margin: 0;
+        font-size: 1.4rem;
+      }
+
+      .close-btn {
+        background: none;
+        border: none;
+        color: var(--text);
+        font-size: 1.8rem;
+        cursor: pointer;
+        padding: 0;
+        width: 32px;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .close-btn:hover {
+        color: var(--accent);
+      }
+
+      .form-group {
+        margin-bottom: 16px;
+      }
+
+      .form-group label {
+        display: block;
+        margin-bottom: 6px;
+        font-weight: 600;
+        font-size: 0.95rem;
+      }
+
+      .form-group input,
+      .form-group textarea,
+      .form-group select {
+        width: 100%;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        background: rgba(15, 23, 42, 0.7);
+        color: var(--text);
+        border-radius: 8px;
+        font-family: inherit;
+        font-size: 1rem;
+      }
+
+      .form-group textarea {
+        resize: vertical;
+        min-height: 80px;
+      }
+
+      .form-group input:focus,
+      .form-group textarea:focus,
+      .form-group select:focus {
+        outline: none;
+        border-color: var(--accent);
+        background: rgba(15, 23, 42, 0.9);
+      }
+
+      .form-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .modal-footer {
+        display: flex;
+        gap: 12px;
+        justify-content: flex-end;
+        margin-top: 24px;
+        padding-top: 16px;
+        border-top: 1px solid var(--line);
+      }
+
+      .btn-cancel {
+        background: rgba(148, 163, 184, 0.1);
+        color: var(--muted);
+        border-color: var(--line);
+      }
+
+      .btn-cancel:hover {
+        background: rgba(148, 163, 184, 0.15);
+      }
+
       @media (max-width: 840px) {
         .two-col {
+          grid-template-columns: 1fr;
+        }
+        .form-row {
           grid-template-columns: 1fr;
         }
       }
@@ -163,6 +324,7 @@
         <div class="card">
           <div class="section-header">
             <h2>Tasks</h2>
+            <button class="btn btn-primary" onclick="openCreateTaskModal()">+ New</button>
           </div>
           <ul id="tasksList"></ul>
         </div>
@@ -170,6 +332,7 @@
         <div class="card">
           <div class="section-header">
             <h2>Goals</h2>
+            <button class="btn btn-primary" onclick="openCreateGoalModal()">+ New</button>
           </div>
           <ul id="goalsList"></ul>
         </div>
@@ -179,6 +342,7 @@
         <div class="card">
           <div class="section-header">
             <h2>Projects</h2>
+            <button class="btn btn-primary" onclick="openCreateProjectModal()">+ New</button>
           </div>
           <ul id="projectsList"></ul>
         </div>
@@ -192,7 +356,305 @@
       </section>
     </div>
 
+    <!-- Task Modal -->
+    <div class="modal-overlay" id="taskModal">
+      <div class="modal">
+        <div class="modal-header">
+          <h3 id="taskModalTitle">New Task</h3>
+          <button class="close-btn" onclick="closeTaskModal()">&times;</button>
+        </div>
+        <form id="taskForm" onsubmit="submitTask(event)">
+          <div class="form-group">
+            <label>Title *</label>
+            <input type="text" id="taskTitle" placeholder="What needs to be done?" required />
+          </div>
+          <div class="form-group">
+            <label>Description</label>
+            <textarea id="taskDescription" placeholder="Add details..."></textarea>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Status</label>
+              <select id="taskStatus">
+                <option value="INBOX">Inbox</option>
+                <option value="PLANNED">Planned</option>
+                <option value="IN_PROGRESS">In Progress</option>
+                <option value="WAITING">Waiting</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Priority</label>
+              <input type="number" id="taskPriority" min="0" max="10" value="0" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Due Date</label>
+            <input type="date" id="taskDueDate" />
+          </div>
+          <div class="form-group">
+            <label>Estimated Minutes</label>
+            <input type="number" id="taskEstimatedMinutes" min="0" />
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-cancel" onclick="closeTaskModal()">Cancel</button>
+            <button type="submit" class="btn btn-primary">Create Task</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Goal Modal -->
+    <div class="modal-overlay" id="goalModal">
+      <div class="modal">
+        <div class="modal-header">
+          <h3 id="goalModalTitle">New Goal</h3>
+          <button class="close-btn" onclick="closeGoalModal()">&times;</button>
+        </div>
+        <form id="goalForm" onsubmit="submitGoal(event)">
+          <div class="form-group">
+            <label>Title *</label>
+            <input type="text" id="goalTitle" placeholder="What do you want to achieve?" required />
+          </div>
+          <div class="form-group">
+            <label>Description</label>
+            <textarea id="goalDescription" placeholder="Why is this important?"></textarea>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Status</label>
+              <select id="goalStatus">
+                <option value="ACTIVE">Active</option>
+                <option value="PAUSED">Paused</option>
+                <option value="CANCELLED">Cancelled</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Priority</label>
+              <input type="number" id="goalPriority" min="0" max="10" value="5" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Target Date</label>
+            <input type="date" id="goalTargetDate" />
+          </div>
+          <div class="form-group">
+            <label>Progress Mode</label>
+            <select id="goalProgressMode">
+              <option value="CALCULATED">Calculated</option>
+              <option value="MANUAL">Manual</option>
+              <option value="HYBRID">Hybrid</option>
+            </select>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-cancel" onclick="closeGoalModal()">Cancel</button>
+            <button type="submit" class="btn btn-primary">Create Goal</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Project Modal -->
+    <div class="modal-overlay" id="projectModal">
+      <div class="modal">
+        <div class="modal-header">
+          <h3 id="projectModalTitle">New Project</h3>
+          <button class="close-btn" onclick="closeProjectModal()">&times;</button>
+        </div>
+        <form id="projectForm" onsubmit="submitProject(event)">
+          <div class="form-group">
+            <label>Title *</label>
+            <input type="text" id="projectTitle" placeholder="Project name" required />
+          </div>
+          <div class="form-group">
+            <label>Description</label>
+            <textarea id="projectDescription" placeholder="What's this project about?"></textarea>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Status</label>
+              <select id="projectStatus">
+                <option value="PLANNED">Planned</option>
+                <option value="ACTIVE">Active</option>
+                <option value="PAUSED">Paused</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Priority</label>
+              <input type="number" id="projectPriority" min="0" max="10" value="5" />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Start Date</label>
+              <input type="date" id="projectStartDate" />
+            </div>
+            <div class="form-group">
+              <label>Target Date</label>
+              <input type="date" id="projectTargetDate" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Progress Mode</label>
+            <select id="projectProgressMode">
+              <option value="CALCULATED">Calculated</option>
+              <option value="MANUAL">Manual</option>
+              <option value="HYBRID">Hybrid</option>
+            </select>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-cancel" onclick="closeProjectModal()">Cancel</button>
+            <button type="submit" class="btn btn-primary">Create Project</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <script>
+      // Modal Management
+      function openCreateTaskModal() {
+        document.getElementById('taskModalTitle').textContent = 'New Task';
+        document.getElementById('taskForm').reset();
+        document.getElementById('taskModal').classList.add('active');
+      }
+
+      function closeTaskModal() {
+        document.getElementById('taskModal').classList.remove('active');
+      }
+
+      function openCreateGoalModal() {
+        document.getElementById('goalModalTitle').textContent = 'New Goal';
+        document.getElementById('goalForm').reset();
+        document.getElementById('goalModal').classList.add('active');
+      }
+
+      function closeGoalModal() {
+        document.getElementById('goalModal').classList.remove('active');
+      }
+
+      function openCreateProjectModal() {
+        document.getElementById('projectModalTitle').textContent = 'New Project';
+        document.getElementById('projectForm').reset();
+        document.getElementById('projectModal').classList.add('active');
+      }
+
+      function closeProjectModal() {
+        document.getElementById('projectModal').classList.remove('active');
+      }
+
+      // Form Submission
+      async function submitTask(event) {
+        event.preventDefault();
+        const title = document.getElementById('taskTitle').value;
+        const description = document.getElementById('taskDescription').value;
+        const status = document.getElementById('taskStatus').value;
+        const priority = parseInt(document.getElementById('taskPriority').value) || 0;
+        const dueDate = document.getElementById('taskDueDate').value;
+        const estimatedMinutes = parseInt(document.getElementById('taskEstimatedMinutes').value) || undefined;
+
+        const payload = {
+          title,
+          description,
+          status,
+          priority,
+          due_at: dueDate ? new Date(dueDate).getTime() : undefined,
+          estimated_minutes: estimatedMinutes,
+        };
+
+        try {
+          const response = await fetch('/api/tasks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          if (response.ok) {
+            closeTaskModal();
+            loadDashboard();
+          }
+        } catch (err) {
+          console.error('Error creating task:', err);
+        }
+      }
+
+      async function submitGoal(event) {
+        event.preventDefault();
+        const title = document.getElementById('goalTitle').value;
+        const description = document.getElementById('goalDescription').value;
+        const status = document.getElementById('goalStatus').value;
+        const priority = parseInt(document.getElementById('goalPriority').value) || 0;
+        const targetDate = document.getElementById('goalTargetDate').value;
+        const progressMode = document.getElementById('goalProgressMode').value;
+
+        const payload = {
+          title,
+          description,
+          status,
+          priority,
+          target_date: targetDate ? new Date(targetDate).getTime() : undefined,
+          progress_mode: progressMode,
+        };
+
+        try {
+          const response = await fetch('/api/goals', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          if (response.ok) {
+            closeGoalModal();
+            loadDashboard();
+          }
+        } catch (err) {
+          console.error('Error creating goal:', err);
+        }
+      }
+
+      async function submitProject(event) {
+        event.preventDefault();
+        const title = document.getElementById('projectTitle').value;
+        const description = document.getElementById('projectDescription').value;
+        const status = document.getElementById('projectStatus').value;
+        const priority = parseInt(document.getElementById('projectPriority').value) || 0;
+        const startDate = document.getElementById('projectStartDate').value;
+        const targetDate = document.getElementById('projectTargetDate').value;
+        const progressMode = document.getElementById('projectProgressMode').value;
+
+        const payload = {
+          title,
+          description,
+          status,
+          priority,
+          start_date: startDate ? new Date(startDate).getTime() : undefined,
+          target_date: targetDate ? new Date(targetDate).getTime() : undefined,
+          progress_mode: progressMode,
+        };
+
+        try {
+          const response = await fetch('/api/projects', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          if (response.ok) {
+            closeProjectModal();
+            loadDashboard();
+          }
+        } catch (err) {
+          console.error('Error creating project:', err);
+        }
+      }
+
+      // Close modals on overlay click
+      document.getElementById('taskModal').addEventListener('click', (e) => {
+        if (e.target.id === 'taskModal') closeTaskModal();
+      });
+      document.getElementById('goalModal').addEventListener('click', (e) => {
+        if (e.target.id === 'goalModal') closeGoalModal();
+      });
+      document.getElementById('projectModal').addEventListener('click', (e) => {
+        if (e.target.id === 'projectModal') closeProjectModal();
+      });
+
+      // Dashboard Loading
       async function loadDashboard() {
         const response = await fetch('/api/context');
         const payload = await response.json();
