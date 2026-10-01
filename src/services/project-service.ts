@@ -1,5 +1,6 @@
 import type { EventRecorder } from '../core/event-recorder.js';
-import type { Goal, Project } from '../types.js';
+import { assertNonNegative } from '../core/validation.js';
+import type { Project } from '../types.js';
 import type { ProjectRepository } from '../repositories/project-repository.js';
 
 export class ProjectService {
@@ -9,6 +10,9 @@ export class ProjectService {
   ) {}
 
   createProject(input: Omit<Project, 'id' | 'created_at' | 'updated_at'> & { id?: string }): Project {
+    if (!input.title.trim()) throw new Error('Project title is required');
+    assertNonNegative(input.priority ?? 0, 'priority');
+
     const now = Date.now();
     const project: Project = {
       ...input,
@@ -30,8 +34,20 @@ export class ProjectService {
       source: 'ProjectService.createProject',
       metadata: { title: project.title },
     });
-
     return saved;
+  }
+
+  startProject(projectId: string): Project | null {
+    const updated = this.projectRepository.update(projectId, { status: 'ACTIVE' });
+    if (!updated) return null;
+    this.eventRecorder.record({
+      ownerId: updated.owner_id,
+      eventType: 'PROJECT_STARTED',
+      entityType: 'PROJECT',
+      entityId: updated.id,
+      source: 'ProjectService.startProject',
+    });
+    return updated;
   }
 
   completeProject(projectId: string): Project | null {
@@ -39,51 +55,14 @@ export class ProjectService {
       status: 'COMPLETED',
       completed_at: Date.now(),
     });
-
     if (!updated) return null;
-
     this.eventRecorder.record({
       ownerId: updated.owner_id,
       eventType: 'PROJECT_COMPLETED',
       entityType: 'PROJECT',
       entityId: updated.id,
-      occurredAt: Date.now(),
       source: 'ProjectService.completeProject',
     });
-
     return updated;
-  }
-}
-
-export class FinanceService {
-  constructor(
-    private readonly financeRepository: import('../repositories/finance-repository.js').FinanceRepository,
-    private readonly eventRecorder: EventRecorder
-  ) {}
-
-  createExpense(input: Omit<import('../types.js').Expense, 'id' | 'created_at' | 'updated_at'> & { id?: string }): import('../types.js').Expense {
-    const now = Date.now();
-    const expense: import('../types.js').Expense = {
-      ...input,
-      id: input.id ?? crypto.randomUUID(),
-      created_at: now,
-      updated_at: now,
-      amount: input.amount,
-      currency: input.currency ?? 'KES',
-      description: input.description,
-    };
-
-    const saved = this.financeRepository.createExpense(expense);
-    this.eventRecorder.record({
-      ownerId: expense.owner_id,
-      eventType: 'EXPENSE_RECORDED',
-      entityType: 'EXPENSE',
-      entityId: expense.id,
-      occurredAt: now,
-      source: 'FinanceService.createExpense',
-      metadata: { amount: expense.amount, currency: expense.currency },
-    });
-
-    return saved;
   }
 }
