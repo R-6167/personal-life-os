@@ -202,6 +202,19 @@ CREATE TABLE IF NOT EXISTS routine_steps (
   FOREIGN KEY(habit_id) REFERENCES habits(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS routine_occurrences (
+  id TEXT PRIMARY KEY,
+  routine_id TEXT NOT NULL,
+  scheduled_date INTEGER NOT NULL,
+  scheduled_time INTEGER,
+  status TEXT NOT NULL,
+  started_at INTEGER,
+  completed_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY(routine_id) REFERENCES routines(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS people (
   id TEXT PRIMARY KEY,
   owner_id TEXT NOT NULL,
@@ -274,6 +287,44 @@ CREATE TABLE IF NOT EXISTS expenses (
   FOREIGN KEY(category_id) REFERENCES categories(id) ON DELETE SET NULL,
   FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE SET NULL,
   FOREIGN KEY(goal_id) REFERENCES goals(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS bills (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  provider TEXT,
+  description TEXT,
+  expected_amount REAL,
+  currency TEXT NOT NULL,
+  frequency TEXT NOT NULL,
+  next_due_at INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  category_id TEXT,
+  default_account_id TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  archived_at INTEGER,
+  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY(category_id) REFERENCES categories(id) ON DELETE SET NULL,
+  FOREIGN KEY(default_account_id) REFERENCES financial_accounts(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS bill_occurrences (
+  id TEXT PRIMARY KEY,
+  bill_id TEXT NOT NULL,
+  period_start INTEGER,
+  period_end INTEGER,
+  due_at INTEGER NOT NULL,
+  expected_amount REAL,
+  actual_amount REAL,
+  status TEXT NOT NULL,
+  paid_at INTEGER,
+  expense_id TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY(bill_id) REFERENCES bills(id) ON DELETE CASCADE,
+  FOREIGN KEY(expense_id) REFERENCES expenses(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS notes (
