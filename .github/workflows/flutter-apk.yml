@@ -42,7 +42,6 @@ jobs:
             --project-name personal_life_os \
             --org com.personallifeos \
             --platforms=android
-          # flutter create overwrites test; keep our smoke test
           cat > test/widget_test.dart <<'EOF'
           import 'package:flutter_test/flutter_test.dart';
           import 'package:personal_life_os/main.dart';
@@ -54,6 +53,12 @@ jobs:
           }
           EOF
           test -f android/gradlew
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          if [ -f "$MANIFEST" ]; then
+            if ! grep -q POST_NOTIFICATIONS "$MANIFEST"; then
+              sed -i 's|<application|<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>\n    <uses-permission android:name="android.permission.VIBRATE"/>\n    <application|' "$MANIFEST"
+            fi
+          fi
 
       - name: Get dependencies
         run: flutter pub get
