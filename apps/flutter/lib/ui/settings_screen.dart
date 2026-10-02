@@ -97,7 +97,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45), fontSize: 12),
                     ),
                     value: NotificationService.instance.enabled,
-                    activeColor: AppTheme.amber,
+                    activeThumbColor: AppTheme.amber,
                     onChanged: (v) async {
                       NotificationService.instance.enabled = v;
                       try {
@@ -252,7 +252,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         const ListTile(
                           contentPadding: EdgeInsets.zero,
                           title: Text('Version'),
-                          subtitle: Text('0.6.0'),
+                          subtitle: Text('0.7.0'),
                         ),
                       ],
                     ),
