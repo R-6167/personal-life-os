@@ -103,6 +103,59 @@ export interface ProjectItem {
   progress: number;
 }
 
+export interface NoteItem {
+  id: string;
+  title: string | null;
+  body: string;
+  projectId: string | null;
+  goalId: string | null;
+  pinned: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface EventItem {
+  id: string;
+  title: string;
+  description: string | null;
+  location: string | null;
+  startsAt: number;
+  endsAt: number | null;
+  allDay: boolean;
+  projectId: string | null;
+  status: string;
+}
+
+export interface ReminderItem {
+  id: string;
+  title: string;
+  body: string | null;
+  remindAt: number;
+  entityType: string | null;
+  entityId: string | null;
+  status: string;
+}
+
+export interface InboxItem {
+  id: string;
+  rawText: string;
+  suggestedType: string | null;
+  status: string;
+  createdAt: number;
+}
+
+export interface MilestoneItem {
+  id: string;
+  projectId: string;
+  projectTitle: string | null;
+  title: string;
+  description: string | null;
+  status: string;
+  targetDate: number | null;
+  completedAt: number | null;
+  sortOrder: number;
+}
+
 export interface AppData {
   ready: boolean;
   error: string | null;
@@ -114,6 +167,11 @@ export interface AppData {
   recentActivity: ActivityItem[];
   goals: GoalItem[];
   projects: ProjectItem[];
+  notes: NoteItem[];
+  events: EventItem[];
+  reminders: ReminderItem[];
+  inbox: InboxItem[];
+  milestones: MilestoneItem[];
   refresh: () => Promise<void>;
   completeTask: (id: string) => Promise<void>;
   startTask: (id: string) => Promise<void>;
@@ -126,7 +184,13 @@ export interface AppData {
   }) => Promise<void>;
   completeHabit: (id: string) => Promise<void>;
   skipHabit: (id: string) => Promise<void>;
-  createHabit: (input: { title: string; targetMinutes?: number }) => Promise<void>;
+  createHabit: (input: {
+    title: string;
+    targetMinutes?: number;
+    frequency?: 'DAILY' | 'WEEKLY' | 'MONTHLY';
+    interval?: number;
+    daysOfWeek?: number[] | null;
+  }) => Promise<void>;
   payBill: (id: string) => Promise<void>;
   createGoal: (input: {
     title: string;
@@ -140,4 +204,36 @@ export interface AppData {
     goalId?: string | null;
     priority?: number;
   }) => Promise<void>;
+  createNote: (input: {
+    title?: string;
+    body: string;
+    projectId?: string | null;
+    pinned?: boolean;
+  }) => Promise<void>;
+  toggleNotePin: (id: string) => Promise<void>;
+  createEvent: (input: {
+    title: string;
+    description?: string;
+    location?: string;
+    startsAt: number;
+    endsAt?: number | null;
+    allDay?: boolean;
+    projectId?: string | null;
+  }) => Promise<void>;
+  createReminder: (input: {
+    title: string;
+    body?: string;
+    remindAt: number;
+  }) => Promise<void>;
+  completeReminder: (id: string) => Promise<void>;
+  captureInbox: (rawText: string, suggestedType?: string) => Promise<void>;
+  processInboxToTask: (id: string) => Promise<void>;
+  processInboxToNote: (id: string) => Promise<void>;
+  dismissInbox: (id: string) => Promise<void>;
+  createMilestone: (input: {
+    projectId: string;
+    title: string;
+    targetDate?: number | null;
+  }) => Promise<void>;
+  completeMilestone: (id: string) => Promise<void>;
 }
