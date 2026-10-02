@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       profile:
-        description: 'EAS build profile'
+        description: "EAS build profile"
         required: true
-        default: 'preview'
+        default: "preview"
         type: choice
         options:
           - preview
@@ -15,7 +15,7 @@ on:
 
 jobs:
   build-android:
-    name: Build Android (${{ inputs.profile || 'preview' }})
+    name: Build Android (${{ inputs.profile }})
     runs-on: ubuntu-latest
 
     defaults:
@@ -29,23 +29,54 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: mobile/package-lock.json
+          node-version: "20"
 
-      - name: Setup Expo & EAS
+      - name: Setup Expo and EAS
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Install dependencies
-        run: npm ci || npm install
+      - name: Verify EXPO_TOKEN
+        run: |
+          if [ -z "${{ secrets.EXPO_TOKEN }}" ]; then
+            echo "::error::Missing EXPO_TOKEN secret."
+            echo "Create a token at https://expo.dev/settings/access-tokens"
+            echo "Then add it under Repo Settings → Secrets and variables → Actions → EXPO_TOKEN"
+            exit 1
+          fi
+          echo "EXPO_TOKEN is set"
 
-      - name: Run EAS Build (Android APK)
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Check EAS project is linked
+        run: |
+          if ! grep -q 'projectId' app.json app.config.js app.config.ts 2>/dev/null; then
+            echo "::error::No EAS projectId found in app config."
+            echo "Run once on your machine from ./mobile:"
+            echo "  npm install -g eas-cli && eas login && eas build:configure"
+            echo "  eas build --platform android --profile preview"
+            echo "Commit the updated app.json (with extra.eas.projectId) and re-run this workflow."
+            exit 1
+          fi
+          echo "EAS projectId is present"
+
+      - name: Trigger EAS Build (Android)
         run: |
           eas build \
             --platform android \
-            --profile ${{ inputs.profile || 'preview' }} \
+            --profile ${{ inputs.profile }} \
             --non-interactive \
             --no-wait
+
+      - name: Next steps
+        run: |
+          echo "Build triggered on EAS."
+          echo "Track progress and download the APK at: https://expo.dev"
+          echo "Project → Builds → latest Android build"
