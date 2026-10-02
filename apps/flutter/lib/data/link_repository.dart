@@ -1,3 +1,5 @@
+import 'package:sqflite/sqflite.dart';
+
 import 'database.dart';
 
 /// entity_links: connect notes, people, tasks, projects, goals, events.
@@ -37,6 +39,3 @@ class LinkRepository {
     ''', [type, id, type, id]);
   }
 }
-
-// ConflictAlgorithm from sqflite
-import 'package:sqflite/sqflite.dart';
