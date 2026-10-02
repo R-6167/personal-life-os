@@ -161,14 +161,16 @@ class _CalendarScreenState extends State<CalendarScreen> {
     await _load();
   }
 
+  Future<void> _snoozeReminder(String id) async {
+    await _ext.snoozeReminder(id, minutes: 15);
+    await _load();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Snoozed 15m')));
+    }
+  }
+
   Future<void> _completeReminder(String id) async {
-    final db = await AppDatabase.instance.database;
-    await db.update(
-      'reminders',
-      {'status': 'COMPLETED', 'updated_at': AppDatabase.nowMs()},
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    await _ext.completeReminder(id);
     await _load();
   }
 
@@ -191,7 +193,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
   Widget _monthGrid() {
     final first = DateTime(_month.year, _month.month, 1);
     final daysInMonth = DateTime(_month.year, _month.month + 1, 0).day;
-    // Monday-first grid
     final lead = (first.weekday + 6) % 7;
     final cells = lead + daysInMonth;
     final rows = (cells / 7).ceil();
@@ -332,9 +333,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     Text('No pending reminders', style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.35)))
                   else
                     ..._reminders.map((r) {
-                      final source = r['source_type'] != null
-                          ? '${r['source_type']}${r['source_id'] != null ? '' : ''}'
-                          : null;
+                      final source = r['source_type'] as String?;
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 8),
                         child: GlassCard(
@@ -351,6 +350,11 @@ class _CalendarScreenState extends State<CalendarScreen> {
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
+                                IconButton(
+                                  icon: const Icon(Icons.snooze, color: AppTheme.amber, size: 20),
+                                  tooltip: 'Snooze 15m',
+                                  onPressed: () => _snoozeReminder(r['id'] as String),
+                                ),
                                 IconButton(
                                   icon: const Icon(Icons.check, color: AppTheme.amber, size: 20),
                                   tooltip: 'Done',
