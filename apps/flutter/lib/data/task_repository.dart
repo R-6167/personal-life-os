@@ -49,6 +49,19 @@ class TaskRepository {
     return rows.map(Task.fromMap).toList();
   }
 
+  Future<List<Task>> listScheduledOnDay(DateTime day) async {
+    final db = await _db.database;
+    final start = DateTime(day.year, day.month, day.day).millisecondsSinceEpoch;
+    final end = start + const Duration(days: 1).inMilliseconds - 1;
+    final rows = await db.query(
+      'tasks',
+      where: 'archived_at IS NULL AND scheduled_start IS NOT NULL AND scheduled_start >= ? AND scheduled_start <= ?',
+      whereArgs: [start, end],
+      orderBy: 'scheduled_start ASC',
+    );
+    return rows.map(Task.fromMap).toList();
+  }
+
   Future<Task?> getById(String id) async {
     final db = await _db.database;
     final rows = await db.query('tasks', where: 'id = ?', whereArgs: [id], limit: 1);
@@ -152,6 +165,131 @@ class TaskRepository {
     await update(id: id, dueAt: due, status: EntityStatus.planned);
   }
 
+  Future<void> scheduleSession({
+    required String taskId,
+    required DateTime start,
+    int durationMinutes = 30,
+    int? estimatedMinutes,
+  }) async {
+    final ownerId = await _db.requireOwnerId();
+    final now = AppDatabase.nowMs();
+    final startMs = start.millisecondsSinceEpoch;
+    final endMs = start.add(Duration(minutes: durationMinutes)).millisecondsSinceEpoch;
+    await _db.txn((txn) async {
+      await txn.update(
+        'tasks',
+        {
+          'scheduled_start': startMs,
+          'scheduled_end': endMs,
+          if (estimatedMinutes != null) 'estimated_minutes': estimatedMinutes,
+          'status': EntityStatus.inProgress,
+          'updated_at': now,
+        },
+        where: 'id = ?',
+        whereArgs: [taskId],
+      );
+      await txn.insert('activity_events', {
+        'id': AppDatabase.newId(),
+        'owner_id': ownerId,
+        'event_type': 'TASK_SCHEDULED',
+        'entity_type': 'TASK',
+        'entity_id': taskId,
+        'occurred_at': now,
+        'recorded_at': now,
+        'source': EventSource.user,
+        'metadata': '{"start":$startMs,"end":$endMs,"minutes":$durationMinutes}',
+      });
+    });
+  }
+
+  Future<void> clearSchedule(String taskId) async {
+    final now = AppDatabase.nowMs();
+    await (await _db.database).update(
+      'tasks',
+      {'scheduled_start': null, 'scheduled_end': null, 'updated_at': now},
+      where: 'id = ?',
+      whereArgs: [taskId],
+    );
+  }
+
+  Future<void> setRecurrence({
+    required String taskId,
+    required String frequency,
+    int intervalN = 1,
+    String? daysOfWeek,
+  }) async {
+    final now = AppDatabase.nowMs();
+    final db = await _db.database;
+    final existing = await db.query('task_recurrences', where: 'task_id = ?', whereArgs: [taskId], limit: 1);
+    if (existing.isNotEmpty) {
+      await db.update(
+        'task_recurrences',
+        {
+          'frequency': frequency,
+          'interval_n': intervalN,
+          'days_of_week': daysOfWeek,
+          'enabled': 1,
+          'updated_at': now,
+        },
+        where: 'task_id = ?',
+        whereArgs: [taskId],
+      );
+    } else {
+      await db.insert('task_recurrences', {
+        'id': AppDatabase.newId(),
+        'task_id': taskId,
+        'frequency': frequency,
+        'interval_n': intervalN,
+        'days_of_week': daysOfWeek,
+        'start_date': now,
+        'enabled': 1,
+        'created_at': now,
+        'updated_at': now,
+      });
+    }
+  }
+
+  Future<Map<String, Object?>?> getRecurrence(String taskId) async {
+    final rows = await (await _db.database).query(
+      'task_recurrences',
+      where: 'task_id = ? AND enabled = 1',
+      whereArgs: [taskId],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  Future<Task?> spawnNextOccurrence(String completedTaskId) async {
+    final rule = await getRecurrence(completedTaskId);
+    if (rule == null) return null;
+    final src = await getById(completedTaskId);
+    if (src == null) return null;
+    final freq = '${rule['frequency']}'.toUpperCase();
+    final n = (rule['interval_n'] as int?) ?? 1;
+    final base = src.dueAt != null
+        ? DateTime.fromMillisecondsSinceEpoch(src.dueAt!)
+        : DateTime.now();
+    DateTime next;
+    switch (freq) {
+      case 'WEEKLY':
+        next = base.add(Duration(days: 7 * n));
+        break;
+      case 'MONTHLY':
+        next = DateTime(base.year, base.month + n, base.day);
+        break;
+      default:
+        next = base.add(Duration(days: n));
+    }
+    return create(
+      title: src.title,
+      status: EntityStatus.planned,
+      dueAt: next.millisecondsSinceEpoch,
+      priority: src.priority,
+      projectId: src.projectId,
+      goalId: src.goalId,
+    );
+  }
+
   Future<void> complete(String taskId) async {
     await _db.txn((txn) async {
       final now = AppDatabase.nowMs();
@@ -177,6 +315,7 @@ class TaskRepository {
         'source': EventSource.user,
       });
     });
+    await spawnNextOccurrence(taskId);
   }
 
   Future<void> reopen(String taskId) async {
@@ -206,7 +345,6 @@ class TaskRepository {
     });
   }
 
-  /// Soft-delete: cancel + archive so it leaves open lists without hard wipe.
   Future<void> delete(String taskId) async {
     await _db.txn((txn) async {
       final now = AppDatabase.nowMs();
