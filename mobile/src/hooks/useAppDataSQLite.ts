@@ -3,7 +3,10 @@ import type { AppData } from '../types/app-data';
 import { getDatabase } from '../db/database';
 import * as Q from '../db/queries';
 import * as L from '../db/life-queries';
+import * as R from '../db/routine-queries';
 import { ensureHabitOccurrences } from '../habits/recurrence';
+import { ensureBillOccurrences } from '../habits/bill-recurrence';
+import { syncReminderNotifications } from '../notifications/reminders';
 
 const empty = {
   tasks: [],
@@ -19,6 +22,9 @@ const empty = {
   reminders: [],
   inbox: [],
   milestones: [],
+  routines: [],
+  routineOccurrences: [],
+  income: [],
 };
 
 export function useAppDataSQLite(): AppData {
@@ -30,6 +36,9 @@ export function useAppDataSQLite(): AppData {
     try {
       const db = await getDatabase();
       await ensureHabitOccurrences(db, { daysAhead: 0 });
+      await ensureBillOccurrences(db, { daysAhead: 45 });
+      await R.ensureRoutineOccurrences(db);
+      try { await syncReminderNotifications(db); } catch { /* optional */ }
       const [
         tasks,
         habitOccurrences,
@@ -44,6 +53,9 @@ export function useAppDataSQLite(): AppData {
         reminders,
         inbox,
         milestones,
+        routines,
+        routineOccurrences,
+        income,
       ] = await Promise.all([
         Q.loadTasks(db),
         Q.loadHabitOccurrences(db),
@@ -58,6 +70,9 @@ export function useAppDataSQLite(): AppData {
         L.loadReminders(db),
         L.loadInbox(db),
         L.loadMilestones(db),
+        R.loadRoutines(db),
+        R.loadRoutineOccurrences(db),
+        R.loadIncome(db),
       ]);
       setData({
         tasks,
@@ -73,6 +88,9 @@ export function useAppDataSQLite(): AppData {
         reminders,
         inbox,
         milestones,
+        routines,
+        routineOccurrences,
+        income,
       });
       setError(null);
       setReady(true);
@@ -202,6 +220,25 @@ export function useAppDataSQLite(): AppData {
     [withRefresh]
   );
 
+  const createRoutine = useCallback(
+    (input: Parameters<AppData['createRoutine']>[0]) =>
+      withRefresh(async () => {
+        await R.createRoutine(await getDatabase(), input);
+      }),
+    [withRefresh]
+  );
+  const completeRoutine = useCallback(
+    (id: string) => withRefresh(async () => R.completeRoutineOccurrence(await getDatabase(), id)),
+    [withRefresh]
+  );
+  const createIncome = useCallback(
+    (input: Parameters<AppData['createIncome']>[0]) =>
+      withRefresh(async () => {
+        await R.createIncome(await getDatabase(), input);
+      }),
+    [withRefresh]
+  );
+
   return useMemo(
     () => ({
       ready,
@@ -228,6 +265,9 @@ export function useAppDataSQLite(): AppData {
       dismissInbox,
       createMilestone,
       completeMilestone,
+      createRoutine,
+      completeRoutine,
+      createIncome,
     }),
     [
       ready,
@@ -254,6 +294,9 @@ export function useAppDataSQLite(): AppData {
       dismissInbox,
       createMilestone,
       completeMilestone,
+      createRoutine,
+      completeRoutine,
+      createIncome,
     ]
   );
 }
