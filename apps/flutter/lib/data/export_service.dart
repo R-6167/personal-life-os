@@ -6,13 +6,18 @@ class ExportService {
   ExportService(this._db);
   final AppDatabase _db;
 
+  static const tables = [
+    'users', 'categories', 'people', 'goals', 'projects', 'milestones', 'tasks',
+    'task_dependencies', 'task_recurrences', 'habits', 'habit_schedules', 'habit_occurrences',
+    'routines', 'routine_steps', 'routine_schedules', 'routine_occurrences',
+    'calendar_events', 'time_blocks', 'reminders', 'notes', 'entity_links',
+    'financial_accounts', 'income', 'expenses', 'bills', 'bill_occurrences',
+    'subscriptions', 'debts', 'debt_payments', 'savings_goals', 'savings_contributions',
+    'practical_items', 'documents', 'shopping_lists', 'shopping_items', 'activity_events',
+  ];
+
   Future<String> buildBackupJson() async {
     final db = await _db.database;
-    final tables = [
-      'users', 'goals', 'projects', 'milestones', 'tasks', 'habits', 'habit_occurrences',
-      'routines', 'routine_steps', 'routine_occurrences', 'notes',
-      'financial_accounts', 'income', 'expenses', 'bills', 'bill_occurrences', 'activity_events',
-    ];
     final data = <String, dynamic>{
       'contractVersion': 1,
       'exportedAt': AppDatabase.nowMs(),
