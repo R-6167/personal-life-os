@@ -22,6 +22,7 @@ import 'screens/project_detail_screen.dart';
 import 'settings_screen.dart';
 import 'theme.dart';
 import 'widgets/glass.dart';
+import 'widgets/pay_bill_dialog.dart';
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
@@ -284,8 +285,8 @@ class _HomeShellState extends State<HomeShell> {
                     title: Text(o.billName ?? 'Bill', style: const TextStyle(color: AppTheme.silver)),
                     trailing: FilledButton(
                       onPressed: () async {
-                        await _bills.payOccurrence(o);
-                        await _reload();
+                        final paid = await promptAndPayBill(context, o);
+                        if (paid) await _reload();
                       },
                       child: const Text('Pay'),
                     ),
