@@ -5,7 +5,6 @@ import '../../data/milestone_repository.dart';
 import '../../data/project_repository.dart';
 import '../../data/task_repository.dart';
 import '../../domain/models.dart';
-import '../forms/create_forms.dart';
 import '../theme.dart';
 import '../widgets/glass.dart';
 
@@ -49,6 +48,64 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
     });
   }
 
+  Future<void> _addTask() async {
+    final titleCtrl = TextEditingController();
+    final submitted = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.metal,
+        title: const Text('New task', style: TextStyle(color: AppTheme.silver)),
+        content: TextField(
+          controller: titleCtrl,
+          autofocus: true,
+          style: const TextStyle(color: AppTheme.silver),
+          decoration: const InputDecoration(labelText: 'Title *'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, titleCtrl.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (submitted == null || submitted.isEmpty || _project == null) return;
+    await _tasksRepo.create(
+      title: submitted,
+      projectId: _project!.id,
+      goalId: _project!.goalId,
+    );
+    await _load();
+  }
+
+  Future<void> _addMilestone() async {
+    final c = TextEditingController();
+    final title = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.metal,
+        title: const Text('Milestone', style: TextStyle(color: AppTheme.silver)),
+        content: TextField(
+          controller: c,
+          autofocus: true,
+          style: const TextStyle(color: AppTheme.silver),
+          decoration: const InputDecoration(labelText: 'Title *'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, c.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (title == null || title.isEmpty) return;
+    await _milestonesRepo.create(projectId: widget.projectId, title: title);
+    await _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -79,63 +136,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
           ],
         ),
         floatingActionButton: FloatingActionButton(
-          onPressed: () async {
-            final ok = await showDialog<bool>(
-              context: context,
-              builder: (ctx) {
-                final c = TextEditingController();
-                return AlertDialog(
-                  backgroundColor: AppTheme.metal,
-                  title: const Text('Task in this project', style: TextStyle(color: AppTheme.silver)),
-                  content: TextField(
-                    controller: c,
-                    autofocus: true,
-                    style: const TextStyle(color: AppTheme.silver),
-                    decoration: const InputDecoration(labelText: 'Title *'),
-                  ),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                    FilledButton(
-                      onPressed: () {
-                        if (c.text.trim().isEmpty) return;
-                        Navigator.pop(ctx, true);
-                      },
-                      child: const Text('Add'),
-                    ),
-                  ],
-                );
-              },
-            );
-            // Recreate with title from a second path — use form
-            if (ok == true) {
-              // simple: use create forms then link — better direct:
-              final titleCtrl = TextEditingController();
-              final submitted = await showDialog<String>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  backgroundColor: AppTheme.metal,
-                  title: const Text('New task', style: TextStyle(color: AppTheme.silver)),
-                  content: TextField(
-                    controller: titleCtrl,
-                    autofocus: true,
-                    style: const TextStyle(color: AppTheme.silver),
-                    decoration: const InputDecoration(labelText: 'Title *'),
-                  ),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-                    FilledButton(
-                      onPressed: () => Navigator.pop(ctx, titleCtrl.text.trim()),
-                      child: const Text('Save'),
-                    ),
-                  ],
-                ),
-              );
-              if (submitted != null && submitted.isNotEmpty) {
-                await _tasksRepo.create(title: submitted, projectId: p.id, goalId: p.goalId);
-                await _load();
-              }
-            }
-          },
+          onPressed: _addTask,
           child: const Icon(Icons.add),
         ),
         body: ListView(
@@ -165,36 +166,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
               children: [
                 const Text('Milestones', style: TextStyle(color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
                 const Spacer(),
-                TextButton(
-                  onPressed: () async {
-                    final c = TextEditingController();
-                    final title = await showDialog<String>(
-                      context: context,
-                      builder: (ctx) => AlertDialog(
-                        backgroundColor: AppTheme.metal,
-                        title: const Text('Milestone', style: TextStyle(color: AppTheme.silver)),
-                        content: TextField(
-                          controller: c,
-                          autofocus: true,
-                          style: const TextStyle(color: AppTheme.silver),
-                          decoration: const InputDecoration(labelText: 'Title *'),
-                        ),
-                        actions: [
-                          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-                          FilledButton(
-                            onPressed: () => Navigator.pop(ctx, c.text.trim()),
-                            child: const Text('Save'),
-                          ),
-                        ],
-                      ),
-                    );
-                    if (title != null && title.isNotEmpty) {
-                      await _milestonesRepo.create(projectId: p.id, title: title);
-                      await _load();
-                    }
-                  },
-                  child: const Text('Add'),
-                ),
+                TextButton(onPressed: _addMilestone, child: const Text('Add')),
               ],
             ),
             if (_milestones.isEmpty)

@@ -18,6 +18,7 @@ import 'forms/create_forms.dart';
 import 'hubs/finance_hub.dart';
 import 'hubs/life_hub.dart';
 import 'hubs/more_hub.dart';
+import 'screens/project_detail_screen.dart';
 import 'settings_screen.dart';
 import 'theme.dart';
 import 'widgets/glass.dart';
@@ -200,6 +201,7 @@ class _HomeShellState extends State<HomeShell> {
           goals: _goalList,
           habits: _habitList,
           notes: _noteList,
+          projects: _projectList,
           onChanged: _reload,
         );
       case 3:
@@ -327,6 +329,11 @@ class _HomeShellState extends State<HomeShell> {
           ..._projectList.take(4).map((p) => Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: GlassCard(
+                  onTap: () {
+                    Navigator.of(context)
+                        .push(MaterialPageRoute(builder: (_) => ProjectDetailScreen(projectId: p.id)))
+                        .then((_) => _reload());
+                  },
                   child: Text(p.title, style: const TextStyle(color: AppTheme.silver)),
                 ),
               )),
