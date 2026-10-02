@@ -44,7 +44,7 @@ jobs:
       - name: Generate native Android project (Expo prebuild)
         run: |
           npx expo prebuild --platform android --clean
-          test -d android || (echo "android/ missing after prebuild" && exit 1)
+          test -d android/app || (echo "android/app missing after prebuild" && exit 1)
 
       - name: Point Gradle at the Android SDK
         run: |
@@ -59,48 +59,62 @@ jobs:
           echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
 
-      # Debug APKs expect Metro. For a phone-only offline install we must
-      # embed the JS bundle (release) so index.android.bundle is inside the APK.
-      - name: Embed JS bundle into Android assets
+      # Debug variants normally skip bundling (they expect Metro).
+      # Empty debuggableVariants forces createBundleDebugJsAndAssets so the
+      # APK contains index.android.bundle and runs offline on a phone.
+      - name: Force JS bundle into debug APK
         run: |
-          mkdir -p android/app/src/main/assets
-          npx react-native bundle \
-            --platform android \
-            --dev false \
-            --minify true \
-            --entry-file node_modules/expo/AppEntry.js \
-            --bundle-output android/app/src/main/assets/index.android.bundle \
-            --assets-dest android/app/src/main/res
-          ls -la android/app/src/main/assets/
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path("android/app/build.gradle")
+          text = p.read_text()
+          if "debuggableVariants" in text:
+              import re
+              text = re.sub(
+                  r"debuggableVariants\s*=\s*\[[^\]]*\]",
+                  "debuggableVariants = []",
+                  text,
+              )
+          elif "react {" in text:
+              text = text.replace(
+                  "react {",
+                  "react {\n    // CI: embed JS in debug APK (no Metro on device)\n    debuggableVariants = []\n",
+                  1,
+              )
+          else:
+              raise SystemExit("Could not find react { block in android/app/build.gradle")
+          p.write_text(text)
+          print("Patched android/app/build.gradle")
+          # show react block snippet
+          for i, line in enumerate(text.splitlines()):
+              if "react" in line or "debuggable" in line or "entryFile" in line:
+                  print(f"{i+1}: {line}")
+          PY
 
-      - name: Build release APK with Gradle
+      - name: Build debug APK (with embedded JS)
         working-directory: ./mobile/android
+        env:
+          NODE_ENV: production
         run: |
           chmod +x gradlew
-          # Sign with the debug keystore so the APK installs without a custom keystore
-          ./gradlew assembleRelease \
-            -Pandroid.injected.signing.store.file=$ANDROID_HOME/../../.android/debug.keystore \
-            -Pandroid.injected.signing.store.password=android \
-            -Pandroid.injected.signing.key.alias=androiddebugkey \
-            -Pandroid.injected.signing.key.password=android \
-            --stacktrace --no-daemon \
-            || ./gradlew assembleRelease --stacktrace --no-daemon
+          ./gradlew assembleDebug --stacktrace --no-daemon
 
-      - name: Locate APK
-        id: apk
+      - name: Verify bundle is inside the APK
         run: |
-          APK=$(find android/app/build/outputs/apk -name "*.apk" | head -n 1)
-          echo "Found: $APK"
-          if [ -z "$APK" ]; then
-            echo "No APK produced" && exit 1
-          fi
-          echo "path=$APK" >> "$GITHUB_OUTPUT"
-          ls -la "$APK"
+          APK="android/app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$APK" || (echo "APK missing" && exit 1)
+          # list APK contents for index.android.bundle
+          unzip -l "$APK" | grep -E "index.android.bundle|assets/" || {
+            echo "WARNING: index.android.bundle not found inside APK"
+            unzip -l "$APK" | head -80
+            exit 1
+          }
+          ls -lh "$APK"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: personal-life-os-apk
-          path: mobile/android/app/build/outputs/apk/**/*.apk
+          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
