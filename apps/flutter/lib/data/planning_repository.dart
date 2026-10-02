@@ -188,13 +188,15 @@ class PlanningRepository {
     final dayStart = DateTime(day.year, day.month, day.day, dayStartHour);
     final dayEnd = DateTime(day.year, day.month, day.day, dayEndHour);
     final blocks = await listBlocksOnDay(day);
-    final occupied = blocks
-        .map((b) => (
-              DateTime.fromMillisecondsSinceEpoch(b['start_at'] as int),
-              DateTime.fromMillisecondsSinceEpoch(b['end_at'] as int),
-            ))
-        .toList()
-      ..sort((a, b) => a.\$1.compareTo(b.\$1));
+    final starts = <DateTime>[];
+    final ends = <DateTime>[];
+    for (final b in blocks) {
+      starts.add(DateTime.fromMillisecondsSinceEpoch(b['start_at'] as int));
+      ends.add(DateTime.fromMillisecondsSinceEpoch(b['end_at'] as int));
+    }
+    // sort by start
+    final order = List<int>.generate(starts.length, (i) => i);
+    order.sort((a, b) => starts[a].compareTo(starts[b]));
 
     var cursor = dayStart;
     final now = DateTime.now();
@@ -204,19 +206,17 @@ class PlanningRepository {
       }
     }
 
-    for (final pair in occupied) {
-      final s = pair.\$1;
-      final e = pair.\$2;
-      while (cursor.add(Duration(minutes: durationMinutes)).isBefore(s) ||
-          cursor.add(Duration(minutes: durationMinutes)).isAtSameMomentAs(s)) {
+    for (final i in order) {
+      final s = starts[i];
+      final e = ends[i];
+      while (!cursor.add(Duration(minutes: durationMinutes)).isAfter(s)) {
         if (cursor.isBefore(dayEnd)) slots.add(cursor);
         cursor = cursor.add(const Duration(minutes: 15));
         if (slots.length >= 6) return slots;
       }
       if (cursor.isBefore(e)) cursor = e;
     }
-    while (cursor.add(Duration(minutes: durationMinutes)).isBefore(dayEnd) ||
-        cursor.add(Duration(minutes: durationMinutes)).isAtSameMomentAs(dayEnd)) {
+    while (!cursor.add(Duration(minutes: durationMinutes)).isAfter(dayEnd)) {
       slots.add(cursor);
       cursor = cursor.add(const Duration(minutes: 30));
       if (slots.length >= 6) break;
