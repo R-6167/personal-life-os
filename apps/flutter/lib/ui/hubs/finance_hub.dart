@@ -2,12 +2,13 @@ import 'package:flutter/material.dart';
 
 import '../../data/account_repository.dart';
 import '../../data/database.dart';
+import '../../data/extended_repository.dart';
+import '../../data/income_repository.dart';
 import '../../domain/enums.dart';
 import '../../domain/models.dart';
 import '../forms/create_forms.dart';
 import '../theme.dart';
 import '../widgets/glass.dart';
-import '../widgets/pay_bill_dialog.dart';
 
 class FinanceHub extends StatefulWidget {
   const FinanceHub({
@@ -17,6 +18,7 @@ class FinanceHub extends StatefulWidget {
     required this.billOcc,
     required this.monthSpendMinor,
     required this.onChanged,
+    this.onPayBill,
   });
 
   final List<Expense> expenses;
@@ -24,6 +26,7 @@ class FinanceHub extends StatefulWidget {
   final List<BillOccurrence> billOcc;
   final int monthSpendMinor;
   final Future<void> Function() onChanged;
+  final Future<void> Function(BillOccurrence o)? onPayBill;
 
   @override
   State<FinanceHub> createState() => _FinanceHubState();
@@ -31,68 +34,77 @@ class FinanceHub extends StatefulWidget {
 
 class _FinanceHubState extends State<FinanceHub> {
   List<Map<String, Object?>> _accounts = [];
+  List<Map<String, Object?>> _debts = [];
+  List<Map<String, Object?>> _subs = [];
+  List<Map<String, Object?>> _savings = [];
+  int _monthIncomeMinor = 0;
+  int _totalBalanceMinor = 0;
 
   @override
   void initState() {
     super.initState();
-    _loadAccounts();
+    _loadExtra();
   }
 
-  Future<void> _loadAccounts() async {
-    final a = await AccountRepository(AppDatabase.instance).list();
-    if (mounted) setState(() => _accounts = a);
+  Future<void> _loadExtra() async {
+    final accounts = await AccountRepository(AppDatabase.instance).list();
+    final debts = await ExtendedRepository(AppDatabase.instance).listDebts();
+    final subs = await ExtendedRepository(AppDatabase.instance).listSubscriptions();
+    final savings = await ExtendedRepository(AppDatabase.instance).listSavings();
+    final inc = await IncomeRepository(AppDatabase.instance).totalMinorThisMonth();
+    final bal = await AccountRepository(AppDatabase.instance).totalBalanceMinor();
+    if (!mounted) return;
+    setState(() {
+      _accounts = accounts;
+      _debts = debts;
+      _subs = subs;
+      _savings = savings;
+      _monthIncomeMinor = inc;
+      _totalBalanceMinor = bal;
+    });
+  }
+
+  Future<void> _refresh() async {
+    await _loadExtra();
+    await widget.onChanged();
   }
 
   Future<void> _addAccount() async {
     final name = TextEditingController();
     final balance = TextEditingController();
-    var type = 'CASH';
+    var type = 'MOBILE_MONEY';
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setLocal) => AlertDialog(
           backgroundColor: AppTheme.metal,
-          title: const Text('Financial account', style: TextStyle(color: AppTheme.silver)),
+          title: const Text('Account', style: TextStyle(color: AppTheme.silver)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(
-                controller: name,
-                autofocus: true,
-                style: const TextStyle(color: AppTheme.silver),
-                decoration: const InputDecoration(labelText: 'Name * (e.g. M-Pesa)'),
-              ),
-              const SizedBox(height: 8),
+              TextField(controller: name, style: const TextStyle(color: AppTheme.silver), decoration: const InputDecoration(labelText: 'Name')),
               DropdownButtonFormField<String>(
                 value: type,
                 dropdownColor: AppTheme.metal,
-                decoration: const InputDecoration(labelText: 'Type'),
                 items: const [
-                  DropdownMenuItem(value: 'CASH', child: Text('Cash / wallet')),
-                  DropdownMenuItem(value: 'BANK', child: Text('Bank')),
                   DropdownMenuItem(value: 'MOBILE_MONEY', child: Text('Mobile money')),
+                  DropdownMenuItem(value: 'BANK', child: Text('Bank')),
+                  DropdownMenuItem(value: 'CASH', child: Text('Cash')),
                   DropdownMenuItem(value: 'OTHER', child: Text('Other')),
                 ],
-                onChanged: (v) => setLocal(() => type = v ?? 'CASH'),
+                onChanged: (v) => setLocal(() => type = v ?? type),
               ),
-              const SizedBox(height: 8),
               TextField(
                 controller: balance,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 style: const TextStyle(color: AppTheme.silver),
-                decoration: InputDecoration(labelText: 'Balance (${Defaults.currency}) optional'),
+                decoration: InputDecoration(labelText: 'Balance (${Defaults.currency})'),
               ),
             ],
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-            FilledButton(
-              onPressed: () {
-                if (name.text.trim().isEmpty) return;
-                Navigator.pop(ctx, true);
-              },
-              child: const Text('Save'),
-            ),
+            FilledButton(onPressed: () => Navigator.pop(ctx, name.text.trim().isNotEmpty), child: const Text('Save')),
           ],
         ),
       ),
@@ -103,147 +115,168 @@ class _FinanceHubState extends State<FinanceHub> {
       type: type,
       balanceMajor: double.tryParse(balance.text.trim().replaceAll(',', '')),
     );
-    await _loadAccounts();
-    await widget.onChanged();
+    await _refresh();
+  }
+
+  Future<void> _adjust(Map<String, Object?> a) async {
+    final ctrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.metal,
+        title: Text('Adjust ${a['name']}', style: const TextStyle(color: AppTheme.silver)),
+        content: TextField(
+          controller: ctrl,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+          style: const TextStyle(color: AppTheme.silver),
+          decoration: InputDecoration(labelText: 'Delta (${Defaults.currency})'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Apply')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final d = double.tryParse(ctrl.text.trim().replaceAll(',', ''));
+    if (d == null || d == 0) return;
+    await AccountRepository(AppDatabase.instance).adjustBalance(accountId: a['id'] as String, deltaMajor: d);
+    await _refresh();
   }
 
   @override
   Widget build(BuildContext context) {
     final spend = (widget.monthSpendMinor / 100).toStringAsFixed(2);
+    final incomeStr = (_monthIncomeMinor / 100).toStringAsFixed(2);
+    final net = ((_monthIncomeMinor - widget.monthSpendMinor) / 100).toStringAsFixed(2);
+    final bal = (_totalBalanceMinor / 100).toStringAsFixed(2);
+    final netOk = _monthIncomeMinor >= widget.monthSpendMinor;
+
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
       children: [
         const Text('Finance', style: TextStyle(color: AppTheme.silver, fontSize: 22, fontWeight: FontWeight.w700)),
-        const SizedBox(height: 4),
-        Text(
-          'Accounts · spend · bills · income',
-          style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45), fontSize: 12),
-        ),
+        Text('Accounts · cashflow · bills · debts · savings',
+            style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45), fontSize: 12)),
         const SizedBox(height: 12),
         GlassCard(
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('This month spent', style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.5), fontSize: 12)),
-                    Text(
-                      '${Defaults.currency} $spend',
-                      style: const TextStyle(color: AppTheme.amber, fontSize: 22, fontWeight: FontWeight.w700),
-                    ),
-                  ],
-                ),
-              ),
-              FilledButton(
-                onPressed: () async {
-                  final ok = await showCreateForm(context, AddKind.expense);
-                  if (ok) await widget.onChanged();
-                },
-                child: const Text('Expense'),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton(
-                onPressed: () async {
-                  final ok = await showCreateForm(context, AddKind.income);
-                  if (ok) await widget.onChanged();
-                },
-                child: const Text('Income'),
-              ),
+              Text('This month', style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.5), fontSize: 12)),
+              Row(children: [
+                Expanded(child: Text('In ${Defaults.currency} $incomeStr', style: const TextStyle(color: AppTheme.woodLight, fontWeight: FontWeight.w700))),
+                Expanded(child: Text('Out ${Defaults.currency} $spend', style: const TextStyle(color: AppTheme.amber, fontWeight: FontWeight.w700))),
+                Expanded(child: Text('Net ${Defaults.currency} $net', style: TextStyle(color: netOk ? AppTheme.woodLight : Colors.redAccent, fontWeight: FontWeight.w700))),
+              ]),
+              Text('Accounts total ${Defaults.currency} $bal', style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.7))),
+              const SizedBox(height: 8),
+              Row(children: [
+                FilledButton(onPressed: () async { if (await showCreateForm(context, AddKind.expense)) await _refresh(); }, child: const Text('Expense')),
+                const SizedBox(width: 8),
+                OutlinedButton(onPressed: () async { if (await showCreateForm(context, AddKind.income)) await _refresh(); }, child: const Text('Income')),
+              ]),
             ],
           ),
         ),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            const Text('Accounts', style: TextStyle(color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
-            const Spacer(),
-            TextButton(onPressed: _addAccount, child: const Text('Add')),
-          ],
-        ),
+        _hdr('Accounts', _addAccount),
         if (_accounts.isEmpty)
-          Text('e.g. M-Pesa, Equity — optional balances', style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.35)))
+          Text('No accounts', style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.35)))
         else
           ..._accounts.map((a) {
-            final bal = a['current_balance_minor'] as int?;
-            final balStr = bal == null
-                ? '—'
-                : '${a['currency'] ?? Defaults.currency} ${(bal / 100).toStringAsFixed(2)}';
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: GlassCard(
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('${a['name']}', style: const TextStyle(color: AppTheme.silver, fontWeight: FontWeight.w600)),
-                          Text('${a['type']}', style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11)),
-                        ],
-                      ),
-                    ),
-                    Text(balStr, style: const TextStyle(color: AppTheme.amber)),
-                  ],
-                ),
+            final m = a['current_balance_minor'] as int? ?? 0;
+            return GlassCard(
+              child: ListTile(
+                onTap: () => _adjust(a),
+                title: Text('${a['name']}', style: const TextStyle(color: AppTheme.silver)),
+                subtitle: Text('${a['type']} · tap to adjust', style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11)),
+                trailing: Text('${(m / 100).toStringAsFixed(2)}', style: const TextStyle(color: AppTheme.amber)),
               ),
             );
           }),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            const Text('Bills due', style: TextStyle(color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
-            const Spacer(),
-            TextButton(
-              onPressed: () async {
-                final ok = await showCreateForm(context, AddKind.bill);
-                if (ok) await widget.onChanged();
-              },
-              child: const Text('Add bill'),
-            ),
-          ],
-        ),
+        _hdr('Bills', () async { if (await showCreateForm(context, AddKind.bill)) await _refresh(); }),
         if (widget.billOcc.isEmpty)
           Text('Nothing open', style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.35)))
         else
-          ...widget.billOcc.map((o) => Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: GlassCard(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  child: ListTile(
-                    title: Text(o.billName ?? 'Bill', style: const TextStyle(color: AppTheme.silver)),
-                    subtitle: Text(o.status, style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11)),
-                    trailing: FilledButton(
-                      onPressed: () async {
-                        final paid = await promptAndPayBill(context, o);
-                        if (paid) {
-                          await widget.onChanged();
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Paid — expense recorded')),
-                            );
-                          }
-                        }
-                      },
-                      child: const Text('Pay'),
-                    ),
-                  ),
+          ...widget.billOcc.map((o) => GlassCard(
+                child: ListTile(
+                  title: Text(o.billName ?? 'Bill', style: const TextStyle(color: AppTheme.silver)),
+                  trailing: widget.onPayBill == null
+                      ? null
+                      : FilledButton(onPressed: () async { await widget.onPayBill!(o); await _refresh(); }, child: const Text('Pay')),
                 ),
               )),
-        const SizedBox(height: 16),
-        const Text('Recent', style: TextStyle(color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
-        const SizedBox(height: 8),
+        _hdr('Debts', () async {
+          await ExtendedRepository(AppDatabase.instance).addDebt(title: 'Debt', amountMajor: 1000, direction: 'OWED_BY_ME');
+          await _refresh();
+        }),
+        ..._debts.map((d) {
+          final rem = d['remaining_amount_minor'] as int? ?? 0;
+          return GlassCard(
+            child: ListTile(
+              title: Text('${d['title']}', style: const TextStyle(color: AppTheme.silver)),
+              subtitle: Text('${d['direction']} · ${(rem / 100).toStringAsFixed(0)}', style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11)),
+              trailing: TextButton(
+                onPressed: () async {
+                  await ExtendedRepository(AppDatabase.instance).payDebt(d['id'] as String, 100);
+                  await _refresh();
+                },
+                child: const Text('Pay 100'),
+              ),
+            ),
+          );
+        }),
+        _hdr('Subscriptions', () async {
+          await ExtendedRepository(AppDatabase.instance).addSubscription('Subscription', 500);
+          await _refresh();
+        }),
+        ..._subs.map((s) {
+          final amt = s['amount_minor'] as int? ?? 0;
+          return GlassCard(
+            child: ListTile(
+              title: Text('${s['service_name']}', style: const TextStyle(color: AppTheme.silver)),
+              trailing: Text('${(amt / 100).toStringAsFixed(0)}/mo', style: const TextStyle(color: AppTheme.amber)),
+            ),
+          );
+        }),
+        _hdr('Savings', () async {
+          await ExtendedRepository(AppDatabase.instance).addSavingsGoal('Goal', 10000);
+          await _refresh();
+        }),
+        ..._savings.map((s) {
+          final cur = s['current_amount_minor'] as int? ?? 0;
+          final tgt = s['target_amount_minor'] as int? ?? 1;
+          return GlassCard(
+            child: ListTile(
+              title: Text('${s['name']}', style: const TextStyle(color: AppTheme.silver)),
+              subtitle: Text('${(cur / 100).toStringAsFixed(0)} / ${(tgt / 100).toStringAsFixed(0)}',
+                  style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11)),
+              trailing: TextButton(
+                onPressed: () async {
+                  await ExtendedRepository(AppDatabase.instance).contributeSavings(s['id'] as String, 500);
+                  await _refresh();
+                },
+                child: const Text('+500'),
+              ),
+            ),
+          );
+        }),
+        const SizedBox(height: 12),
+        const Text('Recent expenses', style: TextStyle(color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
         ...widget.expenses.take(8).map((e) => ListTile(
               dense: true,
               title: Text(e.description, style: const TextStyle(color: AppTheme.silver)),
-              trailing: Text(e.displayAmount, style: const TextStyle(color: AppTheme.amber)),
-            )),
-        ...widget.income.take(5).map((i) => ListTile(
-              dense: true,
-              title: Text(i.source, style: const TextStyle(color: AppTheme.silver)),
-              trailing: Text(i.displayAmount, style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.7))),
+              trailing: Text('-${(e.amountMinor / 100).toStringAsFixed(2)}', style: const TextStyle(color: Colors.redAccent)),
             )),
       ],
     );
   }
+
+  Widget _hdr(String title, Future<void> Function() onAdd) => Row(
+        children: [
+          Text(title, style: const TextStyle(color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
+          const Spacer(),
+          TextButton(onPressed: onAdd, child: const Text('Add')),
+        ],
+      );
 }
