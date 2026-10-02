@@ -1,120 +1,16 @@
-name: Manual APK Build
+name: Manual APK Build (Expo — deprecated)
 
+# Deprecated: phone client is apps/flutter. Use workflow "Flutter APK Build".
 on:
   workflow_dispatch:
 
 jobs:
-  build-android-apk:
+  deprecated:
     runs-on: ubuntu-latest
-
-    defaults:
-      run:
-        working-directory: ./mobile
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: "temurin"
-          java-version: "17"
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v4
-
-      - name: Install Android packages
+      - name: Expo path retired
         run: |
-          sdkmanager --install \
-            "platforms;android-34" \
-            "build-tools;34.0.0" \
-            "platform-tools" \
-            "ndk;26.1.10909125"
-          yes | sdkmanager --licenses >/dev/null || true
-
-      - name: Install npm dependencies
-        run: npm install
-
-      - name: Generate native Android project (Expo prebuild)
-        run: |
-          npx expo prebuild --platform android --clean
-          test -d android/app || (echo "android/app missing after prebuild" && exit 1)
-
-      - name: Point Gradle at the Android SDK
-        run: |
-          SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
-          if [ -z "$SDK" ]; then
-            for d in "$HOME/Android/Sdk" /usr/local/lib/android/sdk "$HOME/.android/sdk"; do
-              if [ -d "$d" ]; then SDK="$d"; break; fi
-            done
-          fi
-          echo "Using SDK at: $SDK"
-          echo "sdk.dir=$SDK" > android/local.properties
-          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
-
-      # Debug variants normally skip bundling (they expect Metro).
-      # Empty debuggableVariants forces createBundleDebugJsAndAssets so the
-      # APK contains index.android.bundle and runs offline on a phone.
-      - name: Force JS bundle into debug APK
-        run: |
-          python3 << 'PY'
-          from pathlib import Path
-          p = Path("android/app/build.gradle")
-          text = p.read_text()
-          if "debuggableVariants" in text:
-              import re
-              text = re.sub(
-                  r"debuggableVariants\s*=\s*\[[^\]]*\]",
-                  "debuggableVariants = []",
-                  text,
-              )
-          elif "react {" in text:
-              text = text.replace(
-                  "react {",
-                  "react {\n    // CI: embed JS in debug APK (no Metro on device)\n    debuggableVariants = []\n",
-                  1,
-              )
-          else:
-              raise SystemExit("Could not find react { block in android/app/build.gradle")
-          p.write_text(text)
-          print("Patched android/app/build.gradle")
-          # show react block snippet
-          for i, line in enumerate(text.splitlines()):
-              if "react" in line or "debuggable" in line or "entryFile" in line:
-                  print(f"{i+1}: {line}")
-          PY
-
-      - name: Build debug APK (with embedded JS)
-        working-directory: ./mobile/android
-        env:
-          NODE_ENV: production
-        run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug --stacktrace --no-daemon
-
-      - name: Verify bundle is inside the APK
-        run: |
-          APK="android/app/build/outputs/apk/debug/app-debug.apk"
-          test -f "$APK" || (echo "APK missing" && exit 1)
-          # list APK contents for index.android.bundle
-          unzip -l "$APK" | grep -E "index.android.bundle|assets/" || {
-            echo "WARNING: index.android.bundle not found inside APK"
-            unzip -l "$APK" | head -80
-            exit 1
-          }
-          ls -lh "$APK"
-
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: personal-life-os-apk
-          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 14
+          echo "::error::This Expo workflow is deprecated."
+          echo "Use Actions → Flutter APK Build instead (apps/flutter)."
+          echo "See apps/flutter/README.md and contract/CONTRACT.md"
+          exit 1

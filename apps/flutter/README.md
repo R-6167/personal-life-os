@@ -1,67 +1,52 @@
-# Personal Life OS — Flutter (offline client)
+# Personal Life OS — Flutter (the phone app)
 
-Implements [`contract/CONTRACT.md`](../../contract/CONTRACT.md).
+**No Expo.** Offline client that implements [`contract/CONTRACT.md`](../../contract/CONTRACT.md).
 
-TypeScript owns the schema and domain. This app **mirrors** that contract in Dart + local SQLite.
+TypeScript (`src/`) owns schema + domain. This app mirrors it in Dart + SQLite.
 
-## Bootstrap (one time)
+## One-time setup (required for APK)
 
-You need the Flutter SDK on a machine once to generate platform folders (or use CI only after the first push of `android/`).
+Needs the Flutter SDK once (same as Resonate):
 
 ```bash
 cd apps/flutter
 
-# If android/ ios/ are missing:
 flutter create . --project-name personal_life_os --org com.personallifeos
 
-# Copy canonical schema into assets (re-run when schema.sql changes)
 mkdir -p assets
 cp ../../src/db/schema.sql assets/schema.sql
 
 flutter pub get
 ```
 
-Update `pubspec.yaml` assets if needed (already listed):
+Commit generated `android/` (and `ios/` if you want).
 
-```yaml
-flutter:
-  assets:
-    - assets/schema.sql
-```
-
-## Run
+## Run locally
 
 ```bash
 flutter run
-# or build APK like Resonate:
+# or
 flutter build apk --release --no-shrink
 ```
 
-## GitHub APK
+## GitHub APK (after android/ is committed)
 
-Workflow: [`.github/workflows/flutter-apk.yml`](../../.github/workflows/flutter-apk.yml)
+**Actions → Flutter APK Build → Run workflow**
 
-**Actions → Flutter APK Build → Run workflow** → download artifact → install on phone.
+Artifact: `personal-life-os-flutter-apk` → install on phone.
 
-Requires `apps/flutter/android/` present (from `flutter create`).
+CI always refreshes `assets/schema.sql` from `src/db/schema.sql`.
 
-## Layout
+## What’s in the app now
 
-```
-lib/
-  main.dart                 # app shell
-  domain/                   # models matching contract (camelCase)
-  data/
-    database.dart           # opens SQLite, applies schema.sql
-    task_repository.dart    # example repository
-  ui/
-    home_shell.dart         # offline shell / tabs
-assets/
-  schema.sql                # copy of src/db/schema.sql
-```
+| Tab | Contract tables |
+|-----|-----------------|
+| Today | Counts from local DB |
+| Tasks | `tasks` + `TASK_*` events |
+| Habits | `habits` / `habit_occurrences` + `HABIT_*` |
+| Goals | `goals` + `GOAL_*` |
+| Notes | `notes` |
 
-## Rules of engagement
+## Not Expo
 
-- Do not invent parallel column names; follow `schema.sql`.
-- Status strings must match `contract/enums.json`.
-- Money = minor units; times = Unix ms.
+The old `mobile/` Expo prototype is not the phone target. Ignore **Manual APK Build** (Expo).

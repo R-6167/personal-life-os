@@ -1,5 +1,5 @@
 /// Domain models aligned with TypeScript repository-types (camelCase).
-/// SQL mapping uses snake_case column names in repositories.
+/// SQL uses snake_case; map in fromMap / toInsertMap.
 
 class Goal {
   final String id;
@@ -50,6 +50,23 @@ class Goal {
         updatedAt: m['updated_at'] as int,
         archivedAt: m['archived_at'] as int?,
       );
+
+  Map<String, Object?> toInsertMap() => {
+        'id': id,
+        'owner_id': ownerId,
+        'title': title,
+        'description': description,
+        'status': status,
+        'priority': priority,
+        'start_date': startDate,
+        'target_date': targetDate,
+        'completed_at': completedAt,
+        'progress_mode': progressMode,
+        'manual_progress': manualProgress,
+        'created_at': createdAt,
+        'updated_at': updatedAt,
+        'archived_at': archivedAt,
+      };
 }
 
 class Task {
@@ -119,22 +136,26 @@ class Task {
 class Habit {
   final String id;
   final String ownerId;
+  final String? goalId;
   final String title;
   final String? description;
   final String status;
   final int targetCount;
   final int startDate;
+  final int? endDate;
   final int createdAt;
   final int updatedAt;
 
   const Habit({
     required this.id,
     required this.ownerId,
+    this.goalId,
     required this.title,
     this.description,
     required this.status,
     this.targetCount = 1,
     required this.startDate,
+    this.endDate,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -142,12 +163,68 @@ class Habit {
   factory Habit.fromMap(Map<String, Object?> m) => Habit(
         id: m['id'] as String,
         ownerId: m['owner_id'] as String,
+        goalId: m['goal_id'] as String?,
         title: m['title'] as String,
         description: m['description'] as String?,
         status: m['status'] as String,
         targetCount: (m['target_count'] as int?) ?? 1,
         startDate: m['start_date'] as int,
+        endDate: m['end_date'] as int?,
         createdAt: m['created_at'] as int,
         updatedAt: m['updated_at'] as int,
       );
+
+  Map<String, Object?> toInsertMap() => {
+        'id': id,
+        'owner_id': ownerId,
+        'goal_id': goalId,
+        'title': title,
+        'description': description,
+        'status': status,
+        'target_count': targetCount,
+        'start_date': startDate,
+        'end_date': endDate,
+        'created_at': createdAt,
+        'updated_at': updatedAt,
+      };
+}
+
+class Note {
+  final String id;
+  final String ownerId;
+  final String? title;
+  final String content;
+  final int createdAt;
+  final int updatedAt;
+  final int? archivedAt;
+
+  const Note({
+    required this.id,
+    required this.ownerId,
+    this.title,
+    required this.content,
+    required this.createdAt,
+    required this.updatedAt,
+    this.archivedAt,
+  });
+
+  factory Note.fromMap(Map<String, Object?> m) => Note(
+        id: m['id'] as String,
+        ownerId: m['owner_id'] as String,
+        title: m['title'] as String?,
+        content: m['content'] as String,
+        createdAt: m['created_at'] as int,
+        updatedAt: m['updated_at'] as int,
+        archivedAt: m['archived_at'] as int?,
+      );
+
+  Map<String, Object?> toInsertMap() => {
+        'id': id,
+        'owner_id': ownerId,
+        'title': title,
+        'content': content,
+        'created_at': createdAt,
+        'updated_at': updatedAt,
+        'archived_at': archivedAt,
+      };
 }

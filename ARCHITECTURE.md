@@ -1,25 +1,22 @@
 # Architecture
 
-## Contract-first (TypeScript + Flutter)
+## Phone client = Flutter only
 
 ```
-contract/          ← shared rules (human + enums.json)
-src/               ← TypeScript: schema, domain, events, CLI
-apps/flutter/      ← Flutter: offline UI + SQLite implementing the contract
-mobile/            ← legacy Expo prototype (optional; not the target client)
+contract/           shared rules (CONTRACT.md, enums.json)
+src/                TypeScript: schema, domain, events, CLI
+apps/flutter/       Flutter offline UI + SQLite (implements contract)
+mobile/             legacy Expo prototype — not the shipping client
 ```
 
-**Rule:** TypeScript defines the data model. Flutter implements the same model locally. No TypeScript runtime inside the APK.
+**Integrate by contract:** TypeScript defines the model; Flutter implements the same SQL + status strings locally. No TypeScript runtime in the APK. No Expo for production builds.
 
-See [contract/CONTRACT.md](contract/CONTRACT.md).
+## Offline path
 
-## Offline phone path
-
-1. Flutter opens on-device SQLite.
-2. Schema = `src/db/schema.sql` (copied to `apps/flutter/assets/schema.sql`).
-3. APK via **Flutter APK Build** workflow (same idea as Resonate).
+1. `apps/flutter` opens on-device SQLite  
+2. Schema from `src/db/schema.sql`  
+3. APK via **Flutter APK Build** (same pattern as Resonate)
 
 ## TypeScript path
 
-- Domain services, repositories, event bus under `src/`.
-- Useful for CLI, tests, and a future sync API using the same JSON shapes.
+Domain services, repositories, event bus under `src/` — CLI, tests, future optional sync API using the same shapes.
