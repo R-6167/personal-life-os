@@ -2,10 +2,11 @@ import '../data/bill_repository.dart';
 import '../data/database.dart';
 import '../data/expense_repository.dart';
 import '../data/habit_repository.dart';
+import '../data/project_repository.dart';
 import '../data/task_repository.dart';
 import '../domain/enums.dart';
 
-/// Local-first PersonalContext + rule-based assistant (doc section 54).
+/// Local PersonalContext + planning-oriented assistant (offline).
 class IntelligenceAssistant {
   IntelligenceAssistant({AppDatabase? db}) : _db = db ?? AppDatabase.instance;
 
@@ -16,6 +17,7 @@ class IntelligenceAssistant {
     final habits = HabitRepository(_db);
     final bills = BillRepository(_db);
     final expenses = ExpenseRepository(_db);
+    final projects = ProjectRepository(_db);
 
     final open = await tasks.listOpen();
     final overdue = await tasks.listOverdue();
@@ -23,6 +25,7 @@ class IntelligenceAssistant {
     final activeHabits = await habits.listActive();
     final billOcc = await bills.listOpenOccurrences();
     final spend = await expenses.totalMinorThisMonth();
+    final activeProjects = await projects.listActive();
 
     return PersonalContext(
       now: DateTime.now(),
@@ -31,11 +34,13 @@ class IntelligenceAssistant {
       dueTodayCount: dueToday.length,
       habitCount: activeHabits.length,
       openBillCount: billOcc.length,
+      projectCount: activeProjects.length,
       monthSpendMinor: spend,
       topOverdueTitles: overdue.take(3).map((t) => t.title).toList(),
       topTaskTitles: open.take(5).map((t) => t.title).toList(),
       habitTitles: activeHabits.take(5).map((h) => h.title).toList(),
       billTitles: billOcc.take(3).map((b) => b.billName ?? 'Bill').toList(),
+      projectTitles: activeProjects.take(3).map((p) => p.title).toList(),
     );
   }
 
@@ -47,40 +52,46 @@ class IntelligenceAssistant {
         q.contains('today') ||
         q.contains('brief') ||
         q.contains('summary') ||
-        q.contains('focus')) {
-      return ctx.briefing();
+        q.contains('focus') ||
+        q.contains('afternoon') ||
+        q.contains('morning') ||
+        q.contains('should i') ||
+        q.contains('what next')) {
+      return ctx.focusAdvice();
     }
     if (q.contains('overdue')) {
-      if (ctx.overdueCount == 0) return 'Nothing overdue. Nice work.';
-      return 'You have ${ctx.overdueCount} overdue task(s):\n• ${ctx.topOverdueTitles.join('\n• ')}';
+      if (ctx.overdueCount == 0) return 'Nothing overdue. Clear runway.';
+      return 'Overdue (${ctx.overdueCount}):\n• ${ctx.topOverdueTitles.join('\n• ')}\nClear these before new work.';
     }
     if (q.contains('habit')) {
-      if (ctx.habitCount == 0) return 'No active habits yet. Add one under Habits.';
-      return 'Active habits (${ctx.habitCount}):\n• ${ctx.habitTitles.join('\n• ')}\nLog them from Today when done.';
+      if (ctx.habitCount == 0) return 'No active habits. Add one under Life.';
+      return 'Habits (${ctx.habitCount}):\n• ${ctx.habitTitles.join('\n• ')}\nLog from Today when done (one log per day).';
     }
     if (q.contains('bill') || q.contains('pay')) {
       if (ctx.openBillCount == 0) return 'No open bill occurrences.';
-      return 'Open bills (${ctx.openBillCount}):\n• ${ctx.billTitles.join('\n• ')}\nPay from Today — that records an expense (bill is not expense).';
+      return 'Open bills:\n• ${ctx.billTitles.join('\n• ')}\nPay from Today or Finance — that records an expense.';
+    }
+    if (q.contains('project')) {
+      if (ctx.projectCount == 0) return 'No active projects. Create one under a goal in Life.';
+      return 'Active projects:\n• ${ctx.projectTitles.join('\n• ')}\nOpen a project for milestones and tasks.';
     }
     if (q.contains('spend') ||
         q.contains('money') ||
         q.contains('expense') ||
         q.contains('finance')) {
       final major = (ctx.monthSpendMinor / 100).toStringAsFixed(2);
-      return "This month's recorded spend: ${Defaults.currency} $major (from local expenses only).";
+      return "This month's recorded spend: ${Defaults.currency} $major (local expenses only).\nBills open: ${ctx.openBillCount}.";
     }
     if (q.contains('task') || q.contains('todo') || q.contains('work')) {
-      if (ctx.openTaskCount == 0) {
-        return 'No open tasks. Capture one when something appears.';
-      }
+      if (ctx.openTaskCount == 0) return 'No open tasks. Capture when something appears.';
       return 'Open tasks (${ctx.openTaskCount}):\n• ${ctx.topTaskTitles.join('\n• ')}';
     }
     if (q.contains('help') || q.contains('what can')) {
-      return 'I run fully offline on your SQLite data.\n'
-          'Ask about: today, overdue, tasks, habits, bills, spend.\n'
-          'I do not call the cloud — answers come from Personal Context.';
+      return 'Offline assistant on your SQLite data.\n'
+          'Try: focus · overdue · tasks · habits · bills · projects · spend\n'
+          'I suggest next actions from Personal Context — no cloud.';
     }
-    return ctx.briefing();
+    return ctx.focusAdvice();
   }
 }
 
@@ -92,11 +103,13 @@ class PersonalContext {
     required this.dueTodayCount,
     required this.habitCount,
     required this.openBillCount,
+    required this.projectCount,
     required this.monthSpendMinor,
     required this.topOverdueTitles,
     required this.topTaskTitles,
     required this.habitTitles,
     required this.billTitles,
+    required this.projectTitles,
   });
 
   final DateTime now;
@@ -105,35 +118,58 @@ class PersonalContext {
   final int dueTodayCount;
   final int habitCount;
   final int openBillCount;
+  final int projectCount;
   final int monthSpendMinor;
   final List<String> topOverdueTitles;
   final List<String> topTaskTitles;
   final List<String> habitTitles;
   final List<String> billTitles;
+  final List<String> projectTitles;
 
-  String briefing() {
+  String briefing() => focusAdvice();
+
+  /// "What should I focus on" style answer across domains.
+  String focusAdvice() {
     final hour = now.hour;
     final greet = hour < 12
         ? 'Good morning'
         : hour < 17
             ? 'Good afternoon'
             : 'Good evening';
-    final buf = StringBuffer()
-      ..writeln('$greet. Here is your local context:')
-      ..writeln(
-          '• Open tasks: $openTaskCount (due/overdue focus: $dueTodayCount)')
-      ..writeln('• Overdue: $overdueCount')
-      ..writeln('• Habits to keep: $habitCount')
-      ..writeln('• Bills open: $openBillCount')
-      ..writeln(
-        '• Month spend: ${Defaults.currency} ${(monthSpendMinor / 100).toStringAsFixed(2)}',
-      );
+
+    final steps = <String>[];
     if (overdueCount > 0) {
-      buf.writeln('\nPriority — overdue:\n• ${topOverdueTitles.join('\n• ')}');
-    } else if (topTaskTitles.isNotEmpty) {
-      buf.writeln('\nSuggested focus:\n• ${topTaskTitles.take(3).join('\n• ')}');
+      steps.add('Clear overdue first: ${topOverdueTitles.take(2).join('; ')}');
     }
-    buf.writeln('\n(All offline. No network used.)');
+    if (openBillCount > 0 && (hour >= 9 && hour <= 18)) {
+      steps.add('Settle open bills if you can (${billTitles.take(2).join('; ')})');
+    }
+    if (dueTodayCount > 0 || topTaskTitles.isNotEmpty) {
+      steps.add('Next task: ${topTaskTitles.isNotEmpty ? topTaskTitles.first : 'review open work'}');
+    }
+    if (habitCount > 0 && hour < 21) {
+      steps.add('Keep a habit alive: ${habitTitles.take(2).join('; ')}');
+    }
+    if (projectCount > 0 && steps.length < 3) {
+      steps.add('Push a project: ${projectTitles.first}');
+    }
+    if (steps.isEmpty) {
+      steps.add('Inbox is calm. Capture a goal or plan tomorrow with Calendar.');
+    }
+
+    final buf = StringBuffer()
+      ..writeln('$greet. Suggested focus:')
+      ..writeln()
+      ..writeln(steps.asMap().entries.map((e) => '${e.key + 1}. ${e.value}').join('\n'))
+      ..writeln()
+      ..writeln(
+        'Context — tasks $openTaskCount · overdue $overdueCount · '
+        'habits $habitCount · bills $openBillCount · projects $projectCount',
+      )
+      ..writeln(
+        'Spend this month: ${Defaults.currency} ${(monthSpendMinor / 100).toStringAsFixed(2)}',
+      )
+      ..writeln('(Offline · from your data only)');
     return buf.toString();
   }
 }
