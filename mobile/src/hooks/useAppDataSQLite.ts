@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AppData } from '../types/app-data';
 import { getDatabase } from '../db/database';
 import * as Q from '../db/queries';
+import { ensureHabitOccurrences } from '../habits/recurrence';
 
 const empty: Omit<
   AppData,
@@ -36,6 +37,7 @@ export function useAppDataSQLite(): AppData {
   const refresh = useCallback(async () => {
     try {
       const db = await getDatabase();
+      await ensureHabitOccurrences(db, { daysAhead: 0 });
       const [tasks, habitOccurrences, billOccurrences, accounts, recentExpenses, recentActivity, goals, projects] =
         await Promise.all([
           Q.loadTasks(db),
