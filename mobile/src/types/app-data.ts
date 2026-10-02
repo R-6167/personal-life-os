@@ -29,6 +29,8 @@ export interface TaskItem {
   dueAt?: number | null;
   estimatedMinutes?: number | null;
   projectTitle?: string | null;
+  projectId?: string | null;
+  goalId?: string | null;
 }
 
 export interface HabitOccurrenceItem {
@@ -76,16 +78,66 @@ export interface ActivityItem {
   occurredAt: number;
 }
 
+export interface GoalItem {
+  id: string;
+  title: string;
+  description?: string | null;
+  status: string;
+  priority: number;
+  targetDate?: number | null;
+  projectCount: number;
+  openTasks: number;
+  manualProgress?: number | null;
+}
+
+export interface ProjectItem {
+  id: string;
+  title: string;
+  description?: string | null;
+  status: string;
+  priority: number;
+  goalId?: string | null;
+  goalTitle?: string | null;
+  openTasks: number;
+  completedTasks: number;
+  progress: number;
+}
+
 export interface AppData {
+  ready: boolean;
+  error: string | null;
   tasks: TaskItem[];
   habitOccurrences: HabitOccurrenceItem[];
   billOccurrences: BillOccurrenceItem[];
   accounts: AccountItem[];
   recentExpenses: ExpenseItem[];
   recentActivity: ActivityItem[];
-  completeTask: (id: string) => void;
-  startTask: (id: string) => void;
-  completeHabit: (id: string) => void;
-  skipHabit: (id: string) => void;
-  payBill: (id: string) => void;
+  goals: GoalItem[];
+  projects: ProjectItem[];
+  refresh: () => Promise<void>;
+  completeTask: (id: string) => Promise<void>;
+  startTask: (id: string) => Promise<void>;
+  createTask: (input: {
+    title: string;
+    description?: string;
+    priority?: number;
+    dueAt?: number | null;
+    projectId?: string | null;
+  }) => Promise<void>;
+  completeHabit: (id: string) => Promise<void>;
+  skipHabit: (id: string) => Promise<void>;
+  createHabit: (input: { title: string; targetMinutes?: number }) => Promise<void>;
+  payBill: (id: string) => Promise<void>;
+  createGoal: (input: {
+    title: string;
+    description?: string;
+    priority?: number;
+    targetDate?: number | null;
+  }) => Promise<void>;
+  createProject: (input: {
+    title: string;
+    description?: string;
+    goalId?: string | null;
+    priority?: number;
+  }) => Promise<void>;
 }
