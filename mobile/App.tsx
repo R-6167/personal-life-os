@@ -17,10 +17,11 @@ import { HabitsScreen } from './src/screens/HabitsScreen';
 import { FinancesScreen } from './src/screens/FinancesScreen';
 import { GoalsScreen } from './src/screens/GoalsScreen';
 import { ProjectsScreen } from './src/screens/ProjectsScreen';
+import { SettingsScreen } from './src/screens/SettingsScreen';
 
-type Screen = 'Today' | 'Tasks' | 'Habits' | 'Goals' | 'Projects' | 'Finances';
+type Screen = 'Today' | 'Tasks' | 'Habits' | 'Goals' | 'Projects' | 'Finances' | 'Settings';
 
-const tabs: Screen[] = ['Today', 'Tasks', 'Habits', 'Goals', 'Projects', 'Finances'];
+const tabs: Screen[] = ['Today', 'Tasks', 'Habits', 'Goals', 'Projects', 'Finances', 'Settings'];
 
 const greetings = () => {
   const hour = new Date().getHours();
@@ -48,6 +49,8 @@ function AppContent() {
         return <ProjectsScreen />;
       case 'Finances':
         return <FinancesScreen />;
+      case 'Settings':
+        return <SettingsScreen />;
       default:
         return <TodayScreen />;
     }
