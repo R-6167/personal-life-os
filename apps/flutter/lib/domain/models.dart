@@ -98,6 +98,9 @@ class Task {
   final String status;
   final int priority;
   final int? dueAt;
+  final int? scheduledStart;
+  final int? scheduledEnd;
+  final int? estimatedMinutes;
   final int? completedAt;
   final int createdAt;
   final int updatedAt;
@@ -111,6 +114,9 @@ class Task {
     required this.status,
     this.priority = 0,
     this.dueAt,
+    this.scheduledStart,
+    this.scheduledEnd,
+    this.estimatedMinutes,
     this.completedAt,
     required this.createdAt,
     required this.updatedAt,
@@ -130,6 +136,14 @@ class Task {
     return dueAt! >= start && dueAt! <= end;
   }
 
+  bool get isScheduledToday {
+    if (scheduledStart == null) return false;
+    final n = DateTime.now();
+    final start = DateTime(n.year, n.month, n.day).millisecondsSinceEpoch;
+    final end = start + const Duration(days: 1).inMilliseconds - 1;
+    return scheduledStart! >= start && scheduledStart! <= end;
+  }
+
   factory Task.fromMap(Map<String, Object?> m) => Task(
         id: m['id'] as String,
         ownerId: m['owner_id'] as String,
@@ -139,6 +153,9 @@ class Task {
         status: m['status'] as String,
         priority: (m['priority'] as int?) ?? 0,
         dueAt: m['due_at'] as int?,
+        scheduledStart: m['scheduled_start'] as int?,
+        scheduledEnd: m['scheduled_end'] as int?,
+        estimatedMinutes: m['estimated_minutes'] as int?,
         completedAt: m['completed_at'] as int?,
         createdAt: m['created_at'] as int,
         updatedAt: m['updated_at'] as int,
@@ -153,6 +170,9 @@ class Task {
         'status': status,
         'priority': priority,
         'due_at': dueAt,
+        'scheduled_start': scheduledStart,
+        'scheduled_end': scheduledEnd,
+        'estimated_minutes': estimatedMinutes,
         'completed_at': completedAt,
         'created_at': createdAt,
         'updated_at': updatedAt,
