@@ -1,15 +1,26 @@
 import React, { useMemo, useState } from 'react';
-import { SafeAreaView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { AppDataProvider } from './src/context/AppDataContext';
-import { useAppDataMock } from './src/hooks/useAppDataMock';
+import {
+  ActivityIndicator,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { AppDataProvider, useAppData } from './src/context/AppDataContext';
+import { useAppDataSQLite } from './src/hooks/useAppDataSQLite';
 import { TodayScreen } from './src/screens/TodayScreen';
 import { TasksScreen } from './src/screens/TasksScreen';
 import { HabitsScreen } from './src/screens/HabitsScreen';
 import { FinancesScreen } from './src/screens/FinancesScreen';
+import { GoalsScreen } from './src/screens/GoalsScreen';
+import { ProjectsScreen } from './src/screens/ProjectsScreen';
 
-type Screen = 'Today' | 'Tasks' | 'Habits' | 'Finances';
+type Screen = 'Today' | 'Tasks' | 'Habits' | 'Goals' | 'Projects' | 'Finances';
 
-const tabs: Screen[] = ['Today', 'Tasks', 'Habits', 'Finances'];
+const tabs: Screen[] = ['Today', 'Tasks', 'Habits', 'Goals', 'Projects', 'Finances'];
 
 const greetings = () => {
   const hour = new Date().getHours();
@@ -21,6 +32,7 @@ const greetings = () => {
 function AppContent() {
   const [activeScreen, setActiveScreen] = useState<Screen>('Today');
   const eyebrow = useMemo(() => greetings(), []);
+  const { ready, error } = useAppData();
 
   const renderScreen = () => {
     switch (activeScreen) {
@@ -30,6 +42,10 @@ function AppContent() {
         return <TasksScreen />;
       case 'Habits':
         return <HabitsScreen />;
+      case 'Goals':
+        return <GoalsScreen />;
+      case 'Projects':
+        return <ProjectsScreen />;
       case 'Finances':
         return <FinancesScreen />;
       default:
@@ -44,11 +60,30 @@ function AppContent() {
       <View style={styles.headerCard}>
         <Text style={styles.eyebrow}>{eyebrow}</Text>
         <Text style={styles.title}>{activeScreen}</Text>
+        <Text style={styles.sub}>Offline · local SQLite</Text>
       </View>
 
-      <View style={styles.screenContainer}>{renderScreen()}</View>
+      <View style={styles.screenContainer}>
+        {!ready ? (
+          <View style={styles.center}>
+            <ActivityIndicator color="#60a5fa" />
+            <Text style={styles.loadingText}>Opening local database…</Text>
+          </View>
+        ) : error ? (
+          <View style={styles.center}>
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : (
+          renderScreen()
+        )}
+      </View>
 
-      <View style={styles.tabBar}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.tabBarScroll}
+        contentContainerStyle={styles.tabBar}
+      >
         {tabs.map((tab) => (
           <TouchableOpacity
             key={tab}
@@ -59,13 +94,13 @@ function AppContent() {
             <Text style={[styles.tabText, activeScreen === tab && styles.activeTabText]}>{tab}</Text>
           </TouchableOpacity>
         ))}
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 function App() {
-  const appData = useAppDataMock();
+  const appData = useAppDataSQLite();
 
   return (
     <AppDataProvider value={appData}>
@@ -99,21 +134,39 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginTop: 6,
   },
+  sub: {
+    color: '#64748b',
+    fontSize: 11,
+    marginTop: 4,
+    fontWeight: '600',
+  },
   screenContainer: {
     flex: 1,
     backgroundColor: '#0f172a',
   },
-  tabBar: {
-    flexDirection: 'row',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: '#0f172a',
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  loadingText: { color: '#94a3b8', marginTop: 12, fontSize: 13 },
+  errorText: { color: '#fca5a5', textAlign: 'center', fontSize: 13 },
+  tabBarScroll: {
+    maxHeight: 64,
     borderTopWidth: 1,
     borderTopColor: '#1f2937',
+    backgroundColor: '#0f172a',
+  },
+  tabBar: {
+    flexDirection: 'row',
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
   },
   tabButton: {
-    flex: 1,
     paddingVertical: 10,
+    paddingHorizontal: 14,
     borderRadius: 10,
     marginHorizontal: 4,
     alignItems: 'center',
