@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:sqflite/sqflite.dart';
+
 import '../domain/enums.dart';
 import 'database.dart';
 
@@ -8,7 +10,6 @@ class ExtendedRepository {
   ExtendedRepository(this._db);
   final AppDatabase _db;
 
-  // ── People ──────────────────────────────────────────────
   Future<List<Map<String, Object?>>> listPeople() async {
     final db = await _db.database;
     return db.query('people', where: 'archived_at IS NULL', orderBy: 'name ASC');
@@ -27,7 +28,6 @@ class ExtendedRepository {
     });
   }
 
-  // ── Calendar ────────────────────────────────────────────
   Future<List<Map<String, Object?>>> listEventsToday() async {
     final db = await _db.database;
     final start = AppDatabase.startOfTodayMs();
@@ -70,7 +70,6 @@ class ExtendedRepository {
     });
   }
 
-  // ── Reminders ───────────────────────────────────────────
   Future<List<Map<String, Object?>>> listPendingReminders() async {
     final db = await _db.database;
     return db.query(
@@ -96,25 +95,6 @@ class ExtendedRepository {
     });
   }
 
-  // ── Habit schedule ──────────────────────────────────────
-  Future<void> ensureDailyHabitSchedule(String habitId) async {
-    final db = await _db.database;
-    final existing = await db.query('habit_schedules', where: 'habit_id = ?', whereArgs: [habitId], limit: 1);
-    if (existing.isNotEmpty) return;
-    final now = AppDatabase.nowMs();
-    await db.insert('habit_schedules', {
-      'id': AppDatabase.newId(),
-      'habit_id': habitId,
-      'frequency': 'DAILY',
-      'interval_n': 1,
-      'start_date': now,
-      'enabled': 1,
-      'created_at': now,
-      'updated_at': now,
-    });
-  }
-
-  // ── Task dependency ─────────────────────────────────────
   Future<void> addDependency({required String taskId, required String dependsOnTaskId}) async {
     final now = AppDatabase.nowMs();
     await (await _db.database).insert('task_dependencies', {
@@ -126,7 +106,6 @@ class ExtendedRepository {
     });
   }
 
-  // ── Subscriptions ───────────────────────────────────────
   Future<List<Map<String, Object?>>> listSubscriptions() async {
     final db = await _db.database;
     return db.query('subscriptions', where: 'status = ?', whereArgs: ['ACTIVE'], orderBy: 'next_renewal_at ASC');
@@ -162,7 +141,6 @@ class ExtendedRepository {
     });
   }
 
-  // ── Debt ────────────────────────────────────────────────
   Future<List<Map<String, Object?>>> listDebts() async {
     final db = await _db.database;
     return db.query('debts', where: 'status != ?', whereArgs: ['PAID'], orderBy: 'due_at ASC');
@@ -240,7 +218,6 @@ class ExtendedRepository {
     });
   }
 
-  // ── Savings ─────────────────────────────────────────────
   Future<List<Map<String, Object?>>> listSavings() async {
     final db = await _db.database;
     return db.query('savings_goals', where: 'status = ?', whereArgs: ['ACTIVE']);
@@ -298,7 +275,6 @@ class ExtendedRepository {
     });
   }
 
-  // ── Practical ───────────────────────────────────────────
   Future<List<Map<String, Object?>>> listPractical() async {
     final db = await _db.database;
     return db.query('practical_items', where: 'archived_at IS NULL', orderBy: 'due_at ASC');
@@ -318,7 +294,6 @@ class ExtendedRepository {
     });
   }
 
-  // ── Documents ───────────────────────────────────────────
   Future<List<Map<String, Object?>>> listDocuments() async {
     final db = await _db.database;
     return db.query('documents', orderBy: 'expires_at ASC');
@@ -350,7 +325,6 @@ class ExtendedRepository {
     });
   }
 
-  // ── Shopping ────────────────────────────────────────────
   Future<List<Map<String, Object?>>> listShoppingLists() async {
     final db = await _db.database;
     return db.query('shopping_lists', where: 'status != ?', whereArgs: ['COMPLETED']);
@@ -377,7 +351,6 @@ class ExtendedRepository {
     });
   }
 
-  // ── Search ──────────────────────────────────────────────
   Future<List<Map<String, String>>> search(String query) async {
     if (query.trim().isEmpty) return [];
     final q = '%${query.trim()}%';
@@ -403,11 +376,10 @@ class ExtendedRepository {
     return results;
   }
 
-  // ── Import backup JSON ──────────────────────────────────
   Future<int> importBackupJson(String jsonStr) async {
     final decoded = jsonDecode(jsonStr);
     if (decoded is! Map) return 0;
-    final map = Map<String, dynamic>.from(decoded as Map);
+    final map = Map<String, dynamic>.from(decoded);
     var count = 0;
     final tables = [
       'goals', 'projects', 'tasks', 'habits', 'notes', 'bills', 'expenses', 'income',

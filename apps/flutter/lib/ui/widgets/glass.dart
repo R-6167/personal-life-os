@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../theme.dart';
 
-/// Frosted glass surface (BackdropFilter) — Resonate-style depth on dark UI.
+/// Frosted glass on metallic dark base.
 class GlassCard extends StatelessWidget {
   const GlassCard({
     super.key,
@@ -35,14 +35,15 @@ class GlassCard extends StatelessWidget {
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                Colors.white.withValues(alpha: 0.10),
-                Colors.white.withValues(alpha: 0.04),
+                AppTheme.silver.withValues(alpha: 0.12),
+                AppTheme.wood.withValues(alpha: 0.08),
+                AppTheme.silver.withValues(alpha: 0.04),
               ],
             ),
             border: Border.all(color: AppTheme.glassBorder),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.25),
+                color: Colors.black.withValues(alpha: 0.35),
                 blurRadius: 16,
                 offset: const Offset(0, 8),
               ),
@@ -77,25 +78,30 @@ class GlassBackground extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Color(0xFF0B1220),
-            Color(0xFF121A2F),
-            Color(0xFF0F172A),
-            Color(0xFF1E1B4B),
+            AppTheme.metalDeep,
+            Color(0xFF1C222B),
+            AppTheme.metal,
+            Color(0xFF241C18),
           ],
-          stops: [0.0, 0.35, 0.7, 1.0],
+          stops: [0.0, 0.35, 0.75, 1.0],
         ),
       ),
       child: Stack(
         children: [
           Positioned(
-            top: -80,
-            right: -40,
-            child: _blob(const Color(0xFF6366F1), 220),
+            top: -90,
+            right: -50,
+            child: _blob(AppTheme.amber, 240, 0.16),
           ),
           Positioned(
-            bottom: 120,
-            left: -60,
-            child: _blob(const Color(0xFF22D3EE), 180),
+            bottom: 100,
+            left: -70,
+            child: _blob(AppTheme.wood, 200, 0.22),
+          ),
+          Positioned(
+            top: 220,
+            left: 40,
+            child: _blob(AppTheme.silver, 120, 0.08),
           ),
           child,
         ],
@@ -103,12 +109,12 @@ class GlassBackground extends StatelessWidget {
     );
   }
 
-  Widget _blob(Color c, double size) => Container(
+  Widget _blob(Color c, double size, double alpha) => Container(
         width: size,
         height: size,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: c.withValues(alpha: 0.18),
+          color: c.withValues(alpha: alpha),
         ),
       );
 }

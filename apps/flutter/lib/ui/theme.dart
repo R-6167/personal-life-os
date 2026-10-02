@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 class AppTheme {
   /// Vibrant amber (primary actions, FAB, focus)
   static const amber = Color(0xFFF5B301);
-  static const amberDeep = Color(0xFFE Pan0A00); // typo fix below
+  static const amberDeep = Color(0xFFE0A000);
 
   /// Cool metallic grey / silver
   static const silver = Color(0xFFC5CBD3);

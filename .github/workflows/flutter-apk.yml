@@ -17,8 +17,6 @@ jobs:
 
       - name: Verify Flutter schema asset
         run: |
-          # Use apps/flutter/assets/schema.sql (clean MVP). Do not overwrite
-          # with src/db/schema.sql — that file has mid-comment semicolons.
           test -s assets/schema.sql
           wc -l assets/schema.sql
 
@@ -48,6 +46,9 @@ jobs:
 
       - name: Get dependencies
         run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
       - name: Build release APK
         run: flutter build apk --release --no-shrink

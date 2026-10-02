@@ -1,7 +1,6 @@
 import '../domain/enums.dart';
 import '../domain/models.dart';
 import 'database.dart';
-import 'extended_repository.dart';
 
 class HabitRepository {
   HabitRepository(this._db);
