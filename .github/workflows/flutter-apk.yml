@@ -1,0 +1,53 @@
+name: Flutter APK Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/flutter
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure schema asset is current
+        run: |
+          mkdir -p assets
+          cp ../../src/db/schema.sql assets/schema.sql
+          wc -l assets/schema.sql
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Flutter version
+        run: flutter --version
+
+      - name: Require platform folders
+        run: |
+          if [ ! -d android ]; then
+            echo "::error::apps/flutter/android is missing."
+            echo "On a machine with Flutter SDK run:"
+            echo "  cd apps/flutter && flutter create . --project-name personal_life_os --org com.personallifeos"
+            echo "Commit android/ (and ios/ if desired), then re-run this workflow."
+            exit 1
+          fi
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Build release APK
+        run: flutter build apk --release --no-shrink
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: personal-life-os-flutter-apk
+          path: apps/flutter/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 14

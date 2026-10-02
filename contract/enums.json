@@ -1,0 +1,110 @@
+{
+  "contractVersion": 1,
+  "entityStatus": [
+    "ACTIVE",
+    "INBOX",
+    "PLANNED",
+    "IN_PROGRESS",
+    "WAITING",
+    "COMPLETED",
+    "PAUSED",
+    "CANCELLED",
+    "ARCHIVED"
+  ],
+  "progressMode": ["CALCULATED", "MANUAL"],
+  "habitOccurrenceStatus": [
+    "EXPECTED",
+    "COMPLETED",
+    "MISSED",
+    "SKIPPED",
+    "PARTIAL"
+  ],
+  "routineOccurrenceStatus": [
+    "EXPECTED",
+    "STARTED",
+    "COMPLETED",
+    "MISSED",
+    "SKIPPED"
+  ],
+  "frequency": ["DAILY", "WEEKLY", "MONTHLY", "YEARLY"],
+  "entityType": [
+    "TASK",
+    "PROJECT",
+    "MILESTONE",
+    "GOAL",
+    "HABIT",
+    "HABIT_OCCURRENCE",
+    "ROUTINE",
+    "ROUTINE_STEP",
+    "ROUTINE_OCCURRENCE",
+    "CALENDAR_EVENT",
+    "INCOME",
+    "EXPENSE",
+    "BILL",
+    "BILL_OCCURRENCE",
+    "SUBSCRIPTION",
+    "DEBT",
+    "DEBT_PAYMENT",
+    "SAVINGS_GOAL",
+    "SAVINGS_CONTRIBUTION",
+    "DOCUMENT",
+    "VEHICLE",
+    "MAINTENANCE_RECORD",
+    "PRACTICAL_ITEM",
+    "NOTE",
+    "PERSON"
+  ],
+  "eventSource": [
+    "USER",
+    "SYSTEM",
+    "IMPORT",
+    "NOTIFICATION",
+    "AUTOMATION",
+    "INTEGRATION",
+    "LOCAL_AI"
+  ],
+  "taskEventType": [
+    "TASK_CREATED",
+    "TASK_UPDATED",
+    "TASK_STARTED",
+    "TASK_PAUSED",
+    "TASK_COMPLETED",
+    "TASK_REOPENED",
+    "TASK_CANCELLED",
+    "TASK_DEFERRED"
+  ],
+  "goalEventType": [
+    "GOAL_CREATED",
+    "GOAL_PROGRESS_CHANGED",
+    "GOAL_COMPLETED",
+    "GOAL_PAUSED"
+  ],
+  "habitEventType": [
+    "HABIT_CREATED",
+    "HABIT_COMPLETED",
+    "HABIT_SKIPPED",
+    "HABIT_MISSED",
+    "HABIT_PARTIAL"
+  ],
+  "financeEventType": [
+    "INCOME_RECORDED",
+    "EXPENSE_RECORDED",
+    "BILL_CREATED",
+    "BILL_DUE",
+    "BILL_PAID",
+    "BILL_OVERDUE"
+  ],
+  "accountType": [
+    "CASH",
+    "BANK",
+    "MOBILE_MONEY",
+    "WALLET",
+    "SAVINGS",
+    "OTHER"
+  ],
+  "defaults": {
+    "currency": "KES",
+    "locale": "en",
+    "weekStartDay": 1
+  }
+}
