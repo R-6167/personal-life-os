@@ -78,7 +78,44 @@ class _MoreHubState extends State<MoreHub> {
     if (ok != true) return;
     final result = await ExportService(AppDatabase.instance).importBackupJson(ctrl.text.trim());
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result.message)));
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.metal,
+        title: Text(
+          result.ok ? 'Import result' : 'Import failed',
+          style: const TextStyle(color: AppTheme.silver),
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(result.message, style: const TextStyle(color: AppTheme.silver)),
+              if (result.inserted.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(
+                  'Tables updated',
+                  style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.5), fontSize: 12),
+                ),
+                const SizedBox(height: 6),
+                ...result.inserted.entries.map(
+                  (e) => Text(
+                    '• ${e.key}: ${e.value}',
+                    style: const TextStyle(color: AppTheme.amber, fontSize: 13),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
+        ],
+      ),
+    );
     if (result.ok) await widget.onChanged();
   }
 

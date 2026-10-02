@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../data/account_repository.dart';
 import '../../data/bill_repository.dart';
 import '../../data/database.dart';
 import '../../data/expense_repository.dart';
@@ -14,7 +15,6 @@ import '../../data/task_repository.dart';
 import '../../domain/enums.dart';
 import '../theme.dart';
 
-/// Contextual create forms — no silent development defaults.
 enum AddKind {
   task,
   project,
@@ -57,11 +57,7 @@ Future<bool> showUniversalAdd(BuildContext context) async {
             const SizedBox(height: 16),
             const Text(
               'What do you want to add?',
-              style: TextStyle(
-                color: AppTheme.silver,
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-              ),
+              style: TextStyle(color: AppTheme.silver, fontSize: 18, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 12),
             Wrap(
@@ -277,78 +273,80 @@ Future<bool> _taskForm(BuildContext context) async {
   await TaskRepository(AppDatabase.instance).create(
     title: title.text.trim(),
     dueAt: dueMs,
+    priority: priority,
+    description: desc.text.trim().isEmpty ? null : desc.text.trim(),
   );
-  // Priority stored via direct update if non-zero
-  if (priority != 0) {
-    final db = await AppDatabase.instance.database;
-    final rows = await db.query('tasks', orderBy: 'created_at DESC', limit: 1);
-    if (rows.isNotEmpty) {
-      await db.update(
-        'tasks',
-        {'priority': priority, 'description': desc.text.trim().isEmpty ? null : desc.text.trim()},
-        where: 'id = ?',
-        whereArgs: [rows.first['id']],
-      );
-    }
-  } else if (desc.text.trim().isNotEmpty) {
-    final db = await AppDatabase.instance.database;
-    final rows = await db.query('tasks', orderBy: 'created_at DESC', limit: 1);
-    if (rows.isNotEmpty) {
-      await db.update(
-        'tasks',
-        {'description': desc.text.trim()},
-        where: 'id = ?',
-        whereArgs: [rows.first['id']],
-      );
-    }
-  }
   return true;
 }
 
 Future<bool> _moneyForm(BuildContext context, {required bool isIncome}) async {
   final label = TextEditingController();
   final amount = TextEditingController();
+  final accounts = await AccountRepository(AppDatabase.instance).list();
+  String? accountId;
+
+  if (!context.mounted) return false;
   final ok = await showDialog<bool>(
     context: context,
-    builder: (ctx) => AlertDialog(
-      backgroundColor: AppTheme.metal,
-      title: Text(
-        isIncome ? 'Record income' : 'Record expense',
-        style: const TextStyle(color: AppTheme.silver),
-      ),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            controller: label,
-            autofocus: true,
-            style: const TextStyle(color: AppTheme.silver),
-            decoration: InputDecoration(
-              labelText: isIncome ? 'Source *' : 'What for? *',
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setLocal) => AlertDialog(
+        backgroundColor: AppTheme.metal,
+        title: Text(
+          isIncome ? 'Record income' : 'Record expense',
+          style: const TextStyle(color: AppTheme.silver),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: label,
+              autofocus: true,
+              style: const TextStyle(color: AppTheme.silver),
+              decoration: InputDecoration(
+                labelText: isIncome ? 'Source *' : 'What for? *',
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: amount,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            style: const TextStyle(color: AppTheme.silver),
-            decoration: InputDecoration(
-              labelText: 'Amount (${Defaults.currency}) *',
+            const SizedBox(height: 8),
+            TextField(
+              controller: amount,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              style: const TextStyle(color: AppTheme.silver),
+              decoration: InputDecoration(
+                labelText: 'Amount (${Defaults.currency}) *',
+              ),
             ),
+            if (accounts.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              DropdownButtonFormField<String?>(
+                value: accountId,
+                dropdownColor: AppTheme.metal,
+                decoration: const InputDecoration(labelText: 'Account (optional)'),
+                items: [
+                  const DropdownMenuItem(value: null, child: Text('None')),
+                  ...accounts.map(
+                    (a) => DropdownMenuItem(
+                      value: a['id'] as String,
+                      child: Text('${a['name']}'),
+                    ),
+                  ),
+                ],
+                onChanged: (v) => setLocal(() => accountId = v),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              if (label.text.trim().isEmpty) return;
+              if (double.tryParse(amount.text.trim().replaceAll(',', '')) == null) return;
+              Navigator.pop(ctx, true);
+            },
+            child: const Text('Save'),
           ),
         ],
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-        FilledButton(
-          onPressed: () {
-            if (label.text.trim().isEmpty) return;
-            if (double.tryParse(amount.text.trim().replaceAll(',', '')) == null) return;
-            Navigator.pop(ctx, true);
-          },
-          child: const Text('Save'),
-        ),
-      ],
     ),
   );
   if (ok != true) return false;
@@ -357,11 +355,13 @@ Future<bool> _moneyForm(BuildContext context, {required bool isIncome}) async {
     await IncomeRepository(AppDatabase.instance).create(
       source: label.text.trim(),
       amountMajor: a,
+      accountId: accountId,
     );
   } else {
     await ExpenseRepository(AppDatabase.instance).create(
       description: label.text.trim(),
       amountMajor: a,
+      accountId: accountId,
     );
   }
   return true;
