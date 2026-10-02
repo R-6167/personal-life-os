@@ -1,20 +1,19 @@
 # GitHub Actions
 
-## EAS APK Build (`eas-build.yml`)
+## EAS APK Build
 
-Manual workflow that triggers an Android build on Expo Application Services.
+Builds an Android **APK in the cloud** so you can install it on your phone.
 
-**Required before first successful run:**
+**No Android Studio. No local SDK.**
 
-1. `EXPO_TOKEN` repository secret (https://expo.dev/settings/access-tokens)
-2. EAS `projectId` in `mobile/app.json` — run from `./mobile`:
-   ```bash
-   eas login
-   eas build:configure
-   eas build --platform android --profile preview
-   ```
-   Commit the updated `app.json`.
+### Before first run
 
-Then: **Actions → EAS APK Build → Run workflow** → choose `preview` for an APK.
+1. Free Expo account + one terminal setup (see `mobile/README.md`)
+2. Repo secret **`EXPO_TOKEN`** from https://expo.dev/settings/access-tokens
+3. `projectId` present in `mobile/app.json` (written by `eas build:configure`)
 
-The job exits after queueing the build (`--no-wait`). Artifacts live on expo.dev, not as GitHub artifacts.
+### Run
+
+**Actions → EAS APK Build → Run workflow** → profile **`preview`**
+
+APK appears under your project on https://expo.dev (Builds). Open that link on your phone to download and install.

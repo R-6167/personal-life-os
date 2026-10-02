@@ -1,51 +1,87 @@
-# Personal Life OS — Mobile (Expo)
+# Personal Life OS — Mobile
 
-Local-first React Native app (Expo SDK 51) with SQLite.
+**Phone-first.** No Android Studio. No local emulator.
 
-## One-time setup for APK builds (EAS)
+You develop on your computer, test on your phone, and build installable APKs on GitHub via Expo (EAS).
 
-CI cannot create Expo credentials for you. Do this **once** on your machine:
+---
+
+## Daily development (phone + Expo Go)
+
+1. Install **[Expo Go](https://play.google.com/store/apps/details?id=host.exp.exponent)** on your Android phone.
+2. On your computer:
+
+```bash
+cd mobile
+npm install
+npm start
+```
+
+3. Scan the QR code with Expo Go (same Wi‑Fi as the computer).
+
+If the phone and computer are on different networks, use tunnel mode:
+
+```bash
+npm run start:tunnel
+```
+
+Then scan the QR code. Changes reload on the phone automatically.
+
+---
+
+## Installable APK (no Android Studio)
+
+Use **EAS Build** on GitHub when you want a real `.apk` you can install without Expo Go.
+
+### One-time setup (browser + terminal, ~10 minutes)
+
+You need a free [Expo](https://expo.dev) account. You do **not** need Android Studio.
 
 ```bash
 cd mobile
 npm install
 npm install -g eas-cli
 
-# Log into the Expo account that should own the project
 eas login
-
-# Link the project (writes projectId into app.json)
 eas build:configure
+```
 
-# First Android build — creates keystore + validates config
+Then trigger the **first** cloud build (still no Android Studio):
+
+```bash
 eas build --platform android --profile preview
 ```
 
-Then:
+When it finishes, Expo gives you a link to download the APK onto your phone.
 
-1. Commit the updated `app.json` (it will contain `extra.eas.projectId`).
-2. Create an access token at https://expo.dev/settings/access-tokens
-3. In GitHub → **Settings → Secrets and variables → Actions**, add:
-   - Name: `EXPO_TOKEN`
-   - Value: the token from step 2
-4. Run **Actions → EAS APK Build → Run workflow** (profile: `preview`).
+Commit whatever `eas build:configure` changed (usually `app.json` gains `extra.eas.projectId`).
 
-The workflow only *triggers* the build. Download the APK from the [Expo dashboard](https://expo.dev) when it finishes.
+### GitHub secret (one-time)
 
-### Build profiles (`eas.json`)
+1. Create a token: https://expo.dev/settings/access-tokens  
+2. GitHub repo → **Settings → Secrets and variables → Actions**  
+3. New secret: name `EXPO_TOKEN`, value = that token
 
-| Profile       | Output                         |
-|---------------|--------------------------------|
-| `preview`     | Internal **APK** (sideload)    |
-| `development` | Dev client **APK**             |
-| `production`  | **AAB** for Play Store         |
+### Build APKs from GitHub
 
-## Local development
+1. **Actions → EAS APK Build → Run workflow**  
+2. Profile: **`preview`** (produces an APK)  
+3. Wait a few minutes, then open https://expo.dev → your project → **Builds**  
+4. Download the APK on your phone and install it (allow “Install from unknown sources” if asked)
 
-```bash
-cd mobile
-npm install
-npx expo start
-```
+| Profile       | What you get                         |
+|---------------|--------------------------------------|
+| `preview`     | **APK** for sideload testing         |
+| `development` | Dev-client APK                       |
+| `production`  | AAB for Play Store (later)           |
 
-Use Expo Go or a development build on device/emulator.
+---
+
+## What you never need
+
+- Android Studio  
+- Local Android SDK / Gradle  
+- An emulator  
+- A Mac (for Android builds)
+
+Everything native is compiled in Expo’s cloud. Your machine only runs Metro (JS) or triggers the cloud build.

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       profile:
-        description: "EAS build profile"
+        description: "EAS build profile (preview = installable APK for your phone)"
         required: true
         default: "preview"
         type: choice
@@ -41,11 +41,11 @@ jobs:
         run: |
           if [ -z "${{ secrets.EXPO_TOKEN }}" ]; then
             echo "::error::Missing EXPO_TOKEN secret."
-            echo "Create a token at https://expo.dev/settings/access-tokens"
-            echo "Then add it under Repo Settings → Secrets and variables → Actions → EXPO_TOKEN"
+            echo "1. Create a token at https://expo.dev/settings/access-tokens"
+            echo "2. GitHub → Settings → Secrets and variables → Actions → New secret"
+            echo "   Name: EXPO_TOKEN"
             exit 1
           fi
-          echo "EXPO_TOKEN is set"
 
       - name: Install dependencies
         run: |
@@ -58,14 +58,15 @@ jobs:
       - name: Check EAS project is linked
         run: |
           if ! grep -q 'projectId' app.json app.config.js app.config.ts 2>/dev/null; then
-            echo "::error::No EAS projectId found in app config."
-            echo "Run once on your machine from ./mobile:"
-            echo "  npm install -g eas-cli && eas login && eas build:configure"
+            echo "::error::No EAS projectId in app config yet."
+            echo "On your computer (no Android Studio needed):"
+            echo "  cd mobile && npm install -g eas-cli"
+            echo "  eas login"
+            echo "  eas build:configure"
             echo "  eas build --platform android --profile preview"
-            echo "Commit the updated app.json (with extra.eas.projectId) and re-run this workflow."
+            echo "Commit the updated app.json, then re-run this workflow."
             exit 1
           fi
-          echo "EAS projectId is present"
 
       - name: Trigger EAS Build (Android)
         run: |
@@ -75,8 +76,7 @@ jobs:
             --non-interactive \
             --no-wait
 
-      - name: Next steps
+      - name: Where to get the APK
         run: |
-          echo "Build triggered on EAS."
-          echo "Track progress and download the APK at: https://expo.dev"
-          echo "Project → Builds → latest Android build"
+          echo "Build queued on Expo cloud (no Android Studio)."
+          echo "Download the APK on your phone from: https://expo.dev → Builds"
