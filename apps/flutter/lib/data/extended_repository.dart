@@ -95,6 +95,68 @@ class ExtendedRepository {
     });
   }
 
+  Future<void> snoozeReminder(String id, {int minutes = 15}) async {
+    final now = AppDatabase.nowMs();
+    final rows = await (await _db.database).query('reminders', where: 'id = ?', whereArgs: [id], limit: 1);
+    if (rows.isEmpty) return;
+    final trigger = (rows.first['trigger_at'] as int? ?? now) + Duration(minutes: minutes).inMilliseconds;
+    final next = now + Duration(minutes: minutes).inMilliseconds;
+    final when = trigger > next ? trigger : next;
+    await (await _db.database).update(
+      'reminders',
+      {'trigger_at': when, 'status': 'PENDING', 'updated_at': now},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<void> completeReminder(String id) async {
+    final now = AppDatabase.nowMs();
+    await (await _db.database).update(
+      'reminders',
+      {'status': 'DISMISSED', 'updated_at': now},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<void> dismissReminder(String id) async {
+    await completeReminder(id);
+  }
+
+  Future<void> fireReminder(String id) async {
+    final now = AppDatabase.nowMs();
+    await (await _db.database).update(
+      'reminders',
+      {'status': 'FIRED', 'updated_at': now},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<void> addReminderAt({
+    required String title,
+    required DateTime triggerAt,
+    String? sourceType,
+    String? sourceId,
+    String? message,
+  }) async {
+    final ownerId = await _db.requireOwnerId();
+    final now = AppDatabase.nowMs();
+    await (await _db.database).insert('reminders', {
+      'id': AppDatabase.newId(),
+      'owner_id': ownerId,
+      'title': title,
+      'message': message,
+      'trigger_at': triggerAt.millisecondsSinceEpoch,
+      'source_type': sourceType,
+      'source_id': sourceId,
+      'status': 'PENDING',
+      'created_at': now,
+      'updated_at': now,
+    });
+  }
+
   Future<void> addDependency({required String taskId, required String dependsOnTaskId}) async {
     final now = AppDatabase.nowMs();
     await (await _db.database).insert('task_dependencies', {
