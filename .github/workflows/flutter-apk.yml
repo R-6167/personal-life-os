@@ -19,7 +19,7 @@ jobs:
         run: |
           mkdir -p assets
           cp ../../src/db/schema.sql assets/schema.sql
-          wc -l assets/schema.sql
+          test -s assets/schema.sql
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -36,32 +36,20 @@ jobs:
       - name: Flutter version
         run: flutter --version
 
-      - name: Write android/local.properties
+      - name: Generate complete Android platform
         run: |
-          # settings.gradle requires flutter.sdk (machine-local file, not in git)
-          test -n "$FLUTTER_ROOT" || { echo "FLUTTER_ROOT not set"; exit 1; }
-          {
-            echo "flutter.sdk=$FLUTTER_ROOT"
-            echo "flutter.buildMode=release"
-            echo "flutter.versionName=0.1.0"
-            echo "flutter.versionCode=1"
-          } > android/local.properties
-          cat android/local.properties
-
-      - name: Require android/ project
-        run: |
-          test -f android/app/build.gradle || {
-            echo "::error::apps/flutter/android incomplete"
-            exit 1
-          }
+          # Replace incomplete android/ with a full Flutter-generated tree.
+          # Application id becomes com.personallifeos.personal_life_os
+          rm -rf android ios linux macos web windows
+          flutter create . \
+            --project-name personal_life_os \
+            --org com.personallifeos \
+            --platforms=android
+          test -f android/gradlew
+          test -f android/app/src/main/AndroidManifest.xml
 
       - name: Get dependencies
         run: flutter pub get
-
-      - name: Ensure platform files (non-destructive)
-        run: |
-          # Fills any missing Gradle wrapper / plugin registrant without wiping custom files
-          flutter create . --project-name personal_life_os --org com.personallifeos --platforms=android
 
       - name: Build release APK
         run: flutter build apk --release --no-shrink
