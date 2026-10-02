@@ -37,8 +37,6 @@ jobs:
             "platform-tools" \
             "ndk;26.1.10909125"
           yes | sdkmanager --licenses >/dev/null || true
-          echo "ANDROID_HOME=${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
-          ls -la "${ANDROID_HOME:-$ANDROID_SDK_ROOT}" || true
 
       - name: Install npm dependencies
         run: npm install
@@ -46,35 +44,63 @@ jobs:
       - name: Generate native Android project (Expo prebuild)
         run: |
           npx expo prebuild --platform android --clean
-          echo "--- android tree ---"
-          ls -la android || (echo "android/ missing after prebuild" && exit 1)
-          ls -la android/app || true
+          test -d android || (echo "android/ missing after prebuild" && exit 1)
 
       - name: Point Gradle at the Android SDK
         run: |
           SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
           if [ -z "$SDK" ]; then
-            # setup-android default locations
             for d in "$HOME/Android/Sdk" /usr/local/lib/android/sdk "$HOME/.android/sdk"; do
               if [ -d "$d" ]; then SDK="$d"; break; fi
             done
           fi
           echo "Using SDK at: $SDK"
           echo "sdk.dir=$SDK" > android/local.properties
-          cat android/local.properties
           echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
 
-      - name: Build debug APK with Gradle
+      # Debug APKs expect Metro. For a phone-only offline install we must
+      # embed the JS bundle (release) so index.android.bundle is inside the APK.
+      - name: Embed JS bundle into Android assets
+        run: |
+          mkdir -p android/app/src/main/assets
+          npx react-native bundle \
+            --platform android \
+            --dev false \
+            --minify true \
+            --entry-file node_modules/expo/AppEntry.js \
+            --bundle-output android/app/src/main/assets/index.android.bundle \
+            --assets-dest android/app/src/main/res
+          ls -la android/app/src/main/assets/
+
+      - name: Build release APK with Gradle
         working-directory: ./mobile/android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --stacktrace --no-daemon
+          # Sign with the debug keystore so the APK installs without a custom keystore
+          ./gradlew assembleRelease \
+            -Pandroid.injected.signing.store.file=$ANDROID_HOME/../../.android/debug.keystore \
+            -Pandroid.injected.signing.store.password=android \
+            -Pandroid.injected.signing.key.alias=androiddebugkey \
+            -Pandroid.injected.signing.key.password=android \
+            --stacktrace --no-daemon \
+            || ./gradlew assembleRelease --stacktrace --no-daemon
+
+      - name: Locate APK
+        id: apk
+        run: |
+          APK=$(find android/app/build/outputs/apk -name "*.apk" | head -n 1)
+          echo "Found: $APK"
+          if [ -z "$APK" ]; then
+            echo "No APK produced" && exit 1
+          fi
+          echo "path=$APK" >> "$GITHUB_OUTPUT"
+          ls -la "$APK"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: personal-life-os-debug-apk
-          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          name: personal-life-os-apk
+          path: mobile/android/app/build/outputs/apk/**/*.apk
           if-no-files-found: error
           retention-days: 14
