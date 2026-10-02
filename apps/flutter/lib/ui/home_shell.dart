@@ -13,6 +13,8 @@ import '../data/routine_repository.dart';
 import '../data/task_repository.dart';
 import '../domain/enums.dart';
 import '../domain/models.dart';
+import '../services/day_planner.dart';
+import '../services/notification_service.dart';
 import 'assistant_screen.dart';
 import 'forms/create_forms.dart';
 import 'hubs/finance_hub.dart';
@@ -59,6 +61,7 @@ class _HomeShellState extends State<HomeShell> {
   List<Routine> _routineList = [];
   List<Income> _incomeList = [];
   List<Map<String, Object?>> _eventsToday = [];
+  List<PlanItem> _plan = [];
   int _monthSpendMinor = 0;
 
   static const _titles = ['Today', 'Tasks', 'Life', 'Finance', 'More'];
@@ -72,6 +75,9 @@ class _HomeShellState extends State<HomeShell> {
   Future<void> _boot() async {
     try {
       await AppDatabase.instance.database;
+      try {
+        await NotificationService.instance.init();
+      } catch (_) {}
       await _reload();
       setState(() => _ready = true);
     } catch (e) {
@@ -95,6 +101,10 @@ class _HomeShellState extends State<HomeShell> {
     final r = await _routines.listActive();
     final inc = await _income.listRecent();
     final ev = await _ext.listEventsToday();
+    final plan = await DayPlanner().buildPlan(limit: 6);
+    try {
+      await NotificationService.instance.syncFromDatabase();
+    } catch (_) {}
     setState(() {
       _taskList = t;
       _overdue = o;
@@ -108,6 +118,7 @@ class _HomeShellState extends State<HomeShell> {
       _routineList = r;
       _incomeList = inc;
       _eventsToday = ev;
+      _plan = plan;
     });
   }
 
@@ -220,6 +231,10 @@ class _HomeShellState extends State<HomeShell> {
           billOcc: _billOcc,
           monthSpendMinor: _monthSpendMinor,
           onChanged: _reload,
+          onPayBill: (o) async {
+            await promptAndPayBill(context, o);
+            await _reload();
+          },
         );
       case 4:
         return MoreHub(onChanged: _reload);
@@ -248,6 +263,46 @@ class _HomeShellState extends State<HomeShell> {
             ],
           ),
         ),
+        if (_plan.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          const Text('Focus now', style: TextStyle(color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          ..._plan.map((p) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: GlassCard(
+                  child: InkWell(
+                    onTap: p.kind == PlanItemKind.overdueTask ||
+                            p.kind == PlanItemKind.dueTodayTask ||
+                            p.kind == PlanItemKind.openTask
+                        ? () async {
+                            final match = [..._overdue, ..._taskList].where((x) => x.id == p.id);
+                            if (match.isNotEmpty) await _openTask(match.first);
+                          }
+                        : null,
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 14,
+                          backgroundColor: AppTheme.amber.withValues(alpha: 0.2),
+                          child: Text('${_plan.indexOf(p) + 1}',
+                              style: const TextStyle(color: AppTheme.amber, fontSize: 12, fontWeight: FontWeight.w700)),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(p.title, style: const TextStyle(color: AppTheme.silver, fontWeight: FontWeight.w600)),
+                              Text(p.reason, style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              )),
+        ],
         if (_overdue.isNotEmpty) ...[
           _section('Overdue'),
           ..._overdue.map((t) => _taskTile(t)),
