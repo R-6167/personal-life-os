@@ -74,6 +74,8 @@ CREATE TABLE IF NOT EXISTS habits (
   status TEXT NOT NULL DEFAULT 'ACTIVE',
   target_minutes INTEGER,
   frequency TEXT NOT NULL DEFAULT 'DAILY',
+  interval INTEGER NOT NULL DEFAULT 1,
+  days_of_week TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   archived_at INTEGER,
@@ -159,6 +161,11 @@ CREATE TABLE IF NOT EXISTS activity_events (
   source TEXT NOT NULL DEFAULT 'APP',
   metadata TEXT,
   FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS app_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_tasks_owner ON tasks(owner_id);
