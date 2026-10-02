@@ -1,6 +1,7 @@
 import '../data/bill_repository.dart';
 import '../data/database.dart';
 import '../data/habit_repository.dart';
+import '../data/planning_repository.dart';
 import '../data/task_repository.dart';
 import '../domain/models.dart';
 
@@ -107,15 +108,20 @@ class DayPlanner {
 
   Future<String> planNarrative({int limit = 5}) async {
     final plan = await buildPlan(limit: limit);
+    final free = await PlanningRepository(_db).availableMinutes(day: DateTime.now());
+    final hours = free ~/ 60;
+    final mins = free % 60;
     if (plan.isEmpty) {
-      return 'Nothing urgent ranked. Capture a task or review Calendar.';
+      return 'Nothing urgent ranked. Free window ≈ ${hours}h ${mins}m today.\nOpen Plan under Life to book sessions.';
     }
-    final buf = StringBuffer()..writeln('Suggested order right now:');
+    final buf = StringBuffer()
+      ..writeln('Free time today ≈ ${hours}h ${mins}m (8–22).')
+      ..writeln('Suggested order:');
     for (var i = 0; i < plan.length; i++) {
       final p = plan[i];
       buf.writeln('${i + 1}. [${p.reason}] ${p.title}');
     }
-    buf.writeln('(Ranked offline from overdue → due → bills → habits → backlog)');
+    buf.writeln('(Overdue → due → bills → habits → backlog · book in Plan)');
     return buf.toString();
   }
 }
