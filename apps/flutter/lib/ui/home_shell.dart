@@ -19,6 +19,7 @@ import 'hubs/finance_hub.dart';
 import 'hubs/life_hub.dart';
 import 'hubs/more_hub.dart';
 import 'screens/project_detail_screen.dart';
+import 'screens/task_detail_screen.dart';
 import 'settings_screen.dart';
 import 'theme.dart';
 import 'widgets/glass.dart';
@@ -108,6 +109,13 @@ class _HomeShellState extends State<HomeShell> {
       _incomeList = inc;
       _eventsToday = ev;
     });
+  }
+
+  Future<void> _openTask(Task t) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => TaskDetailScreen(taskId: t.id)),
+    );
+    await _reload();
   }
 
   Future<void> _add() async {
@@ -234,7 +242,7 @@ class _HomeShellState extends State<HomeShell> {
               const Text('What needs attention', style: TextStyle(color: AppTheme.silver, fontSize: 20, fontWeight: FontWeight.w700)),
               const SizedBox(height: 4),
               Text(
-                'Derived from your data · ${Defaults.currency} $spend spent this month',
+                'Tap any task to open · ${Defaults.currency} $spend spent this month',
                 style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11),
               ),
             ],
@@ -242,13 +250,13 @@ class _HomeShellState extends State<HomeShell> {
         ),
         if (_overdue.isNotEmpty) ...[
           _section('Overdue'),
-          ..._overdue.map((t) => _taskTile(t, highlight: true)),
+          ..._overdue.map((t) => _taskTile(t)),
         ],
         _section('Tasks'),
         if (_taskList.isEmpty)
           _hint('Nothing open — use Add when something appears.')
         else
-          ..._taskList.take(6).map(_taskTile),
+          ..._taskList.take(8).map(_taskTile),
         _section('Habits'),
         if (_habitList.isEmpty)
           _hint('No habits yet.')
@@ -351,7 +359,7 @@ class _HomeShellState extends State<HomeShell> {
           child: Row(
             children: [
               Text(
-                '${_taskList.length} open',
+                '${_taskList.length} open · tap to manage',
                 style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.5)),
               ),
               const Spacer(),
@@ -387,14 +395,15 @@ class _HomeShellState extends State<HomeShell> {
 
   Widget _hint(String m) => Text(m, style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.35)));
 
-  Widget _taskTile(Task t, {bool highlight = false}) => Padding(
+  Widget _taskTile(Task t) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: GlassCard(
+          onTap: () => _openTask(t),
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
           child: ListTile(
             title: Text(t.title, style: const TextStyle(color: AppTheme.silver)),
             subtitle: Text(
-              t.isOverdue ? 'OVERDUE' : t.status,
+              t.isOverdue ? 'OVERDUE' : (t.isDueToday ? 'Due today' : t.status),
               style: TextStyle(
                 color: t.isOverdue ? Colors.redAccent : AppTheme.silver.withValues(alpha: 0.4),
                 fontSize: 11,
