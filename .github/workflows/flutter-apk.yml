@@ -6,6 +6,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     defaults:
       run:
         working-directory: apps/flutter
@@ -20,23 +21,27 @@ jobs:
           cp ../../src/db/schema.sql assets/schema.sql
           wc -l assets/schema.sql
 
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          cache: true
 
       - name: Flutter version
         run: flutter --version
 
-      - name: Require platform folders
+      - name: Require android/ project
         run: |
-          if [ ! -d android ]; then
-            echo "::error::apps/flutter/android is missing."
-            echo "On a machine with Flutter SDK run:"
-            echo "  cd apps/flutter && flutter create . --project-name personal_life_os --org com.personallifeos"
-            echo "Commit android/ (and ios/ if desired), then re-run this workflow."
+          test -f android/app/build.gradle || test -f android/app/build.gradle.kts || {
+            echo "::error::apps/flutter/android missing or incomplete"
             exit 1
-          fi
+          }
 
       - name: Get dependencies
         run: flutter pub get
