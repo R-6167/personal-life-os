@@ -18,10 +18,13 @@ import { FinancesScreen } from './src/screens/FinancesScreen';
 import { GoalsScreen } from './src/screens/GoalsScreen';
 import { ProjectsScreen } from './src/screens/ProjectsScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
+import { CaptureScreen } from './src/screens/CaptureScreen';
+import { NotesScreen } from './src/screens/NotesScreen';
+import { CalendarScreen } from './src/screens/CalendarScreen';
 
-type Screen = 'Today' | 'Tasks' | 'Habits' | 'Goals' | 'Projects' | 'Finances' | 'Settings';
+type Screen = 'Today' | 'Capture' | 'Tasks' | 'Habits' | 'Notes' | 'Calendar' | 'Goals' | 'Projects' | 'Finances' | 'Settings';
 
-const tabs: Screen[] = ['Today', 'Tasks', 'Habits', 'Goals', 'Projects', 'Finances', 'Settings'];
+const tabs: Screen[] = ['Today', 'Capture', 'Tasks', 'Habits', 'Notes', 'Calendar', 'Goals', 'Projects', 'Finances', 'Settings'];
 
 const greetings = () => {
   const hour = new Date().getHours();
@@ -39,10 +42,16 @@ function AppContent() {
     switch (activeScreen) {
       case 'Today':
         return <TodayScreen />;
+      case 'Capture':
+        return <CaptureScreen />;
       case 'Tasks':
         return <TasksScreen />;
       case 'Habits':
         return <HabitsScreen />;
+      case 'Notes':
+        return <NotesScreen />;
+      case 'Calendar':
+        return <CalendarScreen />;
       case 'Goals':
         return <GoalsScreen />;
       case 'Projects':
