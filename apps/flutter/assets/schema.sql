@@ -1,7 +1,6 @@
 PRAGMA foreign_keys = ON;
 
--- Flutter MVP schema (contract-compatible). No semicolons inside comments.
--- Full canonical schema remains at src/db/schema.sql for TypeScript.
+-- Flutter client schema (contract-compatible subset).
 
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
@@ -123,6 +122,39 @@ CREATE TABLE IF NOT EXISTS notes (
   FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS financial_accounts (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL,
+  currency TEXT NOT NULL,
+  current_balance_minor INTEGER,
+  institution TEXT,
+  account_identifier TEXT,
+  is_tracked INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS expenses (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  account_id TEXT,
+  category_id TEXT,
+  merchant TEXT,
+  description TEXT NOT NULL,
+  amount_minor INTEGER NOT NULL,
+  currency TEXT NOT NULL,
+  occurred_at INTEGER NOT NULL,
+  payment_method TEXT,
+  project_id TEXT,
+  goal_id TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS activity_events (
   id TEXT PRIMARY KEY,
   owner_id TEXT NOT NULL,
@@ -141,5 +173,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_owner ON tasks(owner_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_habits_owner ON habits(owner_id);
 CREATE INDEX IF NOT EXISTS idx_goals_owner ON goals(owner_id);
+CREATE INDEX IF NOT EXISTS idx_projects_owner ON projects(owner_id);
 CREATE INDEX IF NOT EXISTS idx_notes_owner ON notes(owner_id);
+CREATE INDEX IF NOT EXISTS idx_expenses_owner ON expenses(owner_id);
 CREATE INDEX IF NOT EXISTS idx_activity_events_owner ON activity_events(owner_id);
