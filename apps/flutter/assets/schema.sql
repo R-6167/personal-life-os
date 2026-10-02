@@ -1,6 +1,7 @@
--- Placeholder: replace with full file from src/db/schema.sql
--- Run: cp ../../src/db/schema.sql apps/flutter/assets/schema.sql
 PRAGMA foreign_keys = ON;
+
+-- Synced from src/db/schema.sql (canonical). CI also copies on each APK build.
+-- Core tables for Flutter MVP; full file lives at src/db/schema.sql.
 
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
@@ -30,6 +31,26 @@ CREATE TABLE IF NOT EXISTS goals (
   updated_at INTEGER NOT NULL,
   archived_at INTEGER,
   FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  goal_id TEXT,
+  title TEXT NOT NULL,
+  description TEXT,
+  status TEXT NOT NULL,
+  priority INTEGER NOT NULL DEFAULT 0,
+  start_date INTEGER,
+  target_date INTEGER,
+  completed_at INTEGER,
+  progress_mode TEXT NOT NULL DEFAULT 'CALCULATED',
+  manual_progress REAL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  archived_at INTEGER,
+  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY(goal_id) REFERENCES goals(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS tasks (
@@ -75,6 +96,22 @@ CREATE TABLE IF NOT EXISTS habits (
   FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS habit_occurrences (
+  id TEXT PRIMARY KEY,
+  habit_id TEXT NOT NULL,
+  scheduled_date INTEGER NOT NULL,
+  scheduled_time INTEGER,
+  status TEXT NOT NULL,
+  completed_at INTEGER,
+  skipped_at INTEGER,
+  actual_duration_minutes INTEGER,
+  reason TEXT,
+  notes TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY(habit_id) REFERENCES habits(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS notes (
   id TEXT PRIMARY KEY,
   owner_id TEXT NOT NULL,
@@ -99,3 +136,10 @@ CREATE TABLE IF NOT EXISTS activity_events (
   metadata TEXT,
   FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
 );
+
+CREATE INDEX IF NOT EXISTS idx_tasks_owner ON tasks(owner_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+CREATE INDEX IF NOT EXISTS idx_habits_owner ON habits(owner_id);
+CREATE INDEX IF NOT EXISTS idx_goals_owner ON goals(owner_id);
+CREATE INDEX IF NOT EXISTS idx_notes_owner ON notes(owner_id);
+CREATE INDEX IF NOT EXISTS idx_activity_events_owner ON activity_events(owner_id);
