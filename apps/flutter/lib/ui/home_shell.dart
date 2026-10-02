@@ -18,7 +18,11 @@ import '../data/routine_repository.dart';
 import '../data/task_repository.dart';
 import '../domain/enums.dart';
 import '../domain/models.dart';
+import 'assistant_screen.dart';
 import 'more_panel.dart';
+import 'settings_screen.dart';
+import 'theme.dart';
+import 'widgets/glass.dart';
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
@@ -151,45 +155,82 @@ class _HomeShellState extends State<HomeShell> {
     return 'Good evening';
   }
 
+  void _openAssistant() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const AssistantScreen()),
+    );
+  }
+
+  void _openSettings() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const SettingsScreen()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF0f172a),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF111827),
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(_titles[_tab], style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
-            const Text('Offline · schema v5 · contract', style: TextStyle(fontSize: 11, color: Colors.white54)),
+    return GlassBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(_titles[_tab], style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+              Text(
+                _tab == 0 ? _greeting : 'Offline · glass · local AI',
+                style: const TextStyle(fontSize: 11, color: Colors.white54),
+              ),
+            ],
+          ),
+          actions: [
+            IconButton(
+              tooltip: 'Intelligence',
+              onPressed: _openAssistant,
+              icon: const Icon(Icons.auto_awesome),
+            ),
+            IconButton(
+              tooltip: 'Settings',
+              onPressed: _openSettings,
+              icon: const Icon(Icons.settings_outlined),
+            ),
+            if (_tab == 4)
+              IconButton(onPressed: _shareBackup, icon: const Icon(Icons.ios_share)),
           ],
         ),
-        actions: [
-          if (_tab == 4) IconButton(onPressed: _shareBackup, icon: const Icon(Icons.ios_share)),
-        ],
-      ),
-      body: !_ready
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-              ? Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(_error!, style: const TextStyle(color: Colors.redAccent))))
-              : Column(
-                  children: [
-                    if (_tab >= 1 && _tab <= 3) _composer(),
-                    Expanded(child: _body()),
-                  ],
-                ),
-      bottomNavigationBar: NavigationBar(
-        backgroundColor: const Color(0xFF111827),
-        indicatorColor: const Color(0xFF1d4ed8),
-        selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.today_outlined), label: 'Today'),
-          NavigationDestination(icon: Icon(Icons.check_box_outlined), label: 'Tasks'),
-          NavigationDestination(icon: Icon(Icons.repeat), label: 'Habits'),
-          NavigationDestination(icon: Icon(Icons.flag_outlined), label: 'Goals'),
-          NavigationDestination(icon: Icon(Icons.more_horiz), label: 'More'),
-        ],
+        floatingActionButton: FloatingActionButton.extended(
+          onPressed: _openAssistant,
+          icon: const Icon(Icons.psychology_alt_outlined),
+          label: const Text('Ask OS'),
+        ),
+        body: !_ready
+            ? const Center(child: CircularProgressIndicator())
+            : _error != null
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: GlassCard(
+                        child: Text(_error!, style: const TextStyle(color: Colors.redAccent)),
+                      ),
+                    ),
+                  )
+                : Column(
+                    children: [
+                      if (_tab >= 1 && _tab <= 3) _composer(),
+                      Expanded(child: _body()),
+                    ],
+                  ),
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _tab,
+          onDestinationSelected: (i) => setState(() => _tab = i),
+          destinations: const [
+            NavigationDestination(icon: Icon(Icons.today_outlined), label: 'Today'),
+            NavigationDestination(icon: Icon(Icons.check_box_outlined), label: 'Tasks'),
+            NavigationDestination(icon: Icon(Icons.repeat), label: 'Habits'),
+            NavigationDestination(icon: Icon(Icons.flag_outlined), label: 'Goals'),
+            NavigationDestination(icon: Icon(Icons.more_horiz), label: 'More'),
+          ],
+        ),
       ),
     );
   }
@@ -198,25 +239,30 @@ class _HomeShellState extends State<HomeShell> {
     final hints = {1: 'New task (due today)…', 2: 'New habit…', 3: 'New goal…'};
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-      child: Row(children: [
-        Expanded(
-          child: TextField(
-            controller: _input,
-            style: const TextStyle(color: Colors.white),
-            decoration: InputDecoration(
-              hintText: hints[_tab],
-              hintStyle: const TextStyle(color: Colors.white38),
-              filled: true,
-              fillColor: const Color(0xFF1f2937),
-              border: const OutlineInputBorder(),
-              isDense: true,
+      child: GlassCard(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Row(children: [
+          Expanded(
+            child: TextField(
+              controller: _input,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                hintText: hints[_tab],
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                filled: false,
+              ),
+              onSubmitted: (_) => _add(),
             ),
-            onSubmitted: (_) => _add(),
           ),
-        ),
-        const SizedBox(width: 8),
-        IconButton.filled(onPressed: _add, icon: const Icon(Icons.add)),
-      ]),
+          IconButton.filled(
+            onPressed: _add,
+            icon: const Icon(Icons.add),
+            style: IconButton.styleFrom(backgroundColor: AppTheme.seed),
+          ),
+        ]),
+      ),
     );
   }
 
@@ -249,12 +295,23 @@ class _HomeShellState extends State<HomeShell> {
   Widget _today() {
     final spend = (_monthSpendMinor / 100).toStringAsFixed(2);
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
       children: [
-        Text(_greeting, style: const TextStyle(color: Colors.white54, fontSize: 13)),
-        const SizedBox(height: 6),
-        const Text('Today', style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w700)),
-        const Text('Derived view — not a table', style: TextStyle(color: Colors.white38, fontSize: 11)),
+        GlassCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(_greeting, style: TextStyle(color: Colors.white.withValues(alpha: 0.55), fontSize: 13)),
+              const SizedBox(height: 4),
+              const Text('Your day', style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 4),
+              Text(
+                'Derived from local SQLite · ${Defaults.currency} $spend this month',
+                style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 11),
+              ),
+            ],
+          ),
+        ),
         const SizedBox(height: 14),
         if (_overdue.isNotEmpty) ...[
           _section('Overdue', Colors.redAccent),
@@ -262,135 +319,175 @@ class _HomeShellState extends State<HomeShell> {
         ],
         _section('Tasks', Colors.lightBlueAccent),
         if (_taskList.isEmpty)
-          const Text('No open tasks', style: TextStyle(color: Colors.white38))
+          _hint('No open tasks')
         else
           ..._taskList.take(8).map(_taskTile),
         _section('Habits', Colors.greenAccent),
-        ..._habitList.map((h) => Card(
-              color: const Color(0xFF1f2937),
-              child: ListTile(
-                title: Text(h.title, style: const TextStyle(color: Colors.white)),
-                trailing: IconButton(
-                  icon: const Icon(Icons.done_all, color: Colors.greenAccent),
-                  onPressed: () async {
-                    await _habits.markDoneToday(h.id);
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Logged ${h.title}')));
-                    }
-                  },
+        if (_habitList.isEmpty)
+          _hint('No habits yet')
+        else
+          ..._habitList.map((h) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: GlassCard(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  child: ListTile(
+                    title: Text(h.title, style: const TextStyle(color: Colors.white)),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.done_all, color: Colors.greenAccent),
+                      onPressed: () async {
+                        await _habits.markDoneToday(h.id);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Logged ${h.title}')));
+                        }
+                      },
+                    ),
+                  ),
                 ),
-              ),
-            )),
+              )),
         _section('Bills', Colors.orangeAccent),
-        ..._billOcc.map((o) => Card(
-              color: const Color(0xFF1f2937),
-              child: ListTile(
-                title: Text(o.billName ?? 'Bill', style: const TextStyle(color: Colors.white)),
-                trailing: TextButton(
-                  onPressed: () async {
-                    await _bills.payOccurrence(o);
-                    await _reload();
-                  },
-                  child: const Text('Pay'),
+        if (_billOcc.isEmpty)
+          _hint('No open bills')
+        else
+          ..._billOcc.map((o) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: GlassCard(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  child: ListTile(
+                    title: Text(o.billName ?? 'Bill', style: const TextStyle(color: Colors.white)),
+                    trailing: FilledButton(
+                      onPressed: () async {
+                        await _bills.payOccurrence(o);
+                        await _reload();
+                      },
+                      child: const Text('Pay'),
+                    ),
+                  ),
                 ),
-              ),
-            )),
+              )),
         _section('Calendar', Colors.cyanAccent),
         if (_eventsToday.isEmpty)
-          const Text('No events today', style: TextStyle(color: Colors.white38))
+          _hint('No events today')
         else
-          ..._eventsToday.map((e) => ListTile(
-                title: Text('${e['title']}', style: const TextStyle(color: Colors.white)),
+          ..._eventsToday.map((e) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: GlassCard(
+                  child: Text('${e['title']}', style: const TextStyle(color: Colors.white)),
+                ),
               )),
         _section('Routines', Colors.purpleAccent),
-        ..._routineList.map((r) => Card(
-              color: const Color(0xFF1f2937),
-              child: ListTile(
-                title: Text(r.name, style: const TextStyle(color: Colors.white)),
-                trailing: IconButton(
-                  icon: const Icon(Icons.play_circle_outline, color: Colors.purpleAccent),
-                  onPressed: () async {
-                    await _routines.completeToday(r.id);
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Completed ${r.name}')));
-                    }
-                  },
+        ..._routineList.map((r) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: GlassCard(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                child: ListTile(
+                  title: Text(r.name, style: const TextStyle(color: Colors.white)),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.play_circle_outline, color: Colors.purpleAccent),
+                    onPressed: () async {
+                      await _routines.completeToday(r.id);
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Completed ${r.name}')));
+                      }
+                    },
+                  ),
                 ),
               ),
             )),
-        const SizedBox(height: 12),
-        Text('Month spend: ${Defaults.currency} $spend', style: const TextStyle(color: Colors.white54, fontSize: 12)),
       ],
     );
   }
 
   Widget _section(String title, Color c) => Padding(
-        padding: const EdgeInsets.only(top: 12, bottom: 6),
-        child: Text(title, style: TextStyle(color: c, fontWeight: FontWeight.w600)),
+        padding: const EdgeInsets.only(top: 14, bottom: 8),
+        child: Text(title, style: TextStyle(color: c, fontWeight: FontWeight.w600, letterSpacing: 0.3)),
       );
 
-  Widget _taskTile(Task t, {bool highlight = false}) => Card(
-        color: highlight ? const Color(0xFF3f1d1d) : const Color(0xFF1f2937),
-        child: ListTile(
-          title: Text(t.title, style: const TextStyle(color: Colors.white)),
-          subtitle: Text(t.isOverdue ? 'OVERDUE' : t.status,
-              style: TextStyle(color: t.isOverdue ? Colors.redAccent : Colors.white38, fontSize: 11)),
-          trailing: IconButton(
-            icon: const Icon(Icons.check_circle_outline, color: Colors.lightBlueAccent),
-            onPressed: () async {
-              await _tasks.complete(t.id);
-              await _reload();
-            },
+  Widget _hint(String m) => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Text(m, style: TextStyle(color: Colors.white.withValues(alpha: 0.35))),
+      );
+
+  Widget _taskTile(Task t, {bool highlight = false}) => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: GlassCard(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          child: ListTile(
+            title: Text(t.title, style: const TextStyle(color: Colors.white)),
+            subtitle: Text(
+              t.isOverdue ? 'OVERDUE' : t.status,
+              style: TextStyle(
+                color: t.isOverdue ? Colors.redAccent : Colors.white38,
+                fontSize: 11,
+              ),
+            ),
+            trailing: IconButton(
+              icon: const Icon(Icons.check_circle_outline, color: Colors.lightBlueAccent),
+              onPressed: () async {
+                await _tasks.complete(t.id);
+                await _reload();
+              },
+            ),
           ),
         ),
       );
 
   Widget _listTasks() {
-    if (_taskList.isEmpty) return _empty('No open tasks');
-    return ListView.builder(itemCount: _taskList.length, itemBuilder: (_, i) => _taskTile(_taskList[i]));
+    if (_taskList.isEmpty) return Center(child: _hint('No open tasks'));
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+      children: _taskList.map(_taskTile).toList(),
+    );
   }
 
   Widget _listHabits() {
-    if (_habitList.isEmpty) return _empty('No habits');
-    return ListView.builder(
-      itemCount: _habitList.length,
-      itemBuilder: (_, i) {
-        final h = _habitList[i];
-        return ListTile(
-          title: Text(h.title, style: const TextStyle(color: Colors.white)),
-          trailing: IconButton(
-            icon: const Icon(Icons.done_all, color: Colors.greenAccent),
-            onPressed: () async {
-              await _habits.markDoneToday(h.id);
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Logged ${h.title}')));
-              }
-            },
-          ),
-        );
-      },
+    if (_habitList.isEmpty) return Center(child: _hint('No habits'));
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+      children: _habitList
+          .map((h) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: GlassCard(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  child: ListTile(
+                    title: Text(h.title, style: const TextStyle(color: Colors.white)),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.done_all, color: Colors.greenAccent),
+                      onPressed: () async {
+                        await _habits.markDoneToday(h.id);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Logged ${h.title}')));
+                        }
+                      },
+                    ),
+                  ),
+                ),
+              ))
+          .toList(),
     );
   }
 
   Widget _listGoals() {
-    if (_goalList.isEmpty) return _empty('No goals');
-    return ListView.builder(
-      itemCount: _goalList.length,
-      itemBuilder: (_, i) {
-        final g = _goalList[i];
-        return ListTile(
-          title: Text(g.title, style: const TextStyle(color: Colors.white)),
-          trailing: IconButton(
-            icon: const Icon(Icons.flag, color: Colors.amberAccent),
-            onPressed: () async {
-              await _goals.complete(g.id);
-              await _reload();
-            },
-          ),
-        );
-      },
+    if (_goalList.isEmpty) return Center(child: _hint('No goals'));
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+      children: _goalList
+          .map((g) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: GlassCard(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  child: ListTile(
+                    title: Text(g.title, style: const TextStyle(color: Colors.white)),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.flag, color: Colors.amberAccent),
+                      onPressed: () async {
+                        await _goals.complete(g.id);
+                        await _reload();
+                      },
+                    ),
+                  ),
+                ),
+              ))
+          .toList(),
     );
   }
-
-  Widget _empty(String m) => Center(child: Text(m, style: const TextStyle(color: Colors.white54)));
 }
