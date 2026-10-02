@@ -49,6 +49,20 @@ class TaskRepository {
     return rows.map(Task.fromMap).toList();
   }
 
+  Future<Task?> getById(String id) async {
+    final db = await _db.database;
+    final rows = await db.query('tasks', where: 'id = ?', whereArgs: [id], limit: 1);
+    if (rows.isEmpty) return null;
+    return Task.fromMap(rows.first);
+  }
+
+  Future<String?> descriptionOf(String id) async {
+    final db = await _db.database;
+    final rows = await db.query('tasks', columns: ['description'], where: 'id = ?', whereArgs: [id], limit: 1);
+    if (rows.isEmpty) return null;
+    return rows.first['description'] as String?;
+  }
+
   Future<Task> create({
     required String title,
     String status = EntityStatus.inbox,
@@ -92,6 +106,52 @@ class TaskRepository {
     return task;
   }
 
+  Future<void> update({
+    required String id,
+    String? title,
+    String? description,
+    int? priority,
+    int? dueAt,
+    bool clearDue = false,
+    String? projectId,
+    String? goalId,
+    String? status,
+  }) async {
+    final ownerId = await _db.requireOwnerId();
+    final now = AppDatabase.nowMs();
+    final patch = <String, Object?>{'updated_at': now};
+    if (title != null) patch['title'] = title;
+    if (description != null) patch['description'] = description.isEmpty ? null : description;
+    if (priority != null) patch['priority'] = priority;
+    if (clearDue) {
+      patch['due_at'] = null;
+    } else if (dueAt != null) {
+      patch['due_at'] = dueAt;
+    }
+    if (projectId != null) patch['project_id'] = projectId.isEmpty ? null : projectId;
+    if (goalId != null) patch['goal_id'] = goalId.isEmpty ? null : goalId;
+    if (status != null) patch['status'] = status;
+
+    await _db.txn((txn) async {
+      await txn.update('tasks', patch, where: 'id = ?', whereArgs: [id]);
+      await txn.insert('activity_events', {
+        'id': AppDatabase.newId(),
+        'owner_id': ownerId,
+        'event_type': 'TASK_UPDATED',
+        'entity_type': 'TASK',
+        'entity_id': id,
+        'occurred_at': now,
+        'recorded_at': now,
+        'source': EventSource.user,
+      });
+    });
+  }
+
+  Future<void> reschedule(String id, DateTime day) async {
+    final due = DateTime(day.year, day.month, day.day, 23, 59).millisecondsSinceEpoch;
+    await update(id: id, dueAt: due, status: EntityStatus.planned);
+  }
+
   Future<void> complete(String taskId) async {
     await _db.txn((txn) async {
       final now = AppDatabase.nowMs();
@@ -117,5 +177,81 @@ class TaskRepository {
         'source': EventSource.user,
       });
     });
+  }
+
+  Future<void> reopen(String taskId) async {
+    await _db.txn((txn) async {
+      final now = AppDatabase.nowMs();
+      final ownerId = await _db.requireOwnerId();
+      await txn.update(
+        'tasks',
+        {
+          'status': EntityStatus.inbox,
+          'completed_at': null,
+          'updated_at': now,
+        },
+        where: 'id = ?',
+        whereArgs: [taskId],
+      );
+      await txn.insert('activity_events', {
+        'id': AppDatabase.newId(),
+        'owner_id': ownerId,
+        'event_type': 'TASK_REOPENED',
+        'entity_type': 'TASK',
+        'entity_id': taskId,
+        'occurred_at': now,
+        'recorded_at': now,
+        'source': EventSource.user,
+      });
+    });
+  }
+
+  /// Soft-delete: cancel + archive so it leaves open lists without hard wipe.
+  Future<void> delete(String taskId) async {
+    await _db.txn((txn) async {
+      final now = AppDatabase.nowMs();
+      final ownerId = await _db.requireOwnerId();
+      await txn.update(
+        'tasks',
+        {
+          'status': EntityStatus.cancelled,
+          'archived_at': now,
+          'updated_at': now,
+        },
+        where: 'id = ?',
+        whereArgs: [taskId],
+      );
+      await txn.insert('activity_events', {
+        'id': AppDatabase.newId(),
+        'owner_id': ownerId,
+        'event_type': 'TASK_DELETED',
+        'entity_type': 'TASK',
+        'entity_id': taskId,
+        'occurred_at': now,
+        'recorded_at': now,
+        'source': EventSource.user,
+      });
+    });
+  }
+
+  Future<void> addDependency({required String taskId, required String dependsOnTaskId}) async {
+    final now = AppDatabase.nowMs();
+    await (await _db.database).insert('task_dependencies', {
+      'id': AppDatabase.newId(),
+      'task_id': taskId,
+      'depends_on_task_id': dependsOnTaskId,
+      'type': 'BLOCKED_BY',
+      'created_at': now,
+    });
+  }
+
+  Future<List<Map<String, Object?>>> dependencies(String taskId) async {
+    final db = await _db.database;
+    return db.rawQuery('''
+      SELECT d.*, t.title AS depends_on_title
+      FROM task_dependencies d
+      JOIN tasks t ON t.id = d.depends_on_task_id
+      WHERE d.task_id = ?
+    ''', [taskId]);
   }
 }
