@@ -156,6 +156,40 @@ export interface MilestoneItem {
   sortOrder: number;
 }
 
+export interface RoutineStepItem {
+  id: string;
+  title: string;
+  sortOrder: number;
+  estimatedMinutes: number | null;
+}
+
+export interface RoutineItem {
+  id: string;
+  title: string;
+  description: string | null;
+  status: string;
+  estimatedMinutes: number | null;
+  frequency: string;
+  steps: RoutineStepItem[];
+}
+
+export interface RoutineOccurrenceItem {
+  id: string;
+  routineId: string;
+  title: string;
+  scheduledDate: number;
+  status: string;
+}
+
+export interface IncomeItem {
+  id: string;
+  description: string;
+  amountMinor: number;
+  currency: string;
+  source: string | null;
+  occurredAt: number;
+}
+
 export interface AppData {
   ready: boolean;
   error: string | null;
@@ -172,6 +206,9 @@ export interface AppData {
   reminders: ReminderItem[];
   inbox: InboxItem[];
   milestones: MilestoneItem[];
+  routines: RoutineItem[];
+  routineOccurrences: RoutineOccurrenceItem[];
+  income: IncomeItem[];
   refresh: () => Promise<void>;
   completeTask: (id: string) => Promise<void>;
   startTask: (id: string) => Promise<void>;
@@ -236,4 +273,18 @@ export interface AppData {
     targetDate?: number | null;
   }) => Promise<void>;
   completeMilestone: (id: string) => Promise<void>;
+  createRoutine: (input: {
+    title: string;
+    description?: string;
+    estimatedMinutes?: number;
+    frequency?: string;
+    steps?: string[];
+  }) => Promise<void>;
+  completeRoutine: (id: string) => Promise<void>;
+  createIncome: (input: {
+    description: string;
+    amountMinor: number;
+    source?: string;
+    accountId?: string | null;
+  }) => Promise<void>;
 }
