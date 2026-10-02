@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { BaseRepository } from './base-repository.js';
+import { BaseRepository, mapRows } from './base-repository.js';
 import { nowMs, newId, type TaskRecord } from './repository-types.js';
 
 export class TaskRepository extends BaseRepository<TaskRecord> {
@@ -108,7 +108,8 @@ export class TaskRepository extends BaseRepository<TaskRecord> {
   }
 
   findByStatus(ownerId: string, status: string): TaskRecord[] {
-    return this.db.prepare(`SELECT * FROM tasks WHERE owner_id = ? AND status = ? ORDER BY created_at DESC`).all(ownerId, status) as TaskRecord[];
+    const rows = this.db.prepare(`SELECT * FROM tasks WHERE owner_id = ? AND status = ? ORDER BY created_at DESC`).all(ownerId, status) as Record<string, unknown>[];
+    return mapRows<TaskRecord>(rows);
   }
 
   markCompleted(id: string): TaskRecord | null {
