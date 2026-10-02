@@ -12,7 +12,7 @@ class AppDatabase {
 
   Database? _db;
   static const _uuid = Uuid();
-  static const schemaVersion = 4;
+  static const schemaVersion = 5;
 
   Future<Database> get database async {
     if (_db != null) return _db!;
@@ -23,13 +23,10 @@ class AppDatabase {
   Future<Database> _open() async {
     final dir = await getApplicationDocumentsDirectory();
     final path = p.join(dir.path, 'personal_life_os.db');
-
     return openDatabase(
       path,
       version: schemaVersion,
-      onConfigure: (db) async {
-        await db.execute('PRAGMA foreign_keys = ON');
-      },
+      onConfigure: (db) async => db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, version) async {
         await _applySchema(db);
         await _seedDefaultUser(db);
@@ -48,8 +45,7 @@ class AppDatabase {
     );
     for (final row in rows) {
       final name = row['name'] as String?;
-      if (name == null) continue;
-      await db.execute('DROP TABLE IF EXISTS $name');
+      if (name != null) await db.execute('DROP TABLE IF EXISTS $name');
     }
   }
 
@@ -96,7 +92,6 @@ class AppDatabase {
     return rows.first['id'] as String;
   }
 
-  /// Run several writes in one SQLite transaction.
   Future<T> txn<T>(Future<T> Function(Transaction txn) action) async {
     final db = await database;
     return db.transaction(action);
@@ -104,7 +99,6 @@ class AppDatabase {
 
   static String newId() => _uuid.v4();
   static int nowMs() => DateTime.now().millisecondsSinceEpoch;
-
   static int startOfTodayMs() {
     final n = DateTime.now();
     return DateTime(n.year, n.month, n.day).millisecondsSinceEpoch;
