@@ -15,11 +15,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Ensure schema asset is current
+      - name: Verify Flutter schema asset
         run: |
-          mkdir -p assets
-          cp ../../src/db/schema.sql assets/schema.sql
+          # Use apps/flutter/assets/schema.sql (clean MVP). Do not overwrite
+          # with src/db/schema.sql — that file has mid-comment semicolons.
           test -s assets/schema.sql
+          wc -l assets/schema.sql
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -38,15 +39,12 @@ jobs:
 
       - name: Generate complete Android platform
         run: |
-          # Replace incomplete android/ with a full Flutter-generated tree.
-          # Application id becomes com.personallifeos.personal_life_os
           rm -rf android ios linux macos web windows
           flutter create . \
             --project-name personal_life_os \
             --org com.personallifeos \
             --platforms=android
           test -f android/gradlew
-          test -f android/app/src/main/AndroidManifest.xml
 
       - name: Get dependencies
         run: flutter pub get

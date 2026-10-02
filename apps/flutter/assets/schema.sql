@@ -1,7 +1,7 @@
 PRAGMA foreign_keys = ON;
 
--- Synced from src/db/schema.sql (canonical). CI also copies on each APK build.
--- Core tables for Flutter MVP; full file lives at src/db/schema.sql.
+-- Flutter MVP schema (contract-compatible). No semicolons inside comments.
+-- Full canonical schema remains at src/db/schema.sql for TypeScript.
 
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
