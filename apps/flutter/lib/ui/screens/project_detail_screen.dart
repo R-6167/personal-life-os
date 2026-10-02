@@ -7,6 +7,7 @@ import '../../data/task_repository.dart';
 import '../../domain/models.dart';
 import '../theme.dart';
 import '../widgets/glass.dart';
+import 'task_detail_screen.dart';
 
 class ProjectDetailScreen extends StatefulWidget {
   const ProjectDetailScreen({super.key, required this.projectId});
@@ -195,6 +196,12 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
               ..._tasks.map((t) => Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: GlassCard(
+                      onTap: () async {
+                        await Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => TaskDetailScreen(taskId: t.id)),
+                        );
+                        await _load();
+                      },
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                       child: ListTile(
                         title: Text(t.title, style: const TextStyle(color: AppTheme.silver)),
