@@ -1,5 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 import { DEFAULT_OWNER_ID, SCHEMA_SQL } from './schema';
+import { ensureHabitOccurrences } from '../habits/recurrence';
 
 export type Db = SQLite.SQLiteDatabase;
 
@@ -223,12 +224,31 @@ async function seedIfEmpty(db: Db): Promise<void> {
   );
 }
 
+async function migrate(db: Db): Promise<void> {
+  const cols = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(habits)`);
+  const names = new Set(cols.map((c) => c.name));
+  if (!names.has('interval')) {
+    await db.execAsync(`ALTER TABLE habits ADD COLUMN interval INTEGER NOT NULL DEFAULT 1`);
+  }
+  if (!names.has('days_of_week')) {
+    await db.execAsync(`ALTER TABLE habits ADD COLUMN days_of_week TEXT`);
+  }
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS app_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+  `);
+}
+
 export async function getDatabase(): Promise<Db> {
   if (!dbPromise) {
     dbPromise = (async () => {
       const db = await SQLite.openDatabaseAsync('personal_life_os.db');
       await db.execAsync(SCHEMA_SQL);
+      await migrate(db);
       await seedIfEmpty(db);
+      await ensureHabitOccurrences(db, { daysAhead: 0 });
       return db;
     })();
   }
