@@ -11,6 +11,7 @@ import '../forms/create_forms.dart';
 import '../screens/calendar_screen.dart';
 import '../screens/goal_detail_screen.dart';
 import '../screens/note_detail_screen.dart';
+import '../screens/planning_screen.dart';
 import '../screens/project_detail_screen.dart';
 import '../theme.dart';
 import '../widgets/glass.dart';
@@ -49,10 +50,12 @@ class _LifeHubState extends State<LifeHub> {
     final ext = ExtendedRepository(AppDatabase.instance);
     final p = await ext.listPractical();
     final d = await ext.listDocuments();
-    if (mounted) setState(() {
-      _practical = p;
-      _docs = d;
-    });
+    if (mounted) {
+      setState(() {
+        _practical = p;
+        _docs = d;
+      });
+    }
   }
 
   List<String> get _attention {
@@ -70,8 +73,6 @@ class _LifeHubState extends State<LifeHub> {
       final due = p['due_at'] as int?;
       if (due != null && due <= week) {
         items.add("${p['title']} needs attention");
-      } else if (due == null) {
-        // still list active practical without due as soft attention if few
       }
     }
     if (items.isEmpty && _practical.isNotEmpty) {
@@ -95,6 +96,28 @@ class _LifeHubState extends State<LifeHub> {
         const SizedBox(height: 12),
         GlassCard(
           onTap: () {
+            Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PlanningScreen()));
+          },
+          child: const Row(
+            children: [
+              Icon(Icons.view_timeline_outlined, color: AppTheme.amber),
+              SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Day plan & time', style: TextStyle(color: AppTheme.silver, fontWeight: FontWeight.w600)),
+                    Text('Sessions · free time · book tasks', style: TextStyle(color: AppTheme.silverMuted, fontSize: 12)),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, color: AppTheme.silverMuted),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        GlassCard(
+          onTap: () {
             Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CalendarScreen()));
           },
           child: const Row(
@@ -105,8 +128,8 @@ class _LifeHubState extends State<LifeHub> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Calendar & plans', style: TextStyle(color: AppTheme.silver, fontWeight: FontWeight.w600)),
-                    Text('Events, reminders, upcoming', style: TextStyle(color: AppTheme.silverMuted, fontSize: 12)),
+                    Text('Calendar', style: TextStyle(color: AppTheme.silver, fontWeight: FontWeight.w600)),
+                    Text('Events, reminders, month grid', style: TextStyle(color: AppTheme.silverMuted, fontSize: 12)),
                   ],
                 ),
               ),
