@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/bill_repository.dart';
+import '../data/database.dart';
 import '../data/expense_repository.dart';
 import '../data/extended_repository.dart';
 import '../data/income_repository.dart';
@@ -11,7 +12,6 @@ import '../data/routine_repository.dart';
 import '../domain/enums.dart';
 import '../domain/models.dart';
 
-/// Scrollable More tab content for secondary domains.
 class MorePanel extends StatefulWidget {
   const MorePanel({
     super.key,
@@ -39,14 +39,14 @@ class MorePanel extends StatefulWidget {
 }
 
 class _MorePanelState extends State<MorePanel> {
-  final _ext = ExtendedRepository(AppDatabaseProxy.instance);
-  final _projects = ProjectRepository(AppDatabaseProxy.instance);
-  final _routines = RoutineRepository(AppDatabaseProxy.instance);
-  final _bills = BillRepository(AppDatabaseProxy.instance);
-  final _milestones = MilestoneRepository(AppDatabaseProxy.instance);
-  final _notes = NoteRepository(AppDatabaseProxy.instance);
-  final _expenses = ExpenseRepository(AppDatabaseProxy.instance);
-  final _income = IncomeRepository(AppDatabaseProxy.instance);
+  final _ext = ExtendedRepository(AppDatabase.instance);
+  final _projects = ProjectRepository(AppDatabase.instance);
+  final _routines = RoutineRepository(AppDatabase.instance);
+  final _bills = BillRepository(AppDatabase.instance);
+  final _milestones = MilestoneRepository(AppDatabase.instance);
+  final _notes = NoteRepository(AppDatabase.instance);
+  final _expenses = ExpenseRepository(AppDatabase.instance);
+  final _incomeRepo = IncomeRepository(AppDatabase.instance);
 
   final _input = TextEditingController();
   final _amount = TextEditingController();
@@ -76,6 +76,9 @@ class _MorePanelState extends State<MorePanel> {
   }
 
   Future<void> _load() async {
+    setState(() {
+      // async load below
+    });
     final people = await _ext.listPeople();
     final subs = await _ext.listSubscriptions();
     final debts = await _ext.listDebts();
@@ -83,6 +86,7 @@ class _MorePanelState extends State<MorePanel> {
     final practical = await _ext.listPractical();
     final docs = await _ext.listDocuments();
     final shop = await _ext.listShoppingLists();
+    if (!mounted) return;
     setState(() {
       _people = people;
       _subs = subs;
@@ -105,35 +109,33 @@ class _MorePanelState extends State<MorePanel> {
       padding: const EdgeInsets.all(12),
       children: [
         _label('Search'),
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _search,
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  hintText: 'Search tasks, bills, people…',
-                  hintStyle: TextStyle(color: Colors.white38),
-                  filled: true,
-                  fillColor: Color(0xFF1f2937),
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-                onSubmitted: (q) async {
-                  final hits = await _ext.search(q);
-                  setState(() => _searchHits = hits);
-                },
+        Row(children: [
+          Expanded(
+            child: TextField(
+              controller: _search,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                hintText: 'Search tasks, bills, people…',
+                hintStyle: TextStyle(color: Colors.white38),
+                filled: true,
+                fillColor: Color(0xFF1f2937),
+                border: OutlineInputBorder(),
+                isDense: true,
               ),
-            ),
-            IconButton(
-              onPressed: () async {
-                final hits = await _ext.search(_search.text);
+              onSubmitted: (q) async {
+                final hits = await _ext.search(q);
                 setState(() => _searchHits = hits);
               },
-              icon: const Icon(Icons.search, color: Colors.white70),
             ),
-          ],
-        ),
+          ),
+          IconButton(
+            onPressed: () async {
+              final hits = await _ext.search(_search.text);
+              setState(() => _searchHits = hits);
+            },
+            icon: const Icon(Icons.search, color: Colors.white70),
+          ),
+        ]),
         ..._searchHits.map((h) => ListTile(
               dense: true,
               title: Text(h['title'] ?? '', style: const TextStyle(color: Colors.white)),
@@ -174,7 +176,6 @@ class _MorePanelState extends State<MorePanel> {
         }),
         ..._people.map((p) => ListTile(
               title: Text('${p['name']}', style: const TextStyle(color: Colors.white)),
-              subtitle: Text('${p['phone'] ?? ''}', style: const TextStyle(color: Colors.white38, fontSize: 11)),
             )),
         const Divider(color: Colors.white12),
         _label('Calendar / reminders'),
@@ -210,10 +211,6 @@ class _MorePanelState extends State<MorePanel> {
           await _bills.create(name: t, expectedMajor: 1000, dueInDays: 3);
           await _refresh();
         }),
-        ...widget.bills.map((b) => ListTile(
-              title: Text(b.name, style: const TextStyle(color: Colors.white)),
-              subtitle: Text(b.displayExpected, style: const TextStyle(color: Colors.white38, fontSize: 11)),
-            )),
         ...widget.billOcc.map((o) => ListTile(
               title: Text('Pay: ${o.billName}', style: const TextStyle(color: Colors.orangeAccent)),
               trailing: TextButton(
@@ -226,29 +223,21 @@ class _MorePanelState extends State<MorePanel> {
             )),
         const Divider(color: Colors.white12),
         _label('Subscriptions'),
-        _quickAdd('Service name…', (t) async {
+        _quickAdd('Service…', (t) async {
           await _ext.addSubscription(t, 500);
           await _refresh();
         }),
         ..._subs.map((s) => ListTile(
               title: Text('${s['service_name']}', style: const TextStyle(color: Colors.white)),
-              trailing: Text(
-                '${Defaults.currency} ${((s['amount_minor'] as int) / 100).toStringAsFixed(0)}',
-                style: const TextStyle(color: Colors.white54),
-              ),
             )),
         const Divider(color: Colors.white12),
-        _label('Debt (OWED_BY_ME / OWED_TO_ME)'),
+        _label('Debt'),
         _quickAdd('Debt title…', (t) async {
           await _ext.addDebt(title: t, amountMajor: 1000, direction: 'OWED_BY_ME');
           await _refresh();
         }),
         ..._debts.map((d) => ListTile(
               title: Text('${d['title']}', style: const TextStyle(color: Colors.white)),
-              subtitle: Text(
-                '${d['direction']} · remaining ${((d['remaining_amount_minor'] as int) / 100).toStringAsFixed(0)}',
-                style: const TextStyle(color: Colors.white38, fontSize: 11),
-              ),
               trailing: TextButton(
                 onPressed: () async {
                   await _ext.payDebt(d['id'] as String, 100);
@@ -259,16 +248,12 @@ class _MorePanelState extends State<MorePanel> {
             )),
         const Divider(color: Colors.white12),
         _label('Savings'),
-        _quickAdd('Savings goal…', (t) async {
+        _quickAdd('Goal name…', (t) async {
           await _ext.addSavingsGoal(t, 10000);
           await _refresh();
         }),
         ..._savings.map((s) => ListTile(
               title: Text('${s['name']}', style: const TextStyle(color: Colors.white)),
-              subtitle: Text(
-                '${((s['current_amount_minor'] as int) / 100).toStringAsFixed(0)} / ${((s['target_amount_minor'] as int) / 100).toStringAsFixed(0)}',
-                style: const TextStyle(color: Colors.white38, fontSize: 11),
-              ),
               trailing: TextButton(
                 onPressed: () async {
                   await _ext.contributeSavings(s['id'] as String, 500);
@@ -330,7 +315,7 @@ class _MorePanelState extends State<MorePanel> {
               final d = _input.text.trim();
               final a = double.tryParse(_amount.text.trim());
               if (d.isEmpty || a == null) return;
-              await _income.create(source: d, amountMajor: a);
+              await _incomeRepo.create(source: d, amountMajor: a);
               _input.clear();
               _amount.clear();
               await _refresh();
@@ -338,13 +323,9 @@ class _MorePanelState extends State<MorePanel> {
             child: const Text('Income'),
           ),
         ]),
-        ...widget.expenses.take(6).map((e) => ListTile(
-              title: Text(e.description, style: const TextStyle(color: Colors.white)),
-              trailing: Text(e.displayAmount, style: const TextStyle(color: Colors.orangeAccent)),
-            )),
         const Divider(color: Colors.white12),
-        _label('Practical / documents / shopping'),
-        _quickAdd('Practical item…', (t) async {
+        _label('Practical / docs / shopping'),
+        _quickAdd('Practical…', (t) async {
           await _ext.addPractical(t);
           await _refresh();
         }),
@@ -356,23 +337,14 @@ class _MorePanelState extends State<MorePanel> {
           await _ext.addShoppingList(t);
           await _refresh();
         }),
-        ..._practical.map((p) => ListTile(
-              title: Text('${p['title']}', style: const TextStyle(color: Colors.white)),
-              subtitle: Text('${p['type']}', style: const TextStyle(color: Colors.white38, fontSize: 11)),
-            )),
-        ..._docs.map((d) => ListTile(
-              title: Text('${d['title']}', style: const TextStyle(color: Colors.white)),
-              subtitle: Text('${d['document_type']}', style: const TextStyle(color: Colors.white38, fontSize: 11)),
-            )),
+        ..._practical.map((p) => ListTile(title: Text('${p['title']}', style: const TextStyle(color: Colors.white)))),
+        ..._docs.map((d) => ListTile(title: Text('${d['title']}', style: const TextStyle(color: Colors.white)))),
         ..._shop.map((s) => ListTile(
               title: Text('${s['name']}', style: const TextStyle(color: Colors.white)),
               trailing: IconButton(
                 icon: const Icon(Icons.add, color: Colors.white54),
                 onPressed: () async {
                   await _ext.addShoppingItem(s['id'] as String, 'Item');
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Item added')));
-                  }
                 },
               ),
             )),
@@ -398,49 +370,36 @@ class _MorePanelState extends State<MorePanel> {
     final c = TextEditingController();
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: c,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                hintText: hint,
-                hintStyle: const TextStyle(color: Colors.white38),
-                filled: true,
-                fillColor: const Color(0xFF1f2937),
-                border: const OutlineInputBorder(),
-                isDense: true,
-              ),
-              onSubmitted: (v) async {
-                if (v.trim().isEmpty) return;
-                await onAdd(v.trim());
-                c.clear();
-              },
+      child: Row(children: [
+        Expanded(
+          child: TextField(
+            controller: c,
+            style: const TextStyle(color: Colors.white),
+            decoration: InputDecoration(
+              hintText: hint,
+              hintStyle: const TextStyle(color: Colors.white38),
+              filled: true,
+              fillColor: const Color(0xFF1f2937),
+              border: const OutlineInputBorder(),
+              isDense: true,
             ),
-          ),
-          IconButton(
-            onPressed: () async {
-              final v = c.text.trim();
-              if (v.isEmpty) return;
-              await onAdd(v);
+            onSubmitted: (v) async {
+              if (v.trim().isEmpty) return;
+              await onAdd(v.trim());
               c.clear();
             },
-            icon: const Icon(Icons.add, color: Colors.white70),
           ),
-        ],
-      ),
+        ),
+        IconButton(
+          onPressed: () async {
+            final v = c.text.trim();
+            if (v.isEmpty) return;
+            await onAdd(v);
+            c.clear();
+          },
+          icon: const Icon(Icons.add, color: Colors.white70),
+        ),
+      ]),
     );
   }
-}
-
-/// Avoid circular import of AppDatabase from UI helpers.
-class AppDatabaseProxy {
-  static dynamic get instance {
-    // ignore: avoid_dynamic_calls
-    return _db;
-  }
-
-  static dynamic _db;
-  static void bind(dynamic db) => _db = db;
 }
