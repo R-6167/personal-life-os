@@ -2,23 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AppData } from '../types/app-data';
 import { getDatabase } from '../db/database';
 import * as Q from '../db/queries';
+import * as L from '../db/life-queries';
 import { ensureHabitOccurrences } from '../habits/recurrence';
 
-const empty: Omit<
-  AppData,
-  | 'ready'
-  | 'error'
-  | 'refresh'
-  | 'completeTask'
-  | 'startTask'
-  | 'createTask'
-  | 'completeHabit'
-  | 'skipHabit'
-  | 'createHabit'
-  | 'payBill'
-  | 'createGoal'
-  | 'createProject'
-> = {
+const empty = {
   tasks: [],
   habitOccurrences: [],
   billOccurrences: [],
@@ -27,6 +14,11 @@ const empty: Omit<
   recentActivity: [],
   goals: [],
   projects: [],
+  notes: [],
+  events: [],
+  reminders: [],
+  inbox: [],
+  milestones: [],
 };
 
 export function useAppDataSQLite(): AppData {
@@ -38,17 +30,35 @@ export function useAppDataSQLite(): AppData {
     try {
       const db = await getDatabase();
       await ensureHabitOccurrences(db, { daysAhead: 0 });
-      const [tasks, habitOccurrences, billOccurrences, accounts, recentExpenses, recentActivity, goals, projects] =
-        await Promise.all([
-          Q.loadTasks(db),
-          Q.loadHabitOccurrences(db),
-          Q.loadBillOccurrences(db),
-          Q.loadAccounts(db),
-          Q.loadExpenses(db),
-          Q.loadActivity(db),
-          Q.loadGoals(db),
-          Q.loadProjects(db),
-        ]);
+      const [
+        tasks,
+        habitOccurrences,
+        billOccurrences,
+        accounts,
+        recentExpenses,
+        recentActivity,
+        goals,
+        projects,
+        notes,
+        events,
+        reminders,
+        inbox,
+        milestones,
+      ] = await Promise.all([
+        Q.loadTasks(db),
+        Q.loadHabitOccurrences(db),
+        Q.loadBillOccurrences(db),
+        Q.loadAccounts(db),
+        Q.loadExpenses(db),
+        Q.loadActivity(db),
+        Q.loadGoals(db),
+        Q.loadProjects(db),
+        L.loadNotes(db),
+        L.loadEvents(db),
+        L.loadReminders(db),
+        L.loadInbox(db),
+        L.loadMilestones(db),
+      ]);
       setData({
         tasks,
         habitOccurrences,
@@ -58,6 +68,11 @@ export function useAppDataSQLite(): AppData {
         recentActivity,
         goals,
         projects,
+        notes,
+        events,
+        reminders,
+        inbox,
+        milestones,
       });
       setError(null);
       setReady(true);
@@ -127,6 +142,65 @@ export function useAppDataSQLite(): AppData {
       }),
     [withRefresh]
   );
+  const createNote = useCallback(
+    (input: Parameters<AppData['createNote']>[0]) =>
+      withRefresh(async () => {
+        await L.createNote(await getDatabase(), input);
+      }),
+    [withRefresh]
+  );
+  const toggleNotePin = useCallback(
+    (id: string) => withRefresh(async () => L.toggleNotePin(await getDatabase(), id)),
+    [withRefresh]
+  );
+  const createEvent = useCallback(
+    (input: Parameters<AppData['createEvent']>[0]) =>
+      withRefresh(async () => {
+        await L.createEvent(await getDatabase(), input);
+      }),
+    [withRefresh]
+  );
+  const createReminder = useCallback(
+    (input: Parameters<AppData['createReminder']>[0]) =>
+      withRefresh(async () => {
+        await L.createReminder(await getDatabase(), input);
+      }),
+    [withRefresh]
+  );
+  const completeReminder = useCallback(
+    (id: string) => withRefresh(async () => L.completeReminder(await getDatabase(), id)),
+    [withRefresh]
+  );
+  const captureInbox = useCallback(
+    (rawText: string, suggestedType?: string) =>
+      withRefresh(async () => {
+        await L.captureInbox(await getDatabase(), rawText, suggestedType);
+      }),
+    [withRefresh]
+  );
+  const processInboxToTask = useCallback(
+    (id: string) => withRefresh(async () => { await L.processInboxToTask(await getDatabase(), id); }),
+    [withRefresh]
+  );
+  const processInboxToNote = useCallback(
+    (id: string) => withRefresh(async () => { await L.processInboxToNote(await getDatabase(), id); }),
+    [withRefresh]
+  );
+  const dismissInbox = useCallback(
+    (id: string) => withRefresh(async () => L.dismissInbox(await getDatabase(), id)),
+    [withRefresh]
+  );
+  const createMilestone = useCallback(
+    (input: Parameters<AppData['createMilestone']>[0]) =>
+      withRefresh(async () => {
+        await L.createMilestone(await getDatabase(), input);
+      }),
+    [withRefresh]
+  );
+  const completeMilestone = useCallback(
+    (id: string) => withRefresh(async () => L.completeMilestone(await getDatabase(), id)),
+    [withRefresh]
+  );
 
   return useMemo(
     () => ({
@@ -143,6 +217,17 @@ export function useAppDataSQLite(): AppData {
       payBill,
       createGoal,
       createProject,
+      createNote,
+      toggleNotePin,
+      createEvent,
+      createReminder,
+      completeReminder,
+      captureInbox,
+      processInboxToTask,
+      processInboxToNote,
+      dismissInbox,
+      createMilestone,
+      completeMilestone,
     }),
     [
       ready,
@@ -158,6 +243,17 @@ export function useAppDataSQLite(): AppData {
       payBill,
       createGoal,
       createProject,
+      createNote,
+      toggleNotePin,
+      createEvent,
+      createReminder,
+      completeReminder,
+      captureInbox,
+      processInboxToTask,
+      processInboxToNote,
+      dismissInbox,
+      createMilestone,
+      completeMilestone,
     ]
   );
 }
