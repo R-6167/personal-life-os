@@ -12,7 +12,7 @@ import {
 } from '../components/ui';
 
 export function FinancesScreen() {
-  const { accounts, billOccurrences, recentExpenses, payBill } = useAppData();
+  const { accounts, billOccurrences, recentExpenses, income, payBill, createIncome } = useAppData();
 
   const totalBalance = useMemo(
     () => accounts.reduce((sum, a) => sum + a.currentBalanceMinor, 0),
@@ -34,9 +34,7 @@ export function FinancesScreen() {
       <Card style={styles.hero}>
         <Text style={styles.heroLabel}>Total balance</Text>
         <Text style={styles.heroValue}>{formatMoney(totalBalance)}</Text>
-        <Text style={styles.heroMeta}>
-          Open obligations {formatMoney(obligations)}
-        </Text>
+        <Text style={styles.heroMeta}>Open obligations {formatMoney(obligations)}</Text>
       </Card>
 
       <SectionHeader title="Accounts" count={accounts.length} />
@@ -77,6 +75,31 @@ export function FinancesScreen() {
           </Card>
         ))
       )}
+
+      <SectionHeader title="Income" count={income?.length ?? 0} />
+      {(income ?? []).length === 0 ? (
+        <EmptyState message="No income recorded" />
+      ) : (
+        (income ?? []).slice(0, 10).map((i) => (
+          <Card key={i.id}>
+            <View style={styles.rowBetween}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.title}>{i.description}</Text>
+                <Text style={styles.meta}>
+                  {[i.source, formatDate(i.occurredAt)].filter(Boolean).join(' · ')}
+                </Text>
+              </View>
+              <Text style={styles.amount}>+{formatMoney(i.amountMinor, i.currency)}</Text>
+            </View>
+          </Card>
+        ))
+      )}
+      <PrimaryButton
+        label="+ Record income (KES 1,000)"
+        onPress={() =>
+          createIncome({ description: 'Income', amountMinor: 100000, source: 'Manual' })
+        }
+      />
 
       <SectionHeader title="Recent expenses" count={recentExpenses.length} />
       {recentExpenses.map((exp) => (
