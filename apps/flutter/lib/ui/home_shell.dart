@@ -8,16 +8,17 @@ import '../data/bill_repository.dart';
 import '../data/database.dart';
 import '../data/expense_repository.dart';
 import '../data/export_service.dart';
+import '../data/extended_repository.dart';
 import '../data/goal_repository.dart';
 import '../data/habit_repository.dart';
 import '../data/income_repository.dart';
-import '../data/milestone_repository.dart';
 import '../data/note_repository.dart';
 import '../data/project_repository.dart';
 import '../data/routine_repository.dart';
 import '../data/task_repository.dart';
 import '../domain/enums.dart';
 import '../domain/models.dart';
+import 'more_panel.dart';
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
@@ -39,9 +40,9 @@ class _HomeShellState extends State<HomeShell> {
   final _expenses = ExpenseRepository(AppDatabase.instance);
   final _bills = BillRepository(AppDatabase.instance);
   final _routines = RoutineRepository(AppDatabase.instance);
-  final _milestones = MilestoneRepository(AppDatabase.instance);
   final _income = IncomeRepository(AppDatabase.instance);
   final _export = ExportService(AppDatabase.instance);
+  final _ext = ExtendedRepository(AppDatabase.instance);
 
   List<Task> _taskList = [];
   List<Task> _overdue = [];
@@ -54,10 +55,10 @@ class _HomeShellState extends State<HomeShell> {
   List<BillOccurrence> _billOcc = [];
   List<Routine> _routineList = [];
   List<Income> _incomeList = [];
+  List<Map<String, Object?>> _eventsToday = [];
   int _monthSpendMinor = 0;
 
   final _input = TextEditingController();
-  final _amount = TextEditingController();
 
   static const _titles = ['Today', 'Tasks', 'Habits', 'Goals', 'More'];
 
@@ -70,7 +71,6 @@ class _HomeShellState extends State<HomeShell> {
   @override
   void dispose() {
     _input.dispose();
-    _amount.dispose();
     super.dispose();
   }
 
@@ -100,6 +100,7 @@ class _HomeShellState extends State<HomeShell> {
     final occ = await _bills.listOpenOccurrences();
     final r = await _routines.listActive();
     final inc = await _income.listRecent();
+    final ev = await _ext.listEventsToday();
     setState(() {
       _taskList = t;
       _overdue = o;
@@ -113,6 +114,7 @@ class _HomeShellState extends State<HomeShell> {
       _billOcc = occ;
       _routineList = r;
       _incomeList = inc;
+      _eventsToday = ev;
     });
   }
 
@@ -159,12 +161,11 @@ class _HomeShellState extends State<HomeShell> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(_titles[_tab], style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
-            const Text('Offline · derived Today · contract', style: TextStyle(fontSize: 11, color: Colors.white54)),
+            const Text('Offline · schema v5 · contract', style: TextStyle(fontSize: 11, color: Colors.white54)),
           ],
         ),
         actions: [
-          if (_tab == 4)
-            IconButton(onPressed: _shareBackup, icon: const Icon(Icons.ios_share)),
+          if (_tab == 4) IconButton(onPressed: _shareBackup, icon: const Icon(Icons.ios_share)),
         ],
       ),
       body: !_ready
@@ -197,27 +198,25 @@ class _HomeShellState extends State<HomeShell> {
     final hints = {1: 'New task (due today)…', 2: 'New habit…', 3: 'New goal…'};
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _input,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                hintText: hints[_tab],
-                hintStyle: const TextStyle(color: Colors.white38),
-                filled: true,
-                fillColor: const Color(0xFF1f2937),
-                border: const OutlineInputBorder(),
-                isDense: true,
-              ),
-              onSubmitted: (_) => _add(),
+      child: Row(children: [
+        Expanded(
+          child: TextField(
+            controller: _input,
+            style: const TextStyle(color: Colors.white),
+            decoration: InputDecoration(
+              hintText: hints[_tab],
+              hintStyle: const TextStyle(color: Colors.white38),
+              filled: true,
+              fillColor: const Color(0xFF1f2937),
+              border: const OutlineInputBorder(),
+              isDense: true,
             ),
+            onSubmitted: (_) => _add(),
           ),
-          const SizedBox(width: 8),
-          IconButton.filled(onPressed: _add, icon: const Icon(Icons.add)),
-        ],
-      ),
+        ),
+        const SizedBox(width: 8),
+        IconButton.filled(onPressed: _add, icon: const Icon(Icons.add)),
+      ]),
     );
   }
 
@@ -232,7 +231,16 @@ class _HomeShellState extends State<HomeShell> {
       case 3:
         return _listGoals();
       case 4:
-        return _more();
+        return MorePanel(
+          onChanged: _reload,
+          projects: _projectList,
+          routines: _routineList,
+          bills: _billList,
+          billOcc: _billOcc,
+          notes: _noteList,
+          expenses: _expenseList,
+          income: _incomeList,
+        );
       default:
         return const SizedBox.shrink();
     }
@@ -246,95 +254,78 @@ class _HomeShellState extends State<HomeShell> {
         Text(_greeting, style: const TextStyle(color: Colors.white54, fontSize: 13)),
         const SizedBox(height: 6),
         const Text('Today', style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w700)),
-        const SizedBox(height: 4),
-        const Text('Derived from tasks, habits, bills — not a stored table',
-            style: TextStyle(color: Colors.white38, fontSize: 11)),
+        const Text('Derived view — not a table', style: TextStyle(color: Colors.white38, fontSize: 11)),
         const SizedBox(height: 14),
         if (_overdue.isNotEmpty) ...[
           _section('Overdue', Colors.redAccent),
           ..._overdue.map((t) => _taskTile(t, highlight: true)),
-          const SizedBox(height: 12),
         ],
-        _section('Due / open tasks', Colors.lightBlueAccent),
+        _section('Tasks', Colors.lightBlueAccent),
         if (_taskList.isEmpty)
           const Text('No open tasks', style: TextStyle(color: Colors.white38))
         else
-          ..._taskList.take(8).map((t) => _taskTile(t)),
-        const SizedBox(height: 12),
+          ..._taskList.take(8).map(_taskTile),
         _section('Habits', Colors.greenAccent),
-        if (_habitList.isEmpty)
-          const Text('No habits', style: TextStyle(color: Colors.white38))
-        else
-          ..._habitList.map((h) => Card(
-                color: const Color(0xFF1f2937),
-                child: ListTile(
-                  title: Text(h.title, style: const TextStyle(color: Colors.white)),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.done_all, color: Colors.greenAccent),
-                    onPressed: () async {
-                      await _habits.markDoneToday(h.id);
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Logged ${h.title}')));
-                      }
-                    },
-                  ),
+        ..._habitList.map((h) => Card(
+              color: const Color(0xFF1f2937),
+              child: ListTile(
+                title: Text(h.title, style: const TextStyle(color: Colors.white)),
+                trailing: IconButton(
+                  icon: const Icon(Icons.done_all, color: Colors.greenAccent),
+                  onPressed: () async {
+                    await _habits.markDoneToday(h.id);
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Logged ${h.title}')));
+                    }
+                  },
                 ),
-              )),
-        const SizedBox(height: 12),
-        _section('Bills due', Colors.orangeAccent),
-        if (_billOcc.isEmpty)
-          const Text('No open bill occurrences', style: TextStyle(color: Colors.white38))
-        else
-          ..._billOcc.map((o) => Card(
-                color: const Color(0xFF1f2937),
-                child: ListTile(
-                  title: Text(o.billName ?? 'Bill', style: const TextStyle(color: Colors.white)),
-                  subtitle: Text(o.status, style: const TextStyle(color: Colors.white38, fontSize: 11)),
-                  trailing: TextButton(
-                    onPressed: () async {
-                      await _bills.payOccurrence(o);
-                      await _reload();
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Paid → expense + BILL_PAID')),
-                        );
-                      }
-                    },
-                    child: const Text('Pay'),
-                  ),
+              ),
+            )),
+        _section('Bills', Colors.orangeAccent),
+        ..._billOcc.map((o) => Card(
+              color: const Color(0xFF1f2937),
+              child: ListTile(
+                title: Text(o.billName ?? 'Bill', style: const TextStyle(color: Colors.white)),
+                trailing: TextButton(
+                  onPressed: () async {
+                    await _bills.payOccurrence(o);
+                    await _reload();
+                  },
+                  child: const Text('Pay'),
                 ),
+              ),
+            )),
+        _section('Calendar', Colors.cyanAccent),
+        if (_eventsToday.isEmpty)
+          const Text('No events today', style: TextStyle(color: Colors.white38))
+        else
+          ..._eventsToday.map((e) => ListTile(
+                title: Text('${e['title']}', style: const TextStyle(color: Colors.white)),
               )),
-        const SizedBox(height: 12),
         _section('Routines', Colors.purpleAccent),
-        if (_routineList.isEmpty)
-          const Text('No routines — add in More', style: TextStyle(color: Colors.white38))
-        else
-          ..._routineList.map((r) => Card(
-                color: const Color(0xFF1f2937),
-                child: ListTile(
-                  title: Text(r.name, style: const TextStyle(color: Colors.white)),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.play_circle_outline, color: Colors.purpleAccent),
-                    onPressed: () async {
-                      await _routines.completeToday(r.id);
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Completed ${r.name}')),
-                        );
-                      }
-                    },
-                  ),
+        ..._routineList.map((r) => Card(
+              color: const Color(0xFF1f2937),
+              child: ListTile(
+                title: Text(r.name, style: const TextStyle(color: Colors.white)),
+                trailing: IconButton(
+                  icon: const Icon(Icons.play_circle_outline, color: Colors.purpleAccent),
+                  onPressed: () async {
+                    await _routines.completeToday(r.id);
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Completed ${r.name}')));
+                    }
+                  },
                 ),
-              )),
-        const SizedBox(height: 16),
-        Text('Month spend: ${Defaults.currency} $spend',
-            style: const TextStyle(color: Colors.white54, fontSize: 12)),
+              ),
+            )),
+        const SizedBox(height: 12),
+        Text('Month spend: ${Defaults.currency} $spend', style: const TextStyle(color: Colors.white54, fontSize: 12)),
       ],
     );
   }
 
   Widget _section(String title, Color c) => Padding(
-        padding: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.only(top: 12, bottom: 6),
         child: Text(title, style: TextStyle(color: c, fontWeight: FontWeight.w600)),
       );
 
@@ -342,10 +333,8 @@ class _HomeShellState extends State<HomeShell> {
         color: highlight ? const Color(0xFF3f1d1d) : const Color(0xFF1f2937),
         child: ListTile(
           title: Text(t.title, style: const TextStyle(color: Colors.white)),
-          subtitle: Text(
-            t.isOverdue ? 'OVERDUE' : t.status,
-            style: TextStyle(color: t.isOverdue ? Colors.redAccent : Colors.white38, fontSize: 11),
-          ),
+          subtitle: Text(t.isOverdue ? 'OVERDUE' : t.status,
+              style: TextStyle(color: t.isOverdue ? Colors.redAccent : Colors.white38, fontSize: 11)),
           trailing: IconButton(
             icon: const Icon(Icons.check_circle_outline, color: Colors.lightBlueAccent),
             onPressed: () async {
@@ -358,10 +347,7 @@ class _HomeShellState extends State<HomeShell> {
 
   Widget _listTasks() {
     if (_taskList.isEmpty) return _empty('No open tasks');
-    return ListView.builder(
-      itemCount: _taskList.length,
-      itemBuilder: (_, i) => _taskTile(_taskList[i]),
-    );
+    return ListView.builder(itemCount: _taskList.length, itemBuilder: (_, i) => _taskTile(_taskList[i]));
   }
 
   Widget _listHabits() {
@@ -403,216 +389,6 @@ class _HomeShellState extends State<HomeShell> {
           ),
         );
       },
-    );
-  }
-
-  Widget _more() {
-    return ListView(
-      padding: const EdgeInsets.all(12),
-      children: [
-        _label('Projects'),
-        _quickAdd('New project…', (t) async {
-          await _projects.create(title: t);
-          await _reload();
-        }),
-        ..._projectList.map((p) => ListTile(
-              title: Text(p.title, style: const TextStyle(color: Colors.white)),
-              subtitle: const Text('Tap + to add milestone', style: TextStyle(color: Colors.white38, fontSize: 11)),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.flag_outlined, color: Colors.amberAccent),
-                    onPressed: () async {
-                      await _milestones.create(projectId: p.id, title: 'Milestone');
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Milestone added')),
-                        );
-                      }
-                    },
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.check, color: Colors.lightBlueAccent),
-                    onPressed: () async {
-                      await _projects.complete(p.id);
-                      await _reload();
-                    },
-                  ),
-                ],
-              ),
-            )),
-        const Divider(color: Colors.white12),
-        _label('Routines'),
-        _quickAdd('New routine…', (t) async {
-          await _routines.create(name: t);
-          await _reload();
-        }),
-        ..._routineList.map((r) => ListTile(
-              title: Text(r.name, style: const TextStyle(color: Colors.white)),
-              trailing: IconButton(
-                icon: const Icon(Icons.play_arrow, color: Colors.purpleAccent),
-                onPressed: () async {
-                  await _routines.completeToday(r.id);
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Done: ${r.name}')));
-                  }
-                },
-              ),
-            )),
-        const Divider(color: Colors.white12),
-        _label('Bills (obligation ≠ expense)'),
-        _quickAdd('Bill name…', (t) async {
-          await _bills.create(name: t, expectedMajor: 1000, dueInDays: 3);
-          await _reload();
-        }),
-        ..._billList.map((b) => ListTile(
-              title: Text(b.name, style: const TextStyle(color: Colors.white)),
-              subtitle: Text(b.displayExpected, style: const TextStyle(color: Colors.white38, fontSize: 11)),
-            )),
-        ..._billOcc.map((o) => ListTile(
-              title: Text('Pay: ${o.billName}', style: const TextStyle(color: Colors.orangeAccent)),
-              trailing: TextButton(
-                onPressed: () async {
-                  await _bills.payOccurrence(o);
-                  await _reload();
-                },
-                child: const Text('Pay'),
-              ),
-            )),
-        const Divider(color: Colors.white12),
-        _label('Money — income / expense (${Defaults.currency})'),
-        Row(
-          children: [
-            Expanded(
-              flex: 2,
-              child: TextField(
-                controller: _input,
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  hintText: 'Description / source',
-                  hintStyle: TextStyle(color: Colors.white38),
-                  filled: true,
-                  fillColor: Color(0xFF1f2937),
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-              ),
-            ),
-            const SizedBox(width: 6),
-            Expanded(
-              child: TextField(
-                controller: _amount,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  hintText: '0.00',
-                  hintStyle: TextStyle(color: Colors.white38),
-                  filled: true,
-                  fillColor: Color(0xFF1f2937),
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-              ),
-            ),
-          ],
-        ),
-        Row(
-          children: [
-            TextButton(
-              onPressed: () async {
-                final d = _input.text.trim();
-                final a = double.tryParse(_amount.text.trim());
-                if (d.isEmpty || a == null) return;
-                await _expenses.create(description: d, amountMajor: a);
-                _input.clear();
-                _amount.clear();
-                await _reload();
-              },
-              child: const Text('Expense'),
-            ),
-            TextButton(
-              onPressed: () async {
-                final d = _input.text.trim();
-                final a = double.tryParse(_amount.text.trim());
-                if (d.isEmpty || a == null) return;
-                await _income.create(source: d, amountMajor: a);
-                _input.clear();
-                _amount.clear();
-                await _reload();
-              },
-              child: const Text('Income'),
-            ),
-          ],
-        ),
-        ..._expenseList.take(8).map((e) => ListTile(
-              title: Text(e.description, style: const TextStyle(color: Colors.white)),
-              trailing: Text(e.displayAmount, style: const TextStyle(color: Colors.orangeAccent)),
-            )),
-        ..._incomeList.take(5).map((i) => ListTile(
-              title: Text(i.source, style: const TextStyle(color: Colors.white)),
-              trailing: Text(i.displayAmount, style: const TextStyle(color: Colors.greenAccent)),
-            )),
-        const Divider(color: Colors.white12),
-        _label('Notes'),
-        _quickAdd('Note…', (t) async {
-          await _notes.create(content: t);
-          await _reload();
-        }),
-        ..._noteList.map((n) => ListTile(
-              title: Text(n.content, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white)),
-            )),
-        const Divider(color: Colors.white12),
-        ListTile(
-          leading: const Icon(Icons.ios_share, color: Colors.white70),
-          title: const Text('Export backup JSON', style: TextStyle(color: Colors.white)),
-          onTap: _shareBackup,
-        ),
-      ],
-    );
-  }
-
-  Widget _label(String t) => Padding(
-        padding: const EdgeInsets.only(top: 8, bottom: 6),
-        child: Text(t, style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w600)),
-      );
-
-  Widget _quickAdd(String hint, Future<void> Function(String) onAdd) {
-    final c = TextEditingController();
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: c,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                hintText: hint,
-                hintStyle: const TextStyle(color: Colors.white38),
-                filled: true,
-                fillColor: const Color(0xFF1f2937),
-                border: const OutlineInputBorder(),
-                isDense: true,
-              ),
-              onSubmitted: (v) async {
-                if (v.trim().isEmpty) return;
-                await onAdd(v.trim());
-                c.clear();
-              },
-            ),
-          ),
-          IconButton(
-            onPressed: () async {
-              final v = c.text.trim();
-              if (v.isEmpty) return;
-              await onAdd(v);
-              c.clear();
-            },
-            icon: const Icon(Icons.add, color: Colors.white70),
-          ),
-        ],
-      ),
     );
   }
 
