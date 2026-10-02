@@ -209,6 +209,9 @@ CREATE TABLE IF NOT EXISTS bills (
   provider TEXT,
   expected_amount_minor INTEGER NOT NULL,
   currency TEXT NOT NULL DEFAULT 'KES',
+  frequency TEXT NOT NULL DEFAULT 'MONTHLY',
+  interval INTEGER NOT NULL DEFAULT 1,
+  next_due_at INTEGER,
   status TEXT NOT NULL DEFAULT 'ACTIVE',
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
@@ -257,6 +260,59 @@ CREATE TABLE IF NOT EXISTS activity_events (
   FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS routines (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT,
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  estimated_minutes INTEGER,
+  frequency TEXT NOT NULL DEFAULT 'DAILY',
+  days_of_week TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  archived_at INTEGER,
+  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS routine_steps (
+  id TEXT PRIMARY KEY,
+  routine_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  estimated_minutes INTEGER,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(routine_id) REFERENCES routines(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS routine_occurrences (
+  id TEXT PRIMARY KEY,
+  routine_id TEXT NOT NULL,
+  owner_id TEXT NOT NULL,
+  scheduled_date INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'EXPECTED',
+  started_at INTEGER,
+  completed_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY(routine_id) REFERENCES routines(id) ON DELETE CASCADE,
+  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS income (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  account_id TEXT,
+  description TEXT NOT NULL,
+  amount_minor INTEGER NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'KES',
+  source TEXT,
+  occurred_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY(account_id) REFERENCES financial_accounts(id) ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS app_meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -272,6 +328,8 @@ CREATE INDEX IF NOT EXISTS idx_events_starts ON events(owner_id, starts_at);
 CREATE INDEX IF NOT EXISTS idx_reminders_at ON reminders(owner_id, remind_at);
 CREATE INDEX IF NOT EXISTS idx_inbox_status ON inbox_items(owner_id, status);
 CREATE INDEX IF NOT EXISTS idx_milestones_project ON milestones(project_id);
+CREATE INDEX IF NOT EXISTS idx_routine_occ_owner ON routine_occurrences(owner_id);
+CREATE INDEX IF NOT EXISTS idx_income_owner ON income(owner_id);
 `;
 
 export const DEFAULT_OWNER_ID = 'user_local';
