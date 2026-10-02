@@ -7,6 +7,7 @@ import 'package:share_plus/share_plus.dart';
 import '../data/database.dart';
 import '../data/export_service.dart';
 import '../domain/enums.dart';
+import '../services/notification_service.dart';
 import 'theme.dart';
 import 'widgets/glass.dart';
 
@@ -89,6 +90,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
             : ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
+                  SwitchListTile(
+                    title: const Text('Local notifications', style: TextStyle(color: AppTheme.silver)),
+                    subtitle: Text(
+                      'Reminders, bills, overdue nudges',
+                      style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45), fontSize: 12),
+                    ),
+                    value: NotificationService.instance.enabled,
+                    activeColor: AppTheme.amber,
+                    onChanged: (v) async {
+                      NotificationService.instance.enabled = v;
+                      try {
+                        if (v) {
+                          await NotificationService.instance.init();
+                          final n = await NotificationService.instance.syncFromDatabase();
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Scheduled $n notifications')),
+                            );
+                          }
+                        } else {
+                          await NotificationService.instance.cancelAll();
+                        }
+                      } catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Notifications: $e')),
+                          );
+                        }
+                      }
+                      setState(() {});
+                    },
+                  ),
                   GlassCard(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -219,7 +252,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         const ListTile(
                           contentPadding: EdgeInsets.zero,
                           title: Text('Version'),
-                          subtitle: Text('0.3.0'),
+                          subtitle: Text('0.6.0'),
                         ),
                       ],
                     ),
