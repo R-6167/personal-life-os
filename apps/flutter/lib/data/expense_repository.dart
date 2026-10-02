@@ -16,8 +16,11 @@ class ExpenseRepository {
     return rows.map(Expense.fromMap).toList();
   }
 
-  /// [amountMajor] e.g. 150.50 KES → stored as 15050 minor units.
-  Future<Expense> create({equired String description, required double amountMajor, String? merchant}) async {
+  Future<Expense> create({
+    required String description,
+    required double amountMajor,
+    String? merchant,
+  }) async {
     final db = await _db.database;
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
@@ -29,7 +32,6 @@ class ExpenseRepository {
       amountMinor: minor,
       currency: Defaults.currency,
       occurredAt: now,
-      merchant: merchant,
       createdAt: now,
       updatedAt: now,
     );

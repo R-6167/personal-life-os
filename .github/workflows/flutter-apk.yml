@@ -42,6 +42,17 @@ jobs:
             --project-name personal_life_os \
             --org com.personallifeos \
             --platforms=android
+          # flutter create overwrites test; keep our smoke test
+          cat > test/widget_test.dart <<'EOF'
+          import 'package:flutter_test/flutter_test.dart';
+          import 'package:personal_life_os/main.dart';
+
+          void main() {
+            testWidgets('app builds', (tester) async {
+              expect(PersonalLifeOsApp, isNotNull);
+            });
+          }
+          EOF
           test -f android/gradlew
 
       - name: Get dependencies

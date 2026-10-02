@@ -25,11 +25,19 @@ class BillRepository {
       JOIN bills b ON b.id = o.bill_id
       WHERE o.status IN (?, ?, ?)
       ORDER BY o.due_at ASC
-    ''', [BillOccurrenceStatus.upcoming, BillOccurrenceStatus.due, BillOccurrenceStatus.overdue]);
+    ''', [
+      BillOccurrenceStatus.upcoming,
+      BillOccurrenceStatus.due,
+      BillOccurrenceStatus.overdue,
+    ]);
     return rows.map(BillOccurrence.fromJoin).toList();
   }
 
-  Future<Bill> create({equired String name, double? expectedMajor, int? dueInDays}) async {
+  Future<Bill> create({
+    required String name,
+    double? expectedMajor,
+    int? dueInDays,
+  }) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
     final dueAt = now + Duration(days: dueInDays ?? 7).inMilliseconds;
@@ -84,7 +92,7 @@ class BillRepository {
     );
   }
 
-  /// Bill ≠ expense: paying creates expense + marks occurrence PAID + BILL_PAID event.
+  /// Bill is not an expense: paying creates expense + marks occurrence PAID.
   Future<void> payOccurrence(BillOccurrence occ, {double? actualMajor}) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
@@ -126,7 +134,8 @@ class BillRepository {
         'occurred_at': now,
         'recorded_at': now,
         'source': EventSource.user,
-        'metadata': '{"amount":$amount,"currency":"$currency","expenseId":"$expenseId"}',
+        'metadata':
+            '{"amount":$amount,"currency":"$currency","expenseId":"$expenseId"}',
       });
       await txn.insert('activity_events', {
         'id': AppDatabase.newId(),

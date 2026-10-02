@@ -1,16 +1,13 @@
-import '../data/database.dart';
-import '../data/task_repository.dart';
-import '../data/habit_repository.dart';
 import '../data/bill_repository.dart';
+import '../data/database.dart';
 import '../data/expense_repository.dart';
+import '../data/habit_repository.dart';
+import '../data/task_repository.dart';
 import '../domain/enums.dart';
 
-/// Local-first PersonalContext + rule-based assistant (doc §54).
-/// No network. Answers from SQLite state only.
+/// Local-first PersonalContext + rule-based assistant (doc section 54).
 class IntelligenceAssistant {
-  IntelligenceAssistant({
-    AppDatabase? db,
-  }) : _db = db ?? AppDatabase.instance;
+  IntelligenceAssistant({AppDatabase? db}) : _db = db ?? AppDatabase.instance;
 
   final AppDatabase _db;
 
@@ -46,10 +43,11 @@ class IntelligenceAssistant {
     final ctx = await buildContext();
     final q = userMessage.trim().toLowerCase();
 
-    if (q.isEmpty) {
-      return ctx.briefing();
-    }
-    if (q.contains('today') || q.contains('brief') || q.contains('summary') || q.contains('focus')) {
+    if (q.isEmpty ||
+        q.contains('today') ||
+        q.contains('brief') ||
+        q.contains('summary') ||
+        q.contains('focus')) {
       return ctx.briefing();
     }
     if (q.contains('overdue')) {
@@ -62,18 +60,25 @@ class IntelligenceAssistant {
     }
     if (q.contains('bill') || q.contains('pay')) {
       if (ctx.openBillCount == 0) return 'No open bill occurrences.';
-      return 'Open bills (${ctx.openBillCount}):\n• ${ctx.billTitles.join('\n• ')}\nPay from Today — that records an expense (bill ≠ expense).';
+      return 'Open bills (${ctx.openBillCount}):\n• ${ctx.billTitles.join('\n• ')}\nPay from Today — that records an expense (bill is not expense).';
     }
-    if (q.contains('spend') || q.contains('money') || q.contains('expense') || q.contains('finance')) {
+    if (q.contains('spend') ||
+        q.contains('money') ||
+        q.contains('expense') ||
+        q.contains('finance')) {
       final major = (ctx.monthSpendMinor / 100).toStringAsFixed(2);
-      return 'This month\'s recorded spend: ${Defaults.currency} $major (from local expenses only).';
+      return "This month's recorded spend: ${Defaults.currency} $major (from local expenses only).";
     }
     if (q.contains('task') || q.contains('todo') || q.contains('work')) {
-      if (ctx.openTaskCount == 0) return 'No open tasks. Capture one when something appears.';
+      if (ctx.openTaskCount == 0) {
+        return 'No open tasks. Capture one when something appears.';
+      }
       return 'Open tasks (${ctx.openTaskCount}):\n• ${ctx.topTaskTitles.join('\n• ')}';
     }
     if (q.contains('help') || q.contains('what can')) {
-      return 'I run fully offline on your SQLite data.\n'\n          'Ask about: today, overdue, tasks, habits, bills, spend.\n'\n          'I don\'t call the cloud — answers come from Personal Context.';
+      return 'I run fully offline on your SQLite data.\n'
+          'Ask about: today, overdue, tasks, habits, bills, spend.\n'
+          'I do not call the cloud — answers come from Personal Context.';
     }
     return ctx.briefing();
   }
@@ -115,7 +120,8 @@ class PersonalContext {
             : 'Good evening';
     final buf = StringBuffer()
       ..writeln('$greet. Here is your local context:')
-      ..writeln('• Open tasks: $openTaskCount (due/overdue focus: $dueTodayCount)')
+      ..writeln(
+          '• Open tasks: $openTaskCount (due/overdue focus: $dueTodayCount)')
       ..writeln('• Overdue: $overdueCount')
       ..writeln('• Habits to keep: $habitCount')
       ..writeln('• Bills open: $openBillCount')
