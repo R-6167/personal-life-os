@@ -6,6 +6,7 @@ import '../data/habit_repository.dart';
 import '../data/project_repository.dart';
 import '../data/task_repository.dart';
 import '../domain/enums.dart';
+import 'day_planner.dart';
 
 /// Local PersonalContext + patterns from activity history.
 class IntelligenceAssistant {
@@ -72,6 +73,14 @@ class IntelligenceAssistant {
         q.contains('what next')) {
       return ctx.focusAdvice();
     }
+    if (q.contains('plan') ||
+        q.contains('priority') ||
+        q.contains('rank') ||
+        q.contains('order') ||
+        q.contains('do next') ||
+        q.contains('do now')) {
+      return DayPlanner(db: _db).planNarrative(limit: 6);
+    }
     if (q.contains('overdue')) {
       if (ctx.overdueCount == 0) return 'Nothing overdue. Clear runway.';
       return 'Overdue (${ctx.overdueCount}):\n• ${ctx.topOverdueTitles.join('\n• ')}\nClear these before new work.';
@@ -101,8 +110,8 @@ class IntelligenceAssistant {
     }
     if (q.contains('help') || q.contains('what can')) {
       return 'Offline assistant on your SQLite data.\n'
-          'Try: focus · overdue · tasks · habits · bills · projects · spend · patterns\n'
-          'I suggest next actions from Personal Context + recent activity.';
+          'Try: plan · focus · overdue · habits · bills · patterns · spend\n'
+          'I suggest next actions from Personal Context + ranked day plan.';
     }
     return ctx.focusAdvice();
   }
