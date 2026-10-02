@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../../data/account_repository.dart';
-import '../../data/bill_repository.dart';
 import '../../data/database.dart';
 import '../../domain/enums.dart';
 import '../../domain/models.dart';
 import '../forms/create_forms.dart';
 import '../theme.dart';
 import '../widgets/glass.dart';
+import '../widgets/pay_bill_dialog.dart';
 
 class FinanceHub extends StatefulWidget {
   const FinanceHub({
@@ -215,12 +215,14 @@ class _FinanceHubState extends State<FinanceHub> {
                     subtitle: Text(o.status, style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11)),
                     trailing: FilledButton(
                       onPressed: () async {
-                        await BillRepository(AppDatabase.instance).payOccurrence(o);
-                        await widget.onChanged();
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Paid — expense recorded')),
-                          );
+                        final paid = await promptAndPayBill(context, o);
+                        if (paid) {
+                          await widget.onChanged();
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Paid — expense recorded')),
+                            );
+                          }
                         }
                       },
                       child: const Text('Pay'),
