@@ -313,17 +313,16 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
               ),
             PopupMenuButton<String>(
               onSelected: (v) async {
-                switch (v) {
-                  case 'reschedule':
-                    await _reschedule();
-                  case 'complete':
-                    await _tasks.complete(t.id);
-                    await _load();
-                  case 'reopen':
-                    await _tasks.reopen(t.id);
-                    await _load();
-                  case 'delete':
-                    await _confirmDelete();
+                if (v == 'reschedule') {
+                  await _reschedule();
+                } else if (v == 'complete') {
+                  await _tasks.complete(t.id);
+                  await _load();
+                } else if (v == 'reopen') {
+                  await _tasks.reopen(t.id);
+                  await _load();
+                } else if (v == 'delete') {
+                  await _confirmDelete();
                 }
               },
               itemBuilder: (_) => [
