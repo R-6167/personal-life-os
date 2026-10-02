@@ -12,7 +12,9 @@ class AppDatabase {
 
   Database? _db;
   static const _uuid = Uuid();
-  static const schemaVersion = 5;
+
+  /// Bump only when adding a non-destructive migration in onUpgrade.
+  static const schemaVersion = 6;
 
   Future<Database> get database async {
     if (_db != null) return _db!;
@@ -30,23 +32,52 @@ class AppDatabase {
       onCreate: (db, version) async {
         await _applySchema(db);
         await _seedDefaultUser(db);
+        await _applyV6Constraints(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
-        await _dropAllTables(db);
-        await _applySchema(db);
-        await _seedDefaultUser(db);
+        // Never drop user data. Only additive / constraint migrations.
+        if (oldVersion < 6) {
+          await _migrateToV6(db);
+        }
       },
     );
   }
 
-  Future<void> _dropAllTables(Database db) async {
-    final rows = await db.rawQuery(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
-    );
-    for (final row in rows) {
-      final name = row['name'] as String?;
-      if (name != null) await db.execute('DROP TABLE IF EXISTS $name');
+  Future<void> _migrateToV6(Database db) async {
+    // Ensure all tables from schema exist (IF NOT EXISTS is safe).
+    await _applySchema(db);
+    await _applyV6Constraints(db);
+    await _seedDefaultUser(db);
+  }
+
+  Future<void> _applyV6Constraints(Database db) async {
+    // Deduplicate habit occurrences before unique index (keep latest).
+    try {
+      await db.execute('''
+        DELETE FROM habit_occurrences
+        WHERE id NOT IN (
+          SELECT id FROM (
+            SELECT id, ROW_NUMBER() OVER (
+              PARTITION BY habit_id, scheduled_date ORDER BY updated_at DESC, created_at DESC
+            ) AS rn FROM habit_occurrences
+          ) WHERE rn = 1
+        )
+      ''');
+    } catch (_) {
+      // SQLite without window functions: best-effort cleanup via grouped max.
+      try {
+        await db.execute('''
+          DELETE FROM habit_occurrences WHERE id NOT IN (
+            SELECT MAX(id) FROM habit_occurrences GROUP BY habit_id, scheduled_date
+          )
+        ''');
+      } catch (_) {}
     }
+    try {
+      await db.execute(
+        'CREATE UNIQUE INDEX IF NOT EXISTS uq_habit_occ_day ON habit_occurrences(habit_id, scheduled_date)',
+      );
+    } catch (_) {}
   }
 
   Future<void> _applySchema(Database db) async {
@@ -54,7 +85,11 @@ class AppDatabase {
     for (final stmt in _splitSql(raw)) {
       final s = stmt.trim();
       if (s.isEmpty || s.toUpperCase().startsWith('PRAGMA')) continue;
-      await db.execute(s);
+      try {
+        await db.execute(s);
+      } catch (_) {
+        // Table may already exist during additive upgrade.
+      }
     }
   }
 
@@ -104,5 +139,6 @@ class AppDatabase {
     return DateTime(n.year, n.month, n.day).millisecondsSinceEpoch;
   }
 
-  static int endOfTodayMs() => startOfTodayMs() + const Duration(days: 1).inMilliseconds - 1;
+  static int endOfTodayMs() =>
+      startOfTodayMs() + const Duration(days: 1).inMilliseconds - 1;
 }

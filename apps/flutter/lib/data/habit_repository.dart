@@ -17,7 +17,7 @@ class HabitRepository {
     return rows.map(Habit.fromMap).toList();
   }
 
-  Future<Habit> create({required String title}) async {
+  Future<Habit> create({required String title, String? description}) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
     final habit = Habit(
@@ -30,7 +30,11 @@ class HabitRepository {
       updatedAt: now,
     );
     await _db.txn((txn) async {
-      await txn.insert('habits', habit.toInsertMap());
+      final map = habit.toInsertMap();
+      if (description != null && description.isNotEmpty) {
+        map['description'] = description;
+      }
+      await txn.insert('habits', map);
       await txn.insert('habit_schedules', {
         'id': AppDatabase.newId(),
         'habit_id': habit.id,
@@ -55,11 +59,35 @@ class HabitRepository {
     return habit;
   }
 
+  /// Idempotent: one occurrence per habit per calendar day.
   Future<void> markDoneToday(String habitId) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
     final scheduledDate = AppDatabase.startOfTodayMs();
+
     await _db.txn((txn) async {
+      final existing = await txn.query(
+        'habit_occurrences',
+        where: 'habit_id = ? AND scheduled_date = ?',
+        whereArgs: [habitId, scheduledDate],
+        limit: 1,
+      );
+
+      if (existing.isNotEmpty) {
+        final id = existing.first['id'] as String;
+        await txn.update(
+          'habit_occurrences',
+          {
+            'status': HabitOccurrenceStatus.completed,
+            'completed_at': now,
+            'updated_at': now,
+          },
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        return;
+      }
+
       final occId = AppDatabase.newId();
       await txn.insert('habit_occurrences', {
         'id': occId,
@@ -82,5 +110,20 @@ class HabitRepository {
         'metadata': '{"scheduledDate":$scheduledDate}',
       });
     });
+  }
+
+  Future<bool> isDoneToday(String habitId) async {
+    final db = await _db.database;
+    final rows = await db.query(
+      'habit_occurrences',
+      where: 'habit_id = ? AND scheduled_date = ? AND status = ?',
+      whereArgs: [
+        habitId,
+        AppDatabase.startOfTodayMs(),
+        HabitOccurrenceStatus.completed,
+      ],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
   }
 }
