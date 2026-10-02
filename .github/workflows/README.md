@@ -1,19 +1,29 @@
 # GitHub Actions
 
-## EAS APK Build
+## Manual APK Build (`build-apk.yml`)
 
-Builds an Android **APK in the cloud** so you can install it on your phone.
+Same style as **Resonate**: GitHub builds an APK → you download the artifact → install on your phone.
 
-**No Android Studio. No local SDK.**
-
-### Before first run
-
-1. Free Expo account + one terminal setup (see `mobile/README.md`)
-2. Repo secret **`EXPO_TOKEN`** from https://expo.dev/settings/access-tokens
-3. `projectId` present in `mobile/app.json` (written by `eas build:configure`)
+**No Android Studio. No Expo Go required for the installable APK.**
 
 ### Run
 
-**Actions → EAS APK Build → Run workflow** → profile **`preview`**
+1. **Actions → Manual APK Build → Run workflow**
+2. Wait for the job to finish (several minutes)
+3. Open the run → **Artifacts** → download `personal-life-os-debug-apk`
+4. Unzip, copy `app-debug.apk` to your phone, install it
 
-APK appears under your project on https://expo.dev (Builds). Open that link on your phone to download and install.
+### What it does
+
+1. Installs Node, Java 17, Android SDK
+2. `npm install` in `mobile/`
+3. `npx expo prebuild` (generates the `android/` folder in CI)
+4. `./gradlew assembleDebug`
+5. Uploads `app-debug.apk` as a GitHub Actions artifact
+
+### Recent failures (fixed in this workflow)
+
+| Failure | Cause | Fix |
+|---------|--------|-----|
+| Setup Android SDK | `setup-android@v3` still installs removed `tools` package | Use `@v4` |
+| Setup Node.js | `cache: npm` + missing `mobile/package-lock.json` | Drop npm cache unless lockfile exists |
