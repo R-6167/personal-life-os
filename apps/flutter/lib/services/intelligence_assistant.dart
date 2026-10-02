@@ -1,12 +1,13 @@
 import '../data/bill_repository.dart';
 import '../data/database.dart';
 import '../data/expense_repository.dart';
+import '../data/export_service.dart';
 import '../data/habit_repository.dart';
 import '../data/project_repository.dart';
 import '../data/task_repository.dart';
 import '../domain/enums.dart';
 
-/// Local PersonalContext + planning-oriented assistant (offline).
+/// Local PersonalContext + patterns from activity history.
 class IntelligenceAssistant {
   IntelligenceAssistant({AppDatabase? db}) : _db = db ?? AppDatabase.instance;
 
@@ -26,6 +27,13 @@ class IntelligenceAssistant {
     final billOcc = await bills.listOpenOccurrences();
     final spend = await expenses.totalMinorThisMonth();
     final activeProjects = await projects.listActive();
+    final activity = await ExportService(_db).recentActivity(limit: 80);
+
+    final eventCounts = <String, int>{};
+    for (final a in activity) {
+      final t = '${a['event_type']}';
+      eventCounts[t] = (eventCounts[t] ?? 0) + 1;
+    }
 
     return PersonalContext(
       now: DateTime.now(),
@@ -41,6 +49,8 @@ class IntelligenceAssistant {
       habitTitles: activeHabits.take(5).map((h) => h.title).toList(),
       billTitles: billOcc.take(3).map((b) => b.billName ?? 'Bill').toList(),
       projectTitles: activeProjects.take(3).map((p) => p.title).toList(),
+      recentEventTypes: eventCounts,
+      activityCount: activity.length,
     );
   }
 
@@ -48,6 +58,9 @@ class IntelligenceAssistant {
     final ctx = await buildContext();
     final q = userMessage.trim().toLowerCase();
 
+    if (q.contains('pattern') || q.contains('history') || q.contains('lately')) {
+      return ctx.patternSummary();
+    }
     if (q.isEmpty ||
         q.contains('today') ||
         q.contains('brief') ||
@@ -69,7 +82,7 @@ class IntelligenceAssistant {
     }
     if (q.contains('bill') || q.contains('pay')) {
       if (ctx.openBillCount == 0) return 'No open bill occurrences.';
-      return 'Open bills:\n• ${ctx.billTitles.join('\n• ')}\nPay from Today or Finance — that records an expense.';
+      return 'Open bills:\n• ${ctx.billTitles.join('\n• ')}\nPay from Today or Finance — you enter the amount.';
     }
     if (q.contains('project')) {
       if (ctx.projectCount == 0) return 'No active projects. Create one under a goal in Life.';
@@ -88,8 +101,8 @@ class IntelligenceAssistant {
     }
     if (q.contains('help') || q.contains('what can')) {
       return 'Offline assistant on your SQLite data.\n'
-          'Try: focus · overdue · tasks · habits · bills · projects · spend\n'
-          'I suggest next actions from Personal Context — no cloud.';
+          'Try: focus · overdue · tasks · habits · bills · projects · spend · patterns\n'
+          'I suggest next actions from Personal Context + recent activity.';
     }
     return ctx.focusAdvice();
   }
@@ -110,6 +123,8 @@ class PersonalContext {
     required this.habitTitles,
     required this.billTitles,
     required this.projectTitles,
+    required this.recentEventTypes,
+    required this.activityCount,
   });
 
   final DateTime now;
@@ -125,10 +140,22 @@ class PersonalContext {
   final List<String> habitTitles;
   final List<String> billTitles;
   final List<String> projectTitles;
+  final Map<String, int> recentEventTypes;
+  final int activityCount;
 
   String briefing() => focusAdvice();
 
-  /// "What should I focus on" style answer across domains.
+  String patternSummary() {
+    if (activityCount == 0) {
+      return 'Not enough history yet. Use the app — patterns appear from activity_events.';
+    }
+    final sorted = recentEventTypes.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    final top = sorted.take(5).map((e) => '• ${e.key}: ${e.value}').join('\n');
+    return 'Recent activity patterns ($activityCount events sampled):\n$top\n'
+        'Use this as a signal of where your energy goes.';
+  }
+
   String focusAdvice() {
     final hour = now.hour;
     final greet = hour < 12
@@ -168,8 +195,11 @@ class PersonalContext {
       )
       ..writeln(
         'Spend this month: ${Defaults.currency} ${(monthSpendMinor / 100).toStringAsFixed(2)}',
-      )
-      ..writeln('(Offline · from your data only)');
+      );
+    if (activityCount > 0) {
+      buf.writeln('Ask "patterns" for recent activity signals.');
+    }
+    buf.writeln('(Offline · from your data only)');
     return buf.toString();
   }
 }
