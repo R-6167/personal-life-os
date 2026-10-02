@@ -7,41 +7,57 @@ class AccountRepository {
 
   Future<List<Map<String, Object?>>> list() async {
     final db = await _db.database;
-    return db.query('financial_accounts', orderBy: 'name ASC');
+    return db.query(
+      'financial_accounts',
+      where: 'archived_at IS NULL',
+      orderBy: 'name ASC',
+    );
   }
 
   Future<void> create({
     required String name,
     required String type,
     double? balanceMajor,
-    String? institution,
+    String? currency,
   }) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
+    final minor = balanceMajor == null ? null : (balanceMajor * 100).round();
     await (await _db.database).insert('financial_accounts', {
       'id': AppDatabase.newId(),
       'owner_id': ownerId,
       'name': name,
       'type': type,
-      'currency': Defaults.currency,
-      'current_balance_minor': balanceMajor == null ? null : (balanceMajor * 100).round(),
-      'institution': institution,
-      'is_tracked': 1,
+      'currency': currency ?? Defaults.currency,
+      'current_balance_minor': minor ?? 0,
       'created_at': now,
       'updated_at': now,
     });
   }
 
-  Future<void> setBalance(String id, double balanceMajor) async {
+  Future<void> adjustBalance({
+    required String accountId,
+    required double deltaMajor,
+  }) async {
     final db = await _db.database;
+    final rows = await db.query('financial_accounts', where: 'id = ?', whereArgs: [accountId], limit: 1);
+    if (rows.isEmpty) return;
+    final current = (rows.first['current_balance_minor'] as int?) ?? 0;
+    final next = current + (deltaMajor * 100).round();
     await db.update(
       'financial_accounts',
-      {
-        'current_balance_minor': (balanceMajor * 100).round(),
-        'updated_at': AppDatabase.nowMs(),
-      },
+      {'current_balance_minor': next, 'updated_at': AppDatabase.nowMs()},
       where: 'id = ?',
-      whereArgs: [id],
+      whereArgs: [accountId],
     );
+  }
+
+  Future<int> totalBalanceMinor() async {
+    final rows = await list();
+    var sum = 0;
+    for (final r in rows) {
+      sum += (r['current_balance_minor'] as int?) ?? 0;
+    }
+    return sum;
   }
 }
