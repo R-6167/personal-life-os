@@ -12,7 +12,7 @@ class IncomeRepository {
     return rows.map(Income.fromMap).toList();
   }
 
-  Future<Income> create({equired String source, required double amountMajor, String? accountId}) async {
+  Future<Income> create({required String source, required double amountMajor, String? accountId}) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
     final minor = (amountMajor * 100).round();
@@ -61,5 +61,16 @@ class IncomeRepository {
       currency: Defaults.currency,
       occurredAt: now,
     );
+  }
+
+  Future<int> totalMinorThisMonth() async {
+    final db = await _db.database;
+    final now = DateTime.now();
+    final start = DateTime(now.year, now.month, 1).millisecondsSinceEpoch;
+    final rows = await db.rawQuery(
+      'SELECT COALESCE(SUM(amount_minor), 0) AS s FROM income WHERE occurred_at >= ?',
+      [start],
+    );
+    return (rows.first['s'] as int?) ?? 0;
   }
 }
