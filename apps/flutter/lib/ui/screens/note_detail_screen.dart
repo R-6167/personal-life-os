@@ -22,11 +22,20 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
   Note? _note;
   List<Map<String, Object?>> _links = [];
   bool _loading = true;
+  bool _editing = false;
+  late TextEditingController _content;
 
   @override
   void initState() {
     super.initState();
+    _content = TextEditingController();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _content.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -35,8 +44,36 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
     setState(() {
       _note = n;
       _links = links;
+      if (n != null) _content.text = n.content;
       _loading = false;
     });
+  }
+
+  Future<void> _save() async {
+    if (_content.text.trim().isEmpty) return;
+    await NoteRepository(AppDatabase.instance).update(
+      id: widget.noteId,
+      content: _content.text.trim(),
+    );
+    setState(() => _editing = false);
+    await _load();
+  }
+
+  Future<void> _delete() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.metal,
+        title: const Text('Delete note?', style: TextStyle(color: AppTheme.silver)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await NoteRepository(AppDatabase.instance).delete(widget.noteId);
+    if (mounted) Navigator.pop(context, true);
   }
 
   Future<void> _linkEntity() async {
@@ -99,19 +136,28 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
         appBar: AppBar(
           title: Text(n.title ?? 'Note'),
           actions: [
-            IconButton(
-              icon: const Icon(Icons.link),
-              tooltip: 'Link to task/project',
-              onPressed: _linkEntity,
-            ),
+            if (_editing)
+              IconButton(icon: const Icon(Icons.check), onPressed: _save)
+            else
+              IconButton(icon: const Icon(Icons.edit_outlined), onPressed: () => setState(() => _editing = true)),
+            IconButton(icon: const Icon(Icons.link), onPressed: _linkEntity),
+            IconButton(icon: const Icon(Icons.delete_outline), onPressed: _delete),
           ],
         ),
         body: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            GlassCard(
-              child: Text(n.content, style: const TextStyle(color: AppTheme.silver, height: 1.4)),
-            ),
+            if (_editing)
+              TextField(
+                controller: _content,
+                maxLines: 12,
+                style: const TextStyle(color: AppTheme.silver, height: 1.4),
+                decoration: const InputDecoration(labelText: 'Content'),
+              )
+            else
+              GlassCard(
+                child: Text(n.content, style: const TextStyle(color: AppTheme.silver, height: 1.4)),
+              ),
             const SizedBox(height: 16),
             const Text('Links', style: TextStyle(color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
             const SizedBox(height: 8),

@@ -51,6 +51,56 @@ class NoteRepository {
     return note;
   }
 
+  Future<void> update({required String id, String? title, required String content}) async {
+    final now = AppDatabase.nowMs();
+    final ownerId = await _db.requireOwnerId();
+    await _db.txn((txn) async {
+      await txn.update(
+        'notes',
+        {
+          'title': title,
+          'content': content,
+          'updated_at': now,
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      await txn.insert('activity_events', {
+        'id': AppDatabase.newId(),
+        'owner_id': ownerId,
+        'event_type': 'NOTE_UPDATED',
+        'entity_type': 'NOTE',
+        'entity_id': id,
+        'occurred_at': now,
+        'recorded_at': now,
+        'source': EventSource.user,
+      });
+    });
+  }
+
+  Future<void> delete(String id) async {
+    final now = AppDatabase.nowMs();
+    final ownerId = await _db.requireOwnerId();
+    await _db.txn((txn) async {
+      await txn.update(
+        'notes',
+        {'archived_at': now, 'updated_at': now},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      await txn.insert('activity_events', {
+        'id': AppDatabase.newId(),
+        'owner_id': ownerId,
+        'event_type': 'NOTE_DELETED',
+        'entity_type': 'NOTE',
+        'entity_id': id,
+        'occurred_at': now,
+        'recorded_at': now,
+        'source': EventSource.user,
+      });
+    });
+  }
+
   Future<void> linkTo({
     required String noteId,
     required String targetType,
