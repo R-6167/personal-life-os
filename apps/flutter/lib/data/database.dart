@@ -12,7 +12,7 @@ class AppDatabase {
 
   Database? _db;
   static const _uuid = Uuid();
-  static const schemaVersion = 3;
+  static const schemaVersion = 4;
 
   Future<Database> get database async {
     if (_db != null) return _db!;
@@ -57,8 +57,7 @@ class AppDatabase {
     final raw = await rootBundle.loadString('assets/schema.sql');
     for (final stmt in _splitSql(raw)) {
       final s = stmt.trim();
-      if (s.isEmpty) continue;
-      if (s.toUpperCase().startsWith('PRAGMA')) continue;
+      if (s.isEmpty || s.toUpperCase().startsWith('PRAGMA')) continue;
       await db.execute(s);
     }
   }
@@ -70,12 +69,7 @@ class AppDatabase {
       final idx = line.indexOf('--');
       buf.writeln(idx >= 0 ? line.substring(0, idx) : line);
     }
-    return buf
-        .toString()
-        .split(';')
-        .map((s) => s.trim())
-        .where((s) => s.isNotEmpty)
-        .toList();
+    return buf.toString().split(';').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
   }
 
   Future<void> _seedDefaultUser(Database db) async {
@@ -102,6 +96,19 @@ class AppDatabase {
     return rows.first['id'] as String;
   }
 
+  /// Run several writes in one SQLite transaction.
+  Future<T> txn<T>(Future<T> Function(Transaction txn) action) async {
+    final db = await database;
+    return db.transaction(action);
+  }
+
   static String newId() => _uuid.v4();
   static int nowMs() => DateTime.now().millisecondsSinceEpoch;
+
+  static int startOfTodayMs() {
+    final n = DateTime.now();
+    return DateTime(n.year, n.month, n.day).millisecondsSinceEpoch;
+  }
+
+  static int endOfTodayMs() => startOfTodayMs() + const Duration(days: 1).inMilliseconds - 1;
 }
