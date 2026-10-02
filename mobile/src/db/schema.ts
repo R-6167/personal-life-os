@@ -1,4 +1,4 @@
-/** Mobile SQLite schema — aligned with domain entity shapes (snake_case columns). */
+/** Mobile SQLite schema — aligned with product Life + Projects core. */
 export const SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
 
@@ -10,6 +10,19 @@ CREATE TABLE IF NOT EXISTS users (
   currency TEXT NOT NULL DEFAULT 'KES',
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS people (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  email TEXT,
+  phone TEXT,
+  notes TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  archived_at INTEGER,
+  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS goals (
@@ -46,11 +59,29 @@ CREATE TABLE IF NOT EXISTS projects (
   FOREIGN KEY(goal_id) REFERENCES goals(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS milestones (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT,
+  status TEXT NOT NULL DEFAULT 'OPEN',
+  target_date INTEGER,
+  completed_at INTEGER,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
   owner_id TEXT NOT NULL,
   project_id TEXT,
   goal_id TEXT,
+  parent_task_id TEXT,
+  milestone_id TEXT,
   title TEXT NOT NULL,
   description TEXT,
   status TEXT NOT NULL DEFAULT 'INBOX',
@@ -63,7 +94,9 @@ CREATE TABLE IF NOT EXISTS tasks (
   archived_at INTEGER,
   FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE SET NULL,
-  FOREIGN KEY(goal_id) REFERENCES goals(id) ON DELETE SET NULL
+  FOREIGN KEY(goal_id) REFERENCES goals(id) ON DELETE SET NULL,
+  FOREIGN KEY(parent_task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+  FOREIGN KEY(milestone_id) REFERENCES milestones(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS habits (
@@ -93,6 +126,67 @@ CREATE TABLE IF NOT EXISTS habit_occurrences (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   FOREIGN KEY(habit_id) REFERENCES habits(id) ON DELETE CASCADE,
+  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS notes (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  title TEXT,
+  body TEXT NOT NULL,
+  project_id TEXT,
+  goal_id TEXT,
+  pinned INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  archived_at INTEGER,
+  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE SET NULL,
+  FOREIGN KEY(goal_id) REFERENCES goals(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS events (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT,
+  location TEXT,
+  starts_at INTEGER NOT NULL,
+  ends_at INTEGER,
+  all_day INTEGER NOT NULL DEFAULT 0,
+  project_id TEXT,
+  status TEXT NOT NULL DEFAULT 'SCHEDULED',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS reminders (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT,
+  remind_at INTEGER NOT NULL,
+  entity_type TEXT,
+  entity_id TEXT,
+  status TEXT NOT NULL DEFAULT 'PENDING',
+  completed_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS inbox_items (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  raw_text TEXT NOT NULL,
+  suggested_type TEXT,
+  status TEXT NOT NULL DEFAULT 'OPEN',
+  processed_entity_type TEXT,
+  processed_entity_id TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
   FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
@@ -173,6 +267,11 @@ CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_habit_occ_owner ON habit_occurrences(owner_id);
 CREATE INDEX IF NOT EXISTS idx_bill_occ_owner ON bill_occurrences(owner_id);
 CREATE INDEX IF NOT EXISTS idx_activity_owner ON activity_events(owner_id, occurred_at);
+CREATE INDEX IF NOT EXISTS idx_notes_owner ON notes(owner_id);
+CREATE INDEX IF NOT EXISTS idx_events_starts ON events(owner_id, starts_at);
+CREATE INDEX IF NOT EXISTS idx_reminders_at ON reminders(owner_id, remind_at);
+CREATE INDEX IF NOT EXISTS idx_inbox_status ON inbox_items(owner_id, status);
+CREATE INDEX IF NOT EXISTS idx_milestones_project ON milestones(project_id);
 `;
 
 export const DEFAULT_OWNER_ID = 'user_local';
