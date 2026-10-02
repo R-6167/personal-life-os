@@ -20,8 +20,8 @@ class ExpenseRepository {
     required String description,
     required double amountMajor,
     String? merchant,
+    String? accountId,
   }) async {
-    final db = await _db.database;
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
     final minor = (amountMajor * 100).round();
@@ -35,17 +35,34 @@ class ExpenseRepository {
       createdAt: now,
       updatedAt: now,
     );
-    await db.insert('expenses', expense.toInsertMap());
-    await db.insert('activity_events', {
-      'id': AppDatabase.newId(),
-      'owner_id': ownerId,
-      'event_type': 'EXPENSE_RECORDED',
-      'entity_type': 'EXPENSE',
-      'entity_id': expense.id,
-      'occurred_at': now,
-      'recorded_at': now,
-      'source': EventSource.user,
-      'metadata': '{"amount":$minor,"currency":"${Defaults.currency}"}',
+    await _db.txn((txn) async {
+      final map = expense.toInsertMap();
+      if (accountId != null) map['account_id'] = accountId;
+      if (merchant != null) map['merchant'] = merchant;
+      await txn.insert('expenses', map);
+      if (accountId != null) {
+        final rows = await txn.query('financial_accounts', where: 'id = ?', whereArgs: [accountId], limit: 1);
+        if (rows.isNotEmpty && rows.first['current_balance_minor'] != null) {
+          final bal = (rows.first['current_balance_minor'] as int) - minor;
+          await txn.update(
+            'financial_accounts',
+            {'current_balance_minor': bal, 'updated_at': now},
+            where: 'id = ?',
+            whereArgs: [accountId],
+          );
+        }
+      }
+      await txn.insert('activity_events', {
+        'id': AppDatabase.newId(),
+        'owner_id': ownerId,
+        'event_type': 'EXPENSE_RECORDED',
+        'entity_type': 'EXPENSE',
+        'entity_id': expense.id,
+        'occurred_at': now,
+        'recorded_at': now,
+        'source': EventSource.user,
+        'metadata': '{"amount":$minor,"currency":"${Defaults.currency}"${accountId != null ? ',"accountId":"$accountId"' : ''}}',
+      });
     });
     return expense;
   }

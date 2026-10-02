@@ -12,7 +12,7 @@ class IncomeRepository {
     return rows.map(Income.fromMap).toList();
   }
 
-  Future<Income> create({required String source, required double amountMajor}) async {
+  Future<Income> create({equired String source, required double amountMajor, String? accountId}) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
     final minor = (amountMajor * 100).round();
@@ -21,6 +21,7 @@ class IncomeRepository {
       await txn.insert('income', {
         'id': id,
         'owner_id': ownerId,
+        'account_id': accountId,
         'source': source,
         'amount_minor': minor,
         'currency': Defaults.currency,
@@ -28,6 +29,18 @@ class IncomeRepository {
         'created_at': now,
         'updated_at': now,
       });
+      if (accountId != null) {
+        final rows = await txn.query('financial_accounts', where: 'id = ?', whereArgs: [accountId], limit: 1);
+        if (rows.isNotEmpty && rows.first['current_balance_minor'] != null) {
+          final bal = (rows.first['current_balance_minor'] as int) + minor;
+          await txn.update(
+            'financial_accounts',
+            {'current_balance_minor': bal, 'updated_at': now},
+            where: 'id = ?',
+            whereArgs: [accountId],
+          );
+        }
+      }
       await txn.insert('activity_events', {
         'id': AppDatabase.newId(),
         'owner_id': ownerId,
@@ -37,9 +50,16 @@ class IncomeRepository {
         'occurred_at': now,
         'recorded_at': now,
         'source': EventSource.user,
-        'metadata': '{"amount":$minor,"currency":"${Defaults.currency}"}',
+        'metadata': '{"amount":$minor,"currency":"${Defaults.currency}"${accountId != null ? ',"accountId":"$accountId"' : ''}}',
       });
     });
-    return Income(id: id, ownerId: ownerId, source: source, amountMinor: minor, currency: Defaults.currency, occurredAt: now);
+    return Income(
+      id: id,
+      ownerId: ownerId,
+      source: source,
+      amountMinor: minor,
+      currency: Defaults.currency,
+      occurredAt: now,
+    );
   }
 }
