@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { SafeAreaView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { AppDataProvider } from './src/context/AppDataContext';
 import { useAppDataMock } from './src/hooks/useAppDataMock';
@@ -11,8 +11,16 @@ type Screen = 'Today' | 'Tasks' | 'Habits' | 'Finances';
 
 const tabs: Screen[] = ['Today', 'Tasks', 'Habits', 'Finances'];
 
+const greetings = () => {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
+};
+
 function AppContent() {
   const [activeScreen, setActiveScreen] = useState<Screen>('Today');
+  const eyebrow = useMemo(() => greetings(), []);
 
   const renderScreen = () => {
     switch (activeScreen) {
@@ -34,8 +42,8 @@ function AppContent() {
       <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
 
       <View style={styles.headerCard}>
-        <Text style={styles.eyebrow}>Good morning</Text>
-        <Text style={styles.title}>Today</Text>
+        <Text style={styles.eyebrow}>{eyebrow}</Text>
+        <Text style={styles.title}>{activeScreen}</Text>
       </View>
 
       <View style={styles.screenContainer}>{renderScreen()}</View>
