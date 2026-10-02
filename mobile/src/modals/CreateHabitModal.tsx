@@ -11,6 +11,17 @@ import {
 } from 'react-native';
 import { useAppData } from '../context/AppDataContext';
 
+const FREQS = ['DAILY', 'WEEKLY', 'MONTHLY'] as const;
+const DOW = [
+  { n: 1, l: 'Mon' },
+  { n: 2, l: 'Tue' },
+  { n: 3, l: 'Wed' },
+  { n: 4, l: 'Thu' },
+  { n: 5, l: 'Fri' },
+  { n: 6, l: 'Sat' },
+  { n: 0, l: 'Sun' },
+];
+
 export function CreateHabitModal({
   visible,
   onClose,
@@ -21,7 +32,13 @@ export function CreateHabitModal({
   const { createHabit } = useAppData();
   const [title, setTitle] = useState('');
   const [minutes, setMinutes] = useState('');
+  const [frequency, setFrequency] = useState<(typeof FREQS)[number]>('DAILY');
+  const [days, setDays] = useState<number[]>([1, 2, 3, 4, 5]);
   const [saving, setSaving] = useState(false);
+
+  const toggleDay = (n: number) => {
+    setDays((prev) => (prev.includes(n) ? prev.filter((d) => d !== n) : [...prev, n]));
+  };
 
   const submit = async () => {
     if (!title.trim() || saving) return;
@@ -31,9 +48,12 @@ export function CreateHabitModal({
       await createHabit({
         title: title.trim(),
         targetMinutes: Number.isFinite(m) && m > 0 ? m : undefined,
+        frequency,
+        daysOfWeek: frequency === 'WEEKLY' ? days : null,
       });
       setTitle('');
       setMinutes('');
+      setFrequency('DAILY');
       onClose();
     } finally {
       setSaving(false);
@@ -64,6 +84,34 @@ export function CreateHabitModal({
             onChangeText={setMinutes}
             keyboardType="number-pad"
           />
+          <Text style={styles.label}>Frequency</Text>
+          <View style={styles.chips}>
+            {FREQS.map((f) => (
+              <TouchableOpacity
+                key={f}
+                style={[styles.chip, frequency === f && styles.chipActive]}
+                onPress={() => setFrequency(f)}
+              >
+                <Text style={styles.chipText}>{f}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          {frequency === 'WEEKLY' ? (
+            <>
+              <Text style={styles.label}>Days</Text>
+              <View style={styles.chips}>
+                {DOW.map((d) => (
+                  <TouchableOpacity
+                    key={d.n}
+                    style={[styles.chip, days.includes(d.n) && styles.chipActive]}
+                    onPress={() => toggleDay(d.n)}
+                  >
+                    <Text style={styles.chipText}>{d.l}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          ) : null}
           <View style={styles.actions}>
             <TouchableOpacity style={styles.cancel} onPress={onClose}>
               <Text style={styles.cancelText}>Cancel</Text>
@@ -108,6 +156,18 @@ const styles = StyleSheet.create({
     fontSize: 15,
     marginBottom: 10,
   },
+  label: { color: '#94a3b8', fontSize: 12, fontWeight: '600', marginBottom: 6, marginTop: 4 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  chip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: '#0f172a',
+    borderWidth: 1,
+    borderColor: '#1f2937',
+  },
+  chipActive: { backgroundColor: '#1d4ed8', borderColor: '#60a5fa' },
+  chipText: { color: '#e2e8f0', fontSize: 12, fontWeight: '600' },
   actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 12 },
   cancel: { paddingHorizontal: 14, paddingVertical: 10 },
   cancelText: { color: '#94a3b8', fontWeight: '600' },
