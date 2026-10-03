@@ -123,6 +123,20 @@ class PlanningRepository {
     return blockId;
   }
 
+  /// Alias used by Planning UI drag-drop for unscheduled tasks.
+  Future<String> dropTaskOntoDay({
+    required String taskId,
+    required DateTime start,
+    int durationMinutes = 30,
+    String? title,
+  }) =>
+      scheduleTaskSession(
+        taskId: taskId,
+        start: start,
+        durationMinutes: durationMinutes,
+        title: title,
+      );
+
   /// Atomic reschedule of task session + matching time blocks.
   Future<void> rescheduleTaskSession({
     required String taskId,
@@ -230,11 +244,13 @@ class PlanningRepository {
   Future<void> moveBlock({
     required String blockId,
     required DateTime start,
-    required DateTime end,
+    DateTime? end,
+    int? durationMinutes,
   }) async {
     final now = AppDatabase.nowMs();
     final startMs = start.millisecondsSinceEpoch;
-    final endMs = end.millisecondsSinceEpoch;
+    final resolvedEnd = end ?? start.add(Duration(minutes: durationMinutes ?? 30));
+    final endMs = resolvedEnd.millisecondsSinceEpoch;
     final db = await _db.database;
     final rows = await db.query('time_blocks', where: 'id = ?', whereArgs: [blockId], limit: 1);
     if (rows.isEmpty) return;
