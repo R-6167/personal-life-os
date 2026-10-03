@@ -5,14 +5,10 @@ import '../data/expense_repository.dart';
 import '../data/extended_repository.dart';
 import '../data/income_repository.dart';
 import '../domain/enums.dart';
+import 'domain_recurrence.dart';
 import 'recurrence_engine.dart';
 
 /// Connected financial operations — one system, not isolated screens.
-///
-/// Bill → reminder → payment → expense → account → history
-/// Subscription → renewal → payment → expense → history
-/// Debt → payment → remaining → history
-/// Savings → contribution → progress → history
 class FinanceService {
   FinanceService({AppDatabase? db}) : _db = db ?? AppDatabase.instance;
 
@@ -82,8 +78,6 @@ class FinanceService {
     ''', [limit]);
     return rows;
   }
-
-  // ── Debt: payment → remaining → expense/income → account → history ──
 
   Future<void> payDebtFromAccount({
     required String debtId,
@@ -170,8 +164,6 @@ class FinanceService {
     });
   }
 
-  // ── Savings: contribution → progress → expense → account → history ──
-
   Future<void> contributeSavingsFromAccount({
     required String goalId,
     required double amountMajor,
@@ -237,8 +229,6 @@ class FinanceService {
     });
   }
 
-  // ── Subscription: renewal → payment → expense → account → next reminder ──
-
   Future<String> createSubscription({
     required String name,
     required double amountMajor,
@@ -292,7 +282,6 @@ class FinanceService {
     return id;
   }
 
-  /// Pay a subscription renewal (records expense, updates balance, schedules next).
   Future<void> paySubscription({
     required String subscriptionId,
     double? amountMajor,
@@ -308,14 +297,17 @@ class FinanceService {
     final minor = amountMajor != null
         ? (amountMajor * 100).round()
         : ((s['amount_minor'] as int?) ?? 0);
-    final freq = (s['frequency'] as String?) ?? 'MONTHLY';
     final account = accountId ?? s['default_account_id'] as String?;
-    final next = RecurrenceEngine.nextAfter(
-      now,
-      frequency: freq,
-      interval: 1,
-      monthDay: DateTime.now().day,
+    final rule = DomainRecurrence.ruleFromScheduleMap(
+      s,
+      fallbackStart: DateTime.fromMillisecondsSinceEpoch(now),
     );
+    final next = DomainRecurrence.nextAfterMs(rule, now) ??
+        DomainRecurrence.nextDueFromLegacy(
+          fromMs: now,
+          frequency: '${s['frequency'] ?? 'MONTHLY'}',
+          monthDay: DateTime.now().day,
+        );
 
     await _db.txn((txn) async {
       final expenseId = AppDatabase.newId();
@@ -343,7 +335,6 @@ class FinanceService {
         whereArgs: [subscriptionId],
       );
 
-      // Cancel old pending sub reminders, add next
       try {
         await txn.update(
           'reminders',
