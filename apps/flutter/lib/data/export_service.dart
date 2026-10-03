@@ -22,6 +22,9 @@ class ExportService {
     'activity_events',
   ];
 
+  /// Hard limit on decoded backup text size (chars).
+  static const maxRawChars = 30 * 1024 * 1024;
+
   Future<String> buildBackupJson() async {
     final db = await _db.database;
     final data = <String, dynamic>{
@@ -42,7 +45,14 @@ class ExportService {
   }
 
   Future<ImportResult> importBackupJson(String raw, {bool replaceUsers = false}) async {
-    final verify = await IntegrityService(_db).verifyBackupJson(raw);
+    if (raw.length > maxRawChars) {
+      return ImportResult(
+        ok: false,
+        message: 'Backup too large (${(raw.length / 1024).toStringAsFixed(0)} KB).',
+      );
+    }
+
+    final verify = await IntegrityService(db: _db).verifyBackupJson(raw);
     if (!verify.ok) {
       return ImportResult(ok: false, message: verify.checks.join('; '));
     }
@@ -58,8 +68,18 @@ class ExportService {
     }
     final map = Map<String, dynamic>.from(decoded);
 
+    // Reject non-PLOS payloads that happen to be JSON objects.
+    final app = map['app']?.toString();
+    if (app != null && app != 'personal-life-os') {
+      return ImportResult(
+        ok: false,
+        message: 'Unrecognized backup app tag: $app',
+      );
+    }
+
     final inserted = <String, int>{};
     var total = 0;
+    var skipped = 0;
 
     await _db.txn((txn) async {
       for (final table in tables) {
@@ -68,16 +88,34 @@ class ExportService {
         if (rows is! List) continue;
         var n = 0;
         for (final row in rows) {
-          if (row is! Map) continue;
+          if (row is! Map) {
+            skipped++;
+            continue;
+          }
           final snake = <String, Object?>{};
           row.forEach((k, v) {
-            snake[_toSnake('$k')] = v;
+            final key = _toSnake('$k');
+            final sanitized = _sanitizeValue(v);
+            if (sanitized != null || v == null) {
+              snake[key] = sanitized;
+            }
           });
-          if (snake['id'] == null) continue;
+          if (snake['id'] == null) {
+            skipped++;
+            continue;
+          }
+          // id must be a short non-empty string
+          final id = snake['id'];
+          if (id is! String || id.isEmpty || id.length > 80) {
+            skipped++;
+            continue;
+          }
           try {
             await txn.insert(table, snake, conflictAlgorithm: ConflictAlgorithm.ignore);
             n++;
-          } catch (_) {}
+          } catch (_) {
+            skipped++;
+          }
         }
         if (n > 0) {
           inserted[table] = n;
@@ -86,16 +124,34 @@ class ExportService {
       }
     });
 
-    final report = await IntegrityService(_db).run(repair: true);
+    final report = await IntegrityService(db: _db).run(repair: true);
 
+    final skipNote = skipped > 0 ? ' Skipped $skipped invalid rows.' : '';
     return ImportResult(
       ok: true,
       message: total == 0
-          ? 'No new rows imported (may already exist). Integrity: ${report.checks.length} checks.'
-          : 'Imported $total rows across ${inserted.length} tables. Integrity fixed ${report.fixed}.',
+          ? 'No new rows imported (may already exist). Integrity: ${report.checks.length} checks.$skipNote'
+          : 'Imported $total rows across ${inserted.length} tables. Integrity fixed ${report.fixed}.$skipNote',
       inserted: inserted,
       total: total,
     );
+  }
+
+  /// Only allow primitives SQLite can store safely.
+  Object? _sanitizeValue(Object? v) {
+    if (v == null) return null;
+    if (v is bool) return v ? 1 : 0;
+    if (v is int) return v;
+    if (v is double) {
+      if (v.isNaN || v.isInfinite) return null;
+      return v;
+    }
+    if (v is String) {
+      // Cap pathological strings
+      return v.length > 50000 ? v.substring(0, 50000) : v;
+    }
+    // Nested objects/arrays not supported in column cells
+    return null;
   }
 
   Future<List<Map<String, Object?>>> recentActivity({int limit = 40}) async {
