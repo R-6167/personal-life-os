@@ -11,6 +11,7 @@ import '../data/project_repository.dart';
 import '../data/routine_repository.dart';
 import '../domain/enums.dart';
 import '../domain/models.dart';
+import '../services/user_prefs.dart';
 
 class MorePanel extends StatefulWidget {
   const MorePanel({
@@ -48,10 +49,7 @@ class _MorePanelState extends State<MorePanel> {
   final _expenses = ExpenseRepository(AppDatabase.instance);
   final _incomeRepo = IncomeRepository(AppDatabase.instance);
 
-  final _input = TextEditingController();
-  final _amount = TextEditingController();
   final _search = TextEditingController();
-
   List<Map<String, Object?>> _people = [];
   List<Map<String, Object?>> _subs = [];
   List<Map<String, Object?>> _debts = [];
@@ -59,26 +57,21 @@ class _MorePanelState extends State<MorePanel> {
   List<Map<String, Object?>> _practical = [];
   List<Map<String, Object?>> _docs = [];
   List<Map<String, Object?>> _shop = [];
-  List<Map<String, String>> _searchHits = [];
+  List<Map<String, Object?>> _searchHits = [];
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _loadExtra();
   }
 
   @override
   void dispose() {
-    _input.dispose();
-    _amount.dispose();
     _search.dispose();
     super.dispose();
   }
 
-  Future<void> _load() async {
-    setState(() {
-      // async load below
-    });
+  Future<void> _loadExtra() async {
     final people = await _ext.listPeople();
     final subs = await _ext.listSubscriptions();
     final debts = await _ext.listDebts();
@@ -99,16 +92,15 @@ class _MorePanelState extends State<MorePanel> {
   }
 
   Future<void> _refresh() async {
-    await _load();
+    await _loadExtra();
     await widget.onChanged();
   }
 
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 100),
       children: [
-        _label('Search'),
         Row(children: [
           Expanded(
             child: TextField(
@@ -138,268 +130,137 @@ class _MorePanelState extends State<MorePanel> {
         ]),
         ..._searchHits.map((h) => ListTile(
               dense: true,
-              title: Text(h['title'] ?? '', style: const TextStyle(color: Colors.white)),
-              subtitle: Text(h['type'] ?? '', style: const TextStyle(color: Colors.white38, fontSize: 11)),
+              title: Text(
+                h['label']?.toString() ?? h['title']?.toString() ?? '',
+                style: const TextStyle(color: Colors.white),
+              ),
+              subtitle: Text(
+                h['kind']?.toString() ?? h['type']?.toString() ?? '',
+                style: const TextStyle(color: Colors.white38, fontSize: 11),
+              ),
             )),
         const Divider(color: Colors.white12),
-        _label('Projects'),
-        _quickAdd('New project…', (t) async {
-          await _projects.create(title: t);
-          await _refresh();
-        }),
-        ...widget.projects.map((p) => ListTile(
+        _label('Projects (${widget.projects.length})'),
+        ...widget.projects.take(8).map((p) => ListTile(
+              dense: true,
               title: Text(p.title, style: const TextStyle(color: Colors.white)),
-              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                IconButton(
-                  icon: const Icon(Icons.flag_outlined, color: Colors.amberAccent),
-                  onPressed: () async {
-                    await _milestones.create(projectId: p.id, title: 'Milestone');
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Milestone added')));
-                    }
-                  },
-                ),
-                IconButton(
-                  icon: const Icon(Icons.check, color: Colors.lightBlueAccent),
-                  onPressed: () async {
-                    await _projects.complete(p.id);
-                    await _refresh();
-                  },
-                ),
-              ]),
+              subtitle: Text(p.status, style: const TextStyle(color: Colors.white38, fontSize: 11)),
             )),
-        const Divider(color: Colors.white12),
-        _label('People'),
-        _quickAdd('Contact name…', (t) async {
-          await _ext.addPerson(t);
-          await _refresh();
-        }),
-        ..._people.map((p) => ListTile(
+        _label('Routines (${widget.routines.length})'),
+        ...widget.routines.take(6).map((r) => ListTile(
+              dense: true,
+              title: Text(r.name, style: const TextStyle(color: Colors.white)),
+            )),
+        _label('Bills open (${widget.billOcc.length})'),
+        ...widget.billOcc.take(6).map((o) => ListTile(
+              dense: true,
+              title: Text(o.billName ?? 'Bill', style: const TextStyle(color: Colors.white)),
+            )),
+        _label('People (${_people.length})'),
+        ..._people.take(6).map((p) => ListTile(
+              dense: true,
               title: Text('${p['name']}', style: const TextStyle(color: Colors.white)),
             )),
-        const Divider(color: Colors.white12),
-        _label('Calendar / reminders'),
-        _quickAdd('Event title…', (t) async {
-          await _ext.addEvent(title: t);
-          await _refresh();
-        }),
-        _quickAdd('Reminder…', (t) async {
-          await _ext.addReminder(t);
-          await _refresh();
-        }),
-        const Divider(color: Colors.white12),
-        _label('Routines'),
-        _quickAdd('New routine…', (t) async {
-          await _routines.create(name: t);
-          await _refresh();
-        }),
-        ...widget.routines.map((r) => ListTile(
-              title: Text(r.name, style: const TextStyle(color: Colors.white)),
-              trailing: IconButton(
-                icon: const Icon(Icons.play_arrow, color: Colors.purpleAccent),
-                onPressed: () async {
-                  await _routines.completeToday(r.id);
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Done: ${r.name}')));
-                  }
-                },
-              ),
-            )),
-        const Divider(color: Colors.white12),
-        _label('Bills'),
-        _quickAdd('Bill name…', (t) async {
-          await _bills.create(name: t, expectedMajor: 1000, dueInDays: 3);
-          await _refresh();
-        }),
-        ...widget.billOcc.map((o) => ListTile(
-              title: Text('Pay: ${o.billName}', style: const TextStyle(color: Colors.orangeAccent)),
-              trailing: TextButton(
-                onPressed: () async {
-                  await _bills.payOccurrence(o);
-                  await _refresh();
-                },
-                child: const Text('Pay'),
-              ),
-            )),
-        const Divider(color: Colors.white12),
-        _label('Subscriptions'),
-        _quickAdd('Service…', (t) async {
-          await _ext.addSubscription(t, 500);
-          await _refresh();
-        }),
-        ..._subs.map((s) => ListTile(
-              title: Text('${s['service_name']}', style: const TextStyle(color: Colors.white)),
-            )),
-        const Divider(color: Colors.white12),
-        _label('Debt'),
-        _quickAdd('Debt title…', (t) async {
-          await _ext.addDebt(title: t, amountMajor: 1000, direction: 'OWED_BY_ME');
-          await _refresh();
-        }),
-        ..._debts.map((d) => ListTile(
-              title: Text('${d['title']}', style: const TextStyle(color: Colors.white)),
-              trailing: TextButton(
-                onPressed: () async {
-                  await _ext.payDebt(d['id'] as String, 100);
-                  await _refresh();
-                },
-                child: const Text('Pay 100'),
-              ),
-            )),
-        const Divider(color: Colors.white12),
-        _label('Savings'),
-        _quickAdd('Goal name…', (t) async {
-          await _ext.addSavingsGoal(t, 10000);
-          await _refresh();
-        }),
-        ..._savings.map((s) => ListTile(
+        _label('Subscriptions (${_subs.length})'),
+        ..._subs.take(6).map((s) => ListTile(
+              dense: true,
               title: Text('${s['name']}', style: const TextStyle(color: Colors.white)),
-              trailing: TextButton(
-                onPressed: () async {
-                  await _ext.contributeSavings(s['id'] as String, 500);
-                  await _refresh();
-                },
-                child: const Text('+500'),
+            )),
+        _label('Debts (${_debts.length})'),
+        ..._debts.take(6).map((d) => ListTile(
+              dense: true,
+              title: Text('${d['title'] ?? d['counterparty']}', style: const TextStyle(color: Colors.white)),
+              subtitle: Text(
+                '${d['direction']} · ${UserPrefs.instance.currency} ${((d['remaining_amount_minor'] as int?) ?? 0) / 100}',
+                style: const TextStyle(color: Colors.white38, fontSize: 11),
               ),
             )),
-        const Divider(color: Colors.white12),
-        _label('Money (${Defaults.currency})'),
-        Row(children: [
-          Expanded(
-            flex: 2,
-            child: TextField(
-              controller: _input,
-              style: const TextStyle(color: Colors.white),
-              decoration: const InputDecoration(
-                hintText: 'Description',
-                hintStyle: TextStyle(color: Colors.white38),
-                filled: true,
-                fillColor: Color(0xFF1f2937),
-                border: OutlineInputBorder(),
-                isDense: true,
-              ),
-            ),
-          ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: TextField(
-              controller: _amount,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              style: const TextStyle(color: Colors.white),
-              decoration: const InputDecoration(
-                hintText: '0.00',
-                hintStyle: TextStyle(color: Colors.white38),
-                filled: true,
-                fillColor: Color(0xFF1f2937),
-                border: OutlineInputBorder(),
-                isDense: true,
-              ),
-            ),
-          ),
-        ]),
-        Row(children: [
-          TextButton(
-            onPressed: () async {
-              final d = _input.text.trim();
-              final a = double.tryParse(_amount.text.trim());
-              if (d.isEmpty || a == null) return;
-              await _expenses.create(description: d, amountMajor: a);
-              _input.clear();
-              _amount.clear();
-              await _refresh();
-            },
-            child: const Text('Expense'),
-          ),
-          TextButton(
-            onPressed: () async {
-              final d = _input.text.trim();
-              final a = double.tryParse(_amount.text.trim());
-              if (d.isEmpty || a == null) return;
-              await _incomeRepo.create(source: d, amountMajor: a);
-              _input.clear();
-              _amount.clear();
-              await _refresh();
-            },
-            child: const Text('Income'),
-          ),
-        ]),
-        const Divider(color: Colors.white12),
-        _label('Practical / docs / shopping'),
-        _quickAdd('Practical…', (t) async {
-          await _ext.addPractical(t);
-          await _refresh();
-        }),
-        _quickAdd('Document…', (t) async {
-          await _ext.addDocument(t);
-          await _refresh();
-        }),
-        _quickAdd('Shopping list…', (t) async {
-          await _ext.addShoppingList(t);
-          await _refresh();
-        }),
-        ..._practical.map((p) => ListTile(title: Text('${p['title']}', style: const TextStyle(color: Colors.white)))),
-        ..._docs.map((d) => ListTile(title: Text('${d['title']}', style: const TextStyle(color: Colors.white)))),
-        ..._shop.map((s) => ListTile(
+        _label('Savings (${_savings.length})'),
+        ..._savings.take(6).map((s) => ListTile(
+              dense: true,
               title: Text('${s['name']}', style: const TextStyle(color: Colors.white)),
-              trailing: IconButton(
-                icon: const Icon(Icons.add, color: Colors.white54),
-                onPressed: () async {
-                  await _ext.addShoppingItem(s['id'] as String, 'Item');
-                },
-              ),
             )),
-        const Divider(color: Colors.white12),
-        _label('Notes'),
-        _quickAdd('Note…', (t) async {
-          await _notes.create(content: t);
-          await _refresh();
-        }),
-        ...widget.notes.map((n) => ListTile(
-              title: Text(n.content, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white)),
+        _label('Notes (${widget.notes.length})'),
+        ...widget.notes.take(6).map((n) => ListTile(
+              dense: true,
+              title: Text(n.title, style: const TextStyle(color: Colors.white)),
             )),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            FilledButton.tonal(
+              onPressed: () async {
+                final c = TextEditingController();
+                final ok = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Person'),
+                    content: TextField(controller: c, autofocus: true),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                      FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Add')),
+                    ],
+                  ),
+                );
+                if (ok == true && c.text.trim().isNotEmpty) {
+                  await _ext.addPerson(c.text.trim());
+                  await _refresh();
+                }
+              },
+              child: const Text('+ Person'),
+            ),
+            FilledButton.tonal(
+              onPressed: () async {
+                final c = TextEditingController();
+                final ok = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Event'),
+                    content: TextField(controller: c, autofocus: true),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                      FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Add')),
+                    ],
+                  ),
+                );
+                if (ok == true && c.text.trim().isNotEmpty) {
+                  await _ext.addEvent(title: c.text.trim());
+                  await _refresh();
+                }
+              },
+              child: const Text('+ Event'),
+            ),
+            FilledButton.tonal(
+              onPressed: () async {
+                final c = TextEditingController();
+                final ok = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Reminder'),
+                    content: TextField(controller: c, autofocus: true),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                      FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Add')),
+                    ],
+                  ),
+                );
+                if (ok == true && c.text.trim().isNotEmpty) {
+                  await _ext.addReminder(c.text.trim());
+                  await _refresh();
+                }
+              },
+              child: const Text('+ Reminder'),
+            ),
+          ],
+        ),
       ],
     );
   }
 
   Widget _label(String t) => Padding(
-        padding: const EdgeInsets.only(top: 8, bottom: 6),
-        child: Text(t, style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w600)),
+        padding: const EdgeInsets.only(top: 12, bottom: 4),
+        child: Text(t, style: const TextStyle(color: Colors.white54, fontWeight: FontWeight.w600)),
       );
-
-  Widget _quickAdd(String hint, Future<void> Function(String) onAdd) {
-    final c = TextEditingController();
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(children: [
-        Expanded(
-          child: TextField(
-            controller: c,
-            style: const TextStyle(color: Colors.white),
-            decoration: InputDecoration(
-              hintText: hint,
-              hintStyle: const TextStyle(color: Colors.white38),
-              filled: true,
-              fillColor: const Color(0xFF1f2937),
-              border: const OutlineInputBorder(),
-              isDense: true,
-            ),
-            onSubmitted: (v) async {
-              if (v.trim().isEmpty) return;
-              await onAdd(v.trim());
-              c.clear();
-            },
-          ),
-        ),
-        IconButton(
-          onPressed: () async {
-            final v = c.text.trim();
-            if (v.isEmpty) return;
-            await onAdd(v);
-            c.clear();
-          },
-          icon: const Icon(Icons.add, color: Colors.white70),
-        ),
-      ]),
-    );
-  }
 }
