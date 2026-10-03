@@ -42,13 +42,19 @@ jobs:
 
       - name: Sync Android platform files
         run: |
-          # Non-destructive: fills missing files (gradlew, wrapper jar) without wiping custom config.
+          set +e
           flutter create . \
             --project-name personal_life_os \
             --org com.personallifeos \
             --platforms=android
-          test -f android/gradlew || test -f android/gradlew.bat
-          chmod +x android/gradlew || true
+          CREATE_CODE=$?
+          set -e
+          echo "flutter create exit=$CREATE_CODE"
+          if [ ! -f android/gradlew ]; then
+            echo "::error::android/gradlew missing after flutter create"
+            exit 1
+          fi
+          chmod +x android/gradlew
           MANIFEST=android/app/src/main/AndroidManifest.xml
           if [ -f "$MANIFEST" ] && ! grep -q POST_NOTIFICATIONS "$MANIFEST"; then
             sed -i 's|<application|<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>\n    <uses-permission android:name="android.permission.VIBRATE"/>\n    <application|' "$MANIFEST"
