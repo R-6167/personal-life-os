@@ -1,7 +1,7 @@
 name: personal_life_os
 description: Offline Personal Life OS — Material 3 glass, local intelligence, local SQLite.
 publish_to: "none"
-version: 0.12.0+16
+version: 0.13.0+17
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
