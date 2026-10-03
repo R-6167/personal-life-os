@@ -13,7 +13,7 @@ class AppDatabase {
   Database? _db;
   static const _uuid = Uuid();
 
-  static const schemaVersion = 15;
+  static const schemaVersion = 16;
 
   Future<Database> get database async {
     if (_db != null) return _db!;
@@ -58,6 +58,7 @@ class AppDatabase {
         await _migrateToV13(db);
         await _migrateToV14(db);
         await _migrateToV15(db);
+        await _migrateToV16(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 6) await _migrateToV6(db);
@@ -70,6 +71,7 @@ class AppDatabase {
         if (oldVersion < 13) await _migrateToV13(db);
         if (oldVersion < 14) await _migrateToV14(db);
         if (oldVersion < 15) await _migrateToV15(db);
+        if (oldVersion < 16) await _migrateToV16(db);
       },
     );
   }
@@ -103,7 +105,6 @@ class AppDatabase {
 
   Future<void> _migrateToV12(Database db) async {
     await _applySchema(db);
-
     await _tryAlter(db, 'ALTER TABLE tasks ADD COLUMN description TEXT');
     await _tryAlter(db, 'ALTER TABLE tasks ADD COLUMN milestone_id TEXT');
     await _tryAlter(db, 'ALTER TABLE tasks ADD COLUMN scheduled_start INTEGER');
@@ -111,11 +112,9 @@ class AppDatabase {
     await _tryAlter(db, 'ALTER TABLE tasks ADD COLUMN estimated_minutes INTEGER');
     await _tryAlter(db, 'ALTER TABLE tasks ADD COLUMN completed_at INTEGER');
     await _tryAlter(db, 'ALTER TABLE tasks ADD COLUMN archived_at INTEGER');
-
     await _tryAlter(db, 'ALTER TABLE habits ADD COLUMN description TEXT');
     await _tryAlter(db, 'ALTER TABLE habits ADD COLUMN archived_at INTEGER');
     await _tryAlter(db, 'ALTER TABLE routines ADD COLUMN archived_at INTEGER');
-
     await _tryAlter(db, 'ALTER TABLE expenses ADD COLUMN account_id TEXT');
     await _tryAlter(db, 'ALTER TABLE expenses ADD COLUMN category_id TEXT');
     await _tryAlter(db, 'ALTER TABLE expenses ADD COLUMN payment_method TEXT');
@@ -126,17 +125,13 @@ class AppDatabase {
     await _tryAlter(db, 'ALTER TABLE bill_occurrences ADD COLUMN paid_at INTEGER');
     await _tryAlter(db, 'ALTER TABLE bill_occurrences ADD COLUMN actual_amount_minor INTEGER');
     await _tryAlter(db, 'ALTER TABLE bill_occurrences ADD COLUMN expense_id TEXT');
-
     await _tryAlter(db, 'ALTER TABLE notes ADD COLUMN archived_at INTEGER');
     await _tryAlter(db, 'ALTER TABLE people ADD COLUMN phone TEXT');
     await _tryAlter(db, 'ALTER TABLE people ADD COLUMN archived_at INTEGER');
-
     await _tryAlter(db, 'ALTER TABLE budgets ADD COLUMN category_id TEXT');
-
     await _tryAlter(db, 'ALTER TABLE reminders ADD COLUMN message TEXT');
     await _tryAlter(db, 'ALTER TABLE reminders ADD COLUMN source_type TEXT');
     await _tryAlter(db, 'ALTER TABLE reminders ADD COLUMN source_id TEXT');
-
     await _tryAlter(
       db,
       'CREATE UNIQUE INDEX IF NOT EXISTS uq_habit_occ_day ON habit_occurrences(habit_id, scheduled_date)',
@@ -144,7 +139,6 @@ class AppDatabase {
     await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)');
     await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_expenses_occurred ON expenses(occurred_at)');
     await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_activity_occurred ON activity_events(occurred_at)');
-
     try {
       await db.execute("UPDATE debts SET status = 'OPEN' WHERE status = 'ACTIVE'");
     } catch (_) {}
@@ -180,6 +174,14 @@ class AppDatabase {
     await _tryAlter(db, 'ALTER TABLE time_blocks ADD COLUMN type TEXT');
     await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_work_sessions_task ON work_sessions(task_id)');
     await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_work_sessions_status ON work_sessions(status)');
+  }
+
+  Future<void> _migrateToV16(Database db) async {
+    await _applySchema(db);
+    await _tryAlter(db, 'ALTER TABLE subscriptions ADD COLUMN frequency TEXT');
+    await _tryAlter(db, 'ALTER TABLE subscriptions ADD COLUMN next_renewal_at INTEGER');
+    await _tryAlter(db, 'ALTER TABLE subscriptions ADD COLUMN default_account_id TEXT');
+    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_subs_renewal ON subscriptions(next_renewal_at)');
   }
 
   Future<void> _tryAlter(Database db, String sql) async {
@@ -262,7 +264,6 @@ class AppDatabase {
   }
 
   static String newId() => _uuid.v4();
-
   static int nowMs() => DateTime.now().millisecondsSinceEpoch;
 
   static int startOfTodayMs() {
