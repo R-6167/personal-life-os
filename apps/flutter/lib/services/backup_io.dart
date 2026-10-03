@@ -7,6 +7,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../data/database.dart';
 import '../data/export_service.dart';
+import 'integrity_service.dart';
 import 'secure_backup.dart';
 
 /// Hardened offline backup read/write via system file picker + share.
@@ -21,8 +22,7 @@ class BackupIo {
     final plain = await ExportService(_db).buildBackupJson();
     if (!encrypted) return plain;
     if (passphrase == null || passphrase.length < 6) {
-      throw ArgumentError('Passphrase must be at least 6 characters');
-    }
+      throw ArgumentError('Passphrase must be at least 6 characters');\n    }
     return SecureBackup.encrypt(plain, passphrase);
   }
 
@@ -33,6 +33,12 @@ class BackupIo {
   }) async {
     try {
       final json = await buildJson(encrypted: encrypted, passphrase: passphrase);
+      if (!encrypted) {
+        final v = await IntegrityService(db: _db).verifyBackupJson(json);
+        if (!v.ok) {
+          return BackupIoResult(ok: false, message: 'Export verification failed: ${v.summary}');
+        }
+      }
       final bytes = utf8.encode(json);
       if (bytes.length > maxBytes) {
         return BackupIoResult(
@@ -139,7 +145,48 @@ class BackupIo {
         }
       }
 
+      final verify = await IntegrityService(db: _db).verifyRestoreDryRun(raw);
+      if (!verify.ok) {
+        return BackupIoResult(
+          ok: false,
+          message: 'Backup failed verification: ${verify.summary}',
+        );
+      }
+
       final imported = await ExportService(_db).importBackupJson(raw);
+      try {
+        final post = await IntegrityService(db: _db).run(repair: true);
+        final extra = post.fixed > 0 ? ' · integrity fixed ${post.fixed}' : '';
+        return BackupIoResult(
+          ok: imported.ok,
+          message: '${imported.message}$extra',
+          inserted: imported.inserted,
+          total: imported.total,
+        );
+      } catch (_) {
+        return BackupIoResult(
+          ok: imported.ok,
+          message: imported.message,
+          inserted: imported.inserted,
+          total: imported.total,
+        );
+      }
+    } catch (e) {
+      return BackupIoResult(ok: false, message: 'Import failed: $e');
+    }
+  }
+
+  Future<BackupIoResult> importEncryptedRaw(String encrypted, String passphrase) async {
+    try {
+      final plain = SecureBackup.decrypt(encrypted, passphrase);
+      final verify = await IntegrityService(db: _db).verifyRestoreDryRun(plain);
+      if (!verify.ok) {
+        return BackupIoResult(ok: false, message: 'Backup failed verification: ${verify.summary}');
+      }
+      final imported = await ExportService(_db).importBackupJson(plain);
+      try {
+        await IntegrityService(db: _db).run(repair: true);
+      } catch (_) {}
       return BackupIoResult(
         ok: imported.ok,
         message: imported.message,
@@ -151,22 +198,7 @@ class BackupIo {
     }
   }
 
-  Future<BackupIoResult> importEncryptedRaw(String encrypted, String passphrase) async {
-    try {
-      final plain = SecureBackup.decrypt(encrypted, passphrase);
-      final imported = await ExportService(_db).importBackupJson(plain);
-      return BackupIoResult(
-        ok: imported.ok,
-        message: imported.message,
-        inserted: imported.inserted,
-        total: imported.total,
-      );
-    } catch (e) {
-      return BackupIoResult(ok: false, message: 'Decrypt/import failed: $e');
-    }
-  }
-
-  static String _kb(int bytes) => (bytes / 1024).toStringAsFixed(1);
+  String _kb(int bytes) => (bytes / 1024).toStringAsFixed(1);
 }
 
 class BackupIoResult {
@@ -174,8 +206,8 @@ class BackupIoResult {
     required this.ok,
     required this.message,
     this.path,
-    this.inserted = const {},
-    this.total = 0,
+    this.inserted,
+    this.total,
     this.needsPassphrase = false,
     this.pendingRaw,
   });
@@ -183,8 +215,8 @@ class BackupIoResult {
   final bool ok;
   final String message;
   final String? path;
-  final Map<String, int> inserted;
-  final int total;
+  final int? inserted;
+  final int? total;
   final bool needsPassphrase;
   final String? pendingRaw;
 }
