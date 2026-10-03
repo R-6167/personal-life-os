@@ -97,7 +97,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45), fontSize: 12),
                     ),
                     value: NotificationService.instance.enabled,
-                    activeThumbColor: AppTheme.amber,
+                    activeColor: AppTheme.amber,
                     onChanged: (v) async {
                       NotificationService.instance.enabled = v;
                       try {
