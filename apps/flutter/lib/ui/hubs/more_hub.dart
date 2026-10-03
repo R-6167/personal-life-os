@@ -1,14 +1,9 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '../../data/database.dart';
-import '../../data/export_service.dart';
 import '../../data/extended_repository.dart';
+import '../../services/backup_io.dart';
 import '../../services/integrity_service.dart';
-import '../../services/secure_backup.dart';
 import '../screens/activity_screen.dart';
 import '../screens/diagnostics_screen.dart';
 import '../screens/feedback_screen.dart';
@@ -30,6 +25,7 @@ class MoreHub extends StatefulWidget {
 class _MoreHubState extends State<MoreHub> {
   final _search = TextEditingController();
   List<Map<String, String>> _hits = [];
+  bool _busy = false;
 
   @override
   void dispose() {
@@ -42,54 +38,59 @@ class _MoreHubState extends State<MoreHub> {
     setState(() => _hits = hits);
   }
 
-  Future<void> _export() async {
-    final json = await ExportService(AppDatabase.instance).buildBackupJson();
-    final dir = await getTemporaryDirectory();
-    final file = File('${dir.path}/personal-life-os-backup.json');
-    await file.writeAsString(json);
-    await Share.shareXFiles([XFile(file.path)], text: 'Personal Life OS backup');
-  }
-
-  Future<void> _import() async {
-    final ctrl = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.metal,
-        title: const Text('Import backup', style: TextStyle(color: AppTheme.silver)),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: TextField(
-            controller: ctrl,
-            maxLines: 10,
-            style: const TextStyle(color: AppTheme.silver, fontSize: 12, fontFamily: 'monospace'),
-            decoration: const InputDecoration(
-              hintText: 'Paste backup JSON (plain or encrypted)',
-              alignLabelWithHint: true,
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () {
-              if (ctrl.text.trim().isEmpty) return;
-              Navigator.pop(ctx, true);
-            },
-            child: const Text('Import'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    var raw = ctrl.text.trim();
-    if (SecureBackup.looksEncrypted(raw)) {
+  Future<void> _export({bool encrypted = false}) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    String? passphrase;
+    if (encrypted) {
       final pass = TextEditingController();
-      final unlocked = await showDialog<bool>(
+      final ok = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
           backgroundColor: AppTheme.metal,
-          title: const Text('Encrypted backup', style: TextStyle(color: AppTheme.silver)),
+          title: const Text('Encrypt backup'),
+          content: TextField(
+            controller: pass,
+            obscureText: true,
+            style: const TextStyle(color: AppTheme.silver),
+            decoration: const InputDecoration(
+              labelText: 'Passphrase (min 6 chars)',
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Continue')),
+          ],
+        ),
+      );
+      if (ok != true) {
+        setState(() => _busy = false);
+        return;
+      }
+      passphrase = pass.text;
+    }
+    final result = await BackupIo(AppDatabase.instance).exportToFile(
+      encrypted: encrypted,
+      passphrase: passphrase,
+    );
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result.message)));
+  }
+
+  Future<void> _import() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    final io = BackupIo(AppDatabase.instance);
+    var result = await io.importFromFile();
+
+    if (result.needsPassphrase && result.pendingRaw != null) {
+      final pass = TextEditingController();
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppTheme.metal,
+          title: const Text('Encrypted backup'),
           content: TextField(
             controller: pass,
             obscureText: true,
@@ -102,49 +103,34 @@ class _MoreHubState extends State<MoreHub> {
           ],
         ),
       );
-      if (unlocked != true) return;
-      try {
-        raw = SecureBackup.decrypt(raw, pass.text);
-      } catch (e) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
-        return;
+      if (ok == true) {
+        result = await io.importEncryptedRaw(result.pendingRaw!, pass.text);
+      } else {
+        result = BackupIoResult(ok: false, message: 'Import cancelled');
       }
     }
-    final result = await ExportService(AppDatabase.instance).importBackupJson(raw);
+
     if (!mounted) return;
+    setState(() => _busy = false);
 
     await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.metal,
-        title: Text(
-          result.ok ? 'Import result' : 'Import failed',
-          style: const TextStyle(color: AppTheme.silver),
-        ),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(result.message, style: const TextStyle(color: AppTheme.silver)),
-              if (result.inserted.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Text(
-                  'Tables updated',
-                  style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.5), fontSize: 12),
-                ),
-                const SizedBox(height: 6),
-                ...result.inserted.entries.map(
-                  (e) => Text(
-                    '• ${e.key}: ${e.value}',
-                    style: const TextStyle(color: AppTheme.amber, fontSize: 13),
-                  ),
-                ),
-              ],
+        title: Text(result.ok ? 'Import result' : 'Import failed'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(result.message, style: const TextStyle(color: AppTheme.silver)),
+            if (result.inserted.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              ...result.inserted.entries.map(
+                (e) => Text('• ${e.key}: ${e.value}',
+                    style: const TextStyle(color: AppTheme.amber, fontSize: 13)),
+              ),
             ],
-          ),
+          ],
         ),
         actions: [
           FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
@@ -161,30 +147,22 @@ class _MoreHubState extends State<MoreHub> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.metal,
-        title: Text(
-          report.ok ? 'Integrity OK' : 'Integrity issues',
-          style: const TextStyle(color: AppTheme.silver),
-        ),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (report.fixed > 0)
-                  Text(
-                    'Repaired ${report.fixed} issue(s)',
-                    style: const TextStyle(color: AppTheme.amber),
-                  ),
-                const SizedBox(height: 8),
-                ...report.checks.map(
-                  (c) => Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Text(c, style: const TextStyle(color: AppTheme.silver, fontSize: 13)),
-                  ),
+        title: Text(report.ok ? 'Integrity OK' : 'Integrity issues'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (report.fixed > 0)
+                Text('Repaired ${report.fixed} issue(s)',
+                    style: const TextStyle(color: AppTheme.amber)),
+              const SizedBox(height: 8),
+              ...report.checks.map(
+                (c) => Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(c, style: const TextStyle(color: AppTheme.silver, fontSize: 13)),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
         actions: [
@@ -203,9 +181,13 @@ class _MoreHubState extends State<MoreHub> {
         const Text('More', style: TextStyle(color: AppTheme.silver, fontSize: 22, fontWeight: FontWeight.w700)),
         const SizedBox(height: 4),
         Text(
-          'Search · offline · feedback · backup · integrity',
+          'Search · offline · feedback · file backup · integrity',
           style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45), fontSize: 12),
         ),
+        if (_busy) ...[
+          const SizedBox(height: 8),
+          const LinearProgressIndicator(color: AppTheme.amber),
+        ],
         const SizedBox(height: 16),
         GlassCard(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -235,7 +217,8 @@ class _MoreHubState extends State<MoreHub> {
         ..._hits.map((h) => ListTile(
               dense: true,
               title: Text(h['title'] ?? '', style: const TextStyle(color: AppTheme.silver)),
-              subtitle: Text(h['type'] ?? '', style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11)),
+              subtitle: Text(h['type'] ?? '',
+                  style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11)),
             )),
         const SizedBox(height: 20),
         GlassCard(
@@ -244,111 +227,84 @@ class _MoreHubState extends State<MoreHub> {
               ListTile(
                 leading: const Icon(Icons.history, color: AppTheme.amber),
                 title: const Text('Activity timeline', style: TextStyle(color: AppTheme.silver)),
-                subtitle: Text(
-                  'Human-readable life events',
-                  style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 12),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ActivityScreen()),
                 ),
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const ActivityScreen()),
-                  );
-                },
               ),
               ListTile(
                 leading: const Icon(Icons.upcoming, color: AppTheme.amber),
                 title: const Text('Upcoming', style: TextStyle(color: AppTheme.silver)),
-                subtitle: Text(
-                  'Tasks · bills · habits · appointments',
-                  style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 12),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const UpcomingScreen()),
                 ),
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const UpcomingScreen()),
-                  );
-                },
               ),
               ListTile(
                 leading: const Icon(Icons.bug_report_outlined, color: AppTheme.amber),
                 title: const Text('Feedback & bugs', style: TextStyle(color: AppTheme.silver)),
-                subtitle: Text(
-                  'Local notes you can share later',
-                  style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 12),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const FeedbackScreen()),
                 ),
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const FeedbackScreen()),
-                  );
-                },
               ),
               ListTile(
                 leading: const Icon(Icons.cloud_off_outlined, color: AppTheme.amber),
                 title: const Text('Offline status', style: TextStyle(color: AppTheme.silver)),
-                subtitle: Text(
-                  'Local health · no network required',
-                  style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 12),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const OfflineStatusScreen()),
                 ),
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const OfflineStatusScreen()),
-                  );
-                },
               ),
               ListTile(
                 leading: const Icon(Icons.analytics_outlined, color: AppTheme.silver),
                 title: const Text('Diagnostics', style: TextStyle(color: AppTheme.silver)),
-                subtitle: Text(
-                  'Usage stats & error log (on-device)',
-                  style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 12),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const DiagnosticsScreen()),
                 ),
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const DiagnosticsScreen()),
-                  );
-                },
               ),
               const Divider(color: Colors.white12),
               ListTile(
-                leading: const Icon(Icons.ios_share, color: AppTheme.amber),
-                title: const Text('Export backup', style: TextStyle(color: AppTheme.silver)),
+                leading: const Icon(Icons.folder_open, color: AppTheme.amber),
+                title: const Text('Export backup to file', style: TextStyle(color: AppTheme.silver)),
                 subtitle: Text(
-                  'JSON copy of offline data',
+                  'Save JSON via file picker',
                   style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 12),
                 ),
-                onTap: _export,
+                onTap: _busy ? null : () => _export(encrypted: false),
+              ),
+              ListTile(
+                leading: const Icon(Icons.lock, color: AppTheme.amber),
+                title: const Text('Export encrypted backup', style: TextStyle(color: AppTheme.silver)),
+                subtitle: Text(
+                  'AES + passphrase → file',
+                  style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 12),
+                ),
+                onTap: _busy ? null : () => _export(encrypted: true),
               ),
               ListTile(
                 leading: const Icon(Icons.file_download_outlined, color: AppTheme.silver),
-                title: const Text('Import backup', style: TextStyle(color: AppTheme.silver)),
+                title: const Text('Import backup from file', style: TextStyle(color: AppTheme.silver)),
                 subtitle: Text(
-                  'Plain or encrypted · verified merge',
+                  'Pick .json · verified merge',
                   style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 12),
                 ),
-                onTap: _import,
+                onTap: _busy ? null : _import,
               ),
               ListTile(
                 leading: const Icon(Icons.health_and_safety_outlined, color: AppTheme.silver),
                 title: const Text('Data integrity check', style: TextStyle(color: AppTheme.silver)),
-                subtitle: Text(
-                  'Dedupe · link checks · repair',
-                  style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 12),
-                ),
                 onTap: _integrity,
               ),
               const Divider(color: Colors.white12),
               ListTile(
                 leading: const Icon(Icons.settings_outlined, color: AppTheme.silver),
                 title: const Text('Settings', style: TextStyle(color: AppTheme.silver)),
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                  );
-                },
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                ),
               ),
               ListTile(
                 leading: const Icon(Icons.info_outline, color: AppTheme.silver),
                 title: const Text('About', style: TextStyle(color: AppTheme.silver)),
                 subtitle: Text(
-                  'Personal Life OS · offline · schema v${AppDatabase.schemaVersion} · 0.16',
+                  'Personal Life OS · offline · schema v${AppDatabase.schemaVersion} · 0.17',
                   style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 12),
                 ),
               ),
