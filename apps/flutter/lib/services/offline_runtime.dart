@@ -4,6 +4,7 @@ import '../data/habit_repository.dart';
 import '../data/routine_repository.dart';
 import 'error_log_service.dart';
 import 'integrity_service.dart';
+import 'smart_reminder_service.dart';
 
 class OfflineCapabilities {
   const OfflineCapabilities({
@@ -64,7 +65,7 @@ class OfflineRuntime {
     lastSuccessfulWriteAt = DateTime.now();
   }
 
-  /// Habit/routine occurrences, bill statuses, light integrity repair.
+  /// Habit/routine occurrences, bill statuses, smart practical reminders, integrity.
   Future<void> runMaintenance({bool force = false}) async {
     if (_running) return;
     if (!force &&
@@ -88,8 +89,16 @@ class OfflineRuntime {
         routines.markMissedBeforeToday(),
         bills.refreshOccurrenceStatuses(),
       ]);
+      try {
+        await SmartReminderService(db).syncAll();
+      } catch (e, st) {
+        await ErrorLogService.instance.log(
+          message: 'smart_reminders: $e',
+          stack: '$st',
+          context: 'offline_runtime',
+        );
+      }
 
-      // Integrity at most once per 30 minutes unless forced
       final needIntegrity = force ||
           lastIntegrityAt == null ||
           DateTime.now().difference(lastIntegrityAt!) > const Duration(minutes: 30);
@@ -107,9 +116,9 @@ class OfflineRuntime {
       lastMaintenanceAt = DateTime.now();
     } catch (e, st) {
       await ErrorLogService.instance.log(
-        message: 'Offline maintenance failed: $e',
-        stack: st.toString(),
-        level: 'MAINTENANCE',
+        message: 'maintenance: $e',
+        stack: '$st',
+        context: 'offline_runtime',
       );
     } finally {
       _running = false;
@@ -120,44 +129,23 @@ class OfflineRuntime {
     final checks = <String>[];
     var ok = true;
     try {
-      final db = await AppDatabase.instance.database;
-      final users = await db.query('users', limit: 1);
-      checks.add(users.isEmpty ? 'WARN: no local user row' : 'OK: local user present');
-      if (users.isEmpty) ok = false;
-
-      final tables = await db.rawQuery(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
-      );
-      checks.add('OK: ${tables.length} local tables');
-
-      for (final t in ['tasks', 'habits', 'expenses', 'activity_events']) {
-        try {
-          await db.query(t, limit: 1);
-          checks.add('OK: $t readable');
-        } catch (e) {
-          checks.add('FAIL: $t — $e');
-          ok = false;
-        }
-      }
-
-      final integrity = await IntegrityService().run(repair: false);
-      checks.addAll(integrity.checks.take(4));
-      if (!integrity.ok) ok = false;
-
-      checks.add('OK: offline-first (no network required)');
-      if (lastMaintenanceAt != null) {
-        checks.add('OK: last maintenance ${lastMaintenanceAt!.toIso8601String()}');
-      } else {
-        checks.add('INFO: maintenance not run yet this session');
-      }
+      await AppDatabase.instance.database;
+      checks.add('OK: database open');
     } catch (e) {
       ok = false;
-      checks.add('FAIL: $e');
+      checks.add('FAIL: database $e');
     }
-    return OfflineHealth(
-      ok: ok,
-      checks: checks,
-      lastMaintenanceAt: lastMaintenanceAt,
-    );
+    try {
+      final integrity = await IntegrityService().run(repair: false);
+      checks.add(integrity.ok ? 'OK: integrity' : 'WARN: ${integrity.summary}');
+      if (!integrity.ok) ok = false;
+    } catch (e) {
+      checks.add('WARN: integrity $e');
+    }
+    if (lastMaintenanceAt != null) {
+      checks.add('OK: last maintenance ${lastMaintenanceAt!.toIso8601String()}');
+    }
+    checks.addAll(capabilities.lines.map((l) => 'CAP: $l'));
+    return OfflineHealth(ok: ok, checks: checks, lastMaintenanceAt: lastMaintenanceAt);
   }
 }
