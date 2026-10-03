@@ -29,13 +29,12 @@ class Goal {
         updatedAt: dbIntOr(m['updated_at']),
       );
 
+  /// Columns that exist in schema.sql only.
   Map<String, Object?> toInsertMap() => {
         'id': id,
         'owner_id': ownerId,
         'title': title,
         'status': status,
-        'priority': priority,
-        'progress_mode': 'CALCULATED',
         'created_at': createdAt,
         'updated_at': updatedAt,
       };
@@ -79,8 +78,6 @@ class Project {
         'goal_id': goalId,
         'title': title,
         'status': status,
-        'priority': priority,
-        'progress_mode': 'CALCULATED',
         'created_at': createdAt,
         'updated_at': updatedAt,
       };

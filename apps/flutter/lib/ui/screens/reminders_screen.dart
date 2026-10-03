@@ -7,7 +7,7 @@ import '../theme.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/glass.dart';
 
-/// Reminder lifecycle: create → notify → snooze → complete / dismiss.
+/// Reminder lifecycle: create → notify → snooze → complete.
 class RemindersScreen extends StatefulWidget {
   const RemindersScreen({super.key});
 
@@ -103,11 +103,6 @@ class _RemindersScreenState extends State<RemindersScreen> {
     await _ext.snoozeReminder(id, minutes: minutes);
     await _resyncNotifs();
     await _load();
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Snoozed $minutes min')),
-      );
-    }
   }
 
   Future<void> _complete(String id) async {
@@ -134,18 +129,12 @@ class _RemindersScreenState extends State<RemindersScreen> {
         backgroundColor: Colors.transparent,
         appBar: AppBar(
           title: const Text('Reminders'),
-          actions: [
-            IconButton(
-              tooltip: 'New',
-              onPressed: _add,
-              icon: const Icon(Icons.add),
-            ),
-          ],
+          // Single add control — FAB only (no AppBar + empty-state duplicates).
         ),
         floatingActionButton: FloatingActionButton.extended(
           onPressed: _add,
           icon: const Icon(Icons.alarm_add),
-          label: const Text('Remind me'),
+          label: const Text('New reminder'),
         ),
         body: _loading
             ? const Center(child: CircularProgressIndicator(color: AppTheme.amber))
@@ -154,8 +143,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
                     icon: Icons.alarm_off_outlined,
                     title: 'No pending reminders',
                     subtitle: 'Create one — it stays on this device and notifies locally.',
-                    actionLabel: 'New reminder',
-                    onAction: _add,
+                    // No third button here — use the FAB.
                   )
                 : RefreshIndicator(
                     color: AppTheme.amber,
