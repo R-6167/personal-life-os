@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:sqflite/sqflite.dart';
 
 import 'database.dart';
+import '../services/integrity_service.dart';
 
 class ExportService {
   ExportService(this._db);
@@ -15,15 +16,18 @@ class ExportService {
     'calendar_events', 'time_blocks', 'reminders', 'notes', 'entity_links',
     'financial_accounts', 'income', 'expenses', 'bills', 'bill_occurrences',
     'subscriptions', 'debts', 'debt_payments', 'savings_goals', 'savings_contributions',
-    'practical_items', 'documents', 'shopping_lists', 'shopping_items', 'activity_events',
+    'practical_items', 'documents', 'shopping_lists', 'shopping_items',
+    'wellness_checkins', 'health_metrics', 'goal_reflections', 'budgets',
+    'activity_events',
   ];
 
   Future<String> buildBackupJson() async {
     final db = await _db.database;
     final data = <String, dynamic>{
-      'contractVersion': 1,
+      'contractVersion': 2,
       'exportedAt': AppDatabase.nowMs(),
       'app': 'personal-life-os',
+      'schemaVersion': AppDatabase.schemaVersion,
     };
     for (final t in tables) {
       try {
@@ -36,9 +40,13 @@ class ExportService {
     return const JsonEncoder.withIndent('  ').convert(data);
   }
 
-  /// Validate + import. Never wipes existing user unless [replaceUsers] is true.
-  /// Returns counts of inserted rows by table.
+  /// Validate structure then import. Uses IntegrityService for pre-check.
   Future<ImportResult> importBackupJson(String raw, {bool replaceUsers = false}) async {
+    final verify = await IntegrityService(_db).verifyBackupJson(raw);
+    if (!verify.ok) {
+      return ImportResult(ok: false, message: verify.checks.join('; '));
+    }
+
     dynamic decoded;
     try {
       decoded = jsonDecode(raw);
@@ -49,9 +57,6 @@ class ExportService {
       return ImportResult(ok: false, message: 'Backup must be a JSON object');
     }
     final map = Map<String, dynamic>.from(decoded);
-    if (map['contractVersion'] == null && map['goals'] == null && map['tasks'] == null) {
-      return ImportResult(ok: false, message: 'Unrecognized backup (missing tables)');
-    }
 
     final inserted = <String, int>{};
     var total = 0;
@@ -81,11 +86,14 @@ class ExportService {
       }
     });
 
+    // Post-import integrity repair
+    final report = await IntegrityService(_db).run(repair: true);
+
     return ImportResult(
       ok: true,
       message: total == 0
-          ? 'No new rows imported (may already exist)'
-          : 'Imported $total rows across ${inserted.length} tables',
+          ? 'No new rows imported (may already exist). Integrity: ${report.checks.length} checks.'
+          : 'Imported $total rows across ${inserted.length} tables. Integrity fixed ${report.fixed}.',
       inserted: inserted,
       total: total,
     );
