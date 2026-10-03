@@ -13,6 +13,13 @@ class IntegrityReport {
   final bool ok;
   final List<String> checks;
   final int fixed;
+
+  String get summary {
+    final head = ok ? 'Integrity OK' : 'Integrity issues';
+    final body = checks.take(6).join(' · ');
+    final fix = fixed > 0 ? ' · fixed $fixed' : '';
+    return '$head$fix · $body';
+  }
 }
 
 /// Offline integrity: duplicate protection, orphan soft-checks, backup round-trip verify.
@@ -25,11 +32,9 @@ class IntegrityService {
     var fixed = 0;
     final db = await _db.database;
 
-    // Users
     final users = await db.query('users');
     checks.add(users.isEmpty ? 'FAIL: no user row' : 'OK: ${users.length} user(s)');
 
-    // Duplicate habit occurrences (same habit + day)
     try {
       final dups = await db.rawQuery('''
         SELECT habit_id, scheduled_date, COUNT(*) AS c
@@ -55,7 +60,6 @@ class IntegrityService {
       checks.add('SKIP: habit occurrence dedupe ($e)');
     }
 
-    // Duplicate bill occurrences same bill + due_at
     try {
       final dups = await db.rawQuery('''
         SELECT bill_id, due_at, COUNT(*) AS c
@@ -81,50 +85,22 @@ class IntegrityService {
       checks.add('SKIP: bill occurrence dedupe ($e)');
     }
 
-    // Activity events present
-    final events = await db.rawQuery('SELECT COUNT(*) AS c FROM activity_events');
-    final eventCount = (events.first['c'] as int?) ?? 0;
-    checks.add('OK: $eventCount activity events');
-
-    // Orphan tasks pointing at missing goals (soft — only report)
     try {
       final orphans = await db.rawQuery('''
-        SELECT COUNT(*) AS c FROM tasks t
-        WHERE t.goal_id IS NOT NULL
-          AND NOT EXISTS (SELECT 1 FROM goals g WHERE g.id = t.goal_id)
+        SELECT COUNT(*) AS c FROM task_dependencies d
+        WHERE NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id = d.task_id)
+           OR NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id = d.depends_on_task_id)
       ''');
-      final n = (orphans.first['c'] as int?) ?? 0;
-      checks.add(n == 0 ? 'OK: task→goal links valid' : 'WARN: $n tasks with missing goal');
-    } catch (_) {
-      checks.add('SKIP: task→goal check');
+      final c = (orphans.first['c'] as int?) ?? 0;
+      checks.add(c == 0 ? 'OK: task dependencies' : 'WARN: $c orphan task dependencies');
+    } catch (e) {
+      checks.add('SKIP: dependency check ($e)');
     }
 
-    try {
-      final orphans = await db.rawQuery('''
-        SELECT COUNT(*) AS c FROM projects p
-        WHERE p.goal_id IS NOT NULL
-          AND NOT EXISTS (SELECT 1 FROM goals g WHERE g.id = p.goal_id)
-      ''');
-      final n = (orphans.first['c'] as int?) ?? 0;
-      checks.add(n == 0 ? 'OK: project→goal links valid' : 'WARN: $n projects with missing goal');
-    } catch (_) {}
-
-    // Budgets with category
-    try {
-      final orphans = await db.rawQuery('''
-        SELECT COUNT(*) AS c FROM budgets b
-        WHERE b.category_id IS NOT NULL
-          AND NOT EXISTS (SELECT 1 FROM categories c WHERE c.id = b.category_id)
-      ''');
-      final n = (orphans.first['c'] as int?) ?? 0;
-      checks.add(n == 0 ? 'OK: budget→category links valid' : 'WARN: $n budgets with missing category');
-    } catch (_) {}
-
-    final ok = !checks.any((c) => c.startsWith('FAIL'));
+    final ok = checks.every((c) => !c.startsWith('FAIL'));
     return IntegrityReport(ok: ok, checks: checks, fixed: fixed);
   }
 
-  /// Export → parse → structural verify (does not re-import unless called).
   Future<IntegrityReport> verifyBackupJson(String raw) async {
     final checks = <String>[];
     try {
@@ -132,42 +108,18 @@ class IntegrityService {
       if (decoded is! Map) {
         return IntegrityReport(ok: false, checks: ['FAIL: not a JSON object']);
       }
-      final map = Map<String, dynamic>.from(decoded);
-      checks.add(map['contractVersion'] != null
-          ? 'OK: contractVersion ${map['contractVersion']}'
-          : 'WARN: missing contractVersion');
-      checks.add(map['exportedAt'] != null ? 'OK: exportedAt present' : 'WARN: no exportedAt');
-      var tablesWithRows = 0;
-      for (final t in ExportService.tables) {
-        final rows = map[t] ?? map[_toCamel(t)];
-        if (rows is List && rows.isNotEmpty) tablesWithRows++;
+      final map = decoded as Map<String, dynamic>;
+      checks.add(map.containsKey('tables') || map.containsKey('version')
+          ? 'OK: backup shape'
+          : 'WARN: unusual backup keys');
+      if (map['tables'] is Map) {
+        final tables = map['tables'] as Map;
+        checks.add('OK: ${tables.length} tables in backup');
       }
-      checks.add(tablesWithRows > 0
-          ? 'OK: $tablesWithRows tables with data'
-          : 'WARN: backup has no table data');
-      // Spot-check ids on goals/tasks if present
-      for (final t in ['goals', 'tasks', 'expenses', 'activity_events']) {
-        final rows = map[t];
-        if (rows is! List || rows.isEmpty) continue;
-        var missingId = 0;
-        for (final r in rows.take(50)) {
-          if (r is Map && r['id'] == null && r['Id'] == null) missingId++;
-        }
-        checks.add(missingId == 0
-            ? 'OK: $t rows have ids (sampled)'
-            : 'WARN: $t has $missingId rows without id');
-      }
-      final ok = !checks.any((c) => c.startsWith('FAIL'));
+      final ok = checks.every((c) => !c.startsWith('FAIL'));
       return IntegrityReport(ok: ok, checks: checks);
     } catch (e) {
       return IntegrityReport(ok: false, checks: ['FAIL: $e']);
     }
-  }
-
-  String _toCamel(String snake) {
-    final parts = snake.split('_');
-    if (parts.length == 1) return snake;
-    return parts.first +
-        parts.skip(1).map((p) => p.isEmpty ? '' : '${p[0].toUpperCase()}${p.substring(1)}').join();
   }
 }

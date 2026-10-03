@@ -3,19 +3,17 @@ import 'package:flutter/material.dart';
 import '../../data/database.dart';
 import '../../data/extended_repository.dart';
 import '../../services/backup_io.dart';
-import '../../services/data_management.dart';
 import '../../services/integrity_service.dart';
-import '../../services/local_analytics.dart';
-import '../../services/notification_service.dart';
-import '../../services/security_service.dart';
 import '../app_meta.dart';
+import '../screens/reminders_screen.dart';
 import '../settings_screen.dart';
 import '../theme.dart';
 import '../widgets/glass.dart';
-import '../screens/reminders_screen.dart';
 
 class MoreHub extends StatefulWidget {
-  const MoreHub({super.key});
+  const MoreHub({super.key, this.onChanged});
+
+  final Future<void> Function()? onChanged;
 
   @override
   State<MoreHub> createState() => _MoreHubState();
@@ -108,6 +106,7 @@ class _MoreHubState extends State<MoreHub> {
     if (!mounted) return;
     setState(() => _busy = false);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result.message)));
+    if (result.ok) await widget.onChanged?.call();
   }
 
   Future<void> _integrity() async {
@@ -118,6 +117,7 @@ class _MoreHubState extends State<MoreHub> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(report.summary)),
     );
+    await widget.onChanged?.call();
   }
 
   @override
