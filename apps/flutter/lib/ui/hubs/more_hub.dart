@@ -7,7 +7,9 @@ import 'package:share_plus/share_plus.dart';
 import '../../data/database.dart';
 import '../../data/export_service.dart';
 import '../../data/extended_repository.dart';
+import '../../services/integrity_service.dart';
 import '../screens/activity_screen.dart';
+import '../screens/upcoming_screen.dart';
 import '../settings_screen.dart';
 import '../theme.dart';
 import '../widgets/glass.dart';
@@ -119,6 +121,47 @@ class _MoreHubState extends State<MoreHub> {
     if (result.ok) await widget.onChanged();
   }
 
+  Future<void> _integrity() async {
+    final report = await IntegrityService().run(repair: true);
+    if (!mounted) return;
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.metal,
+        title: Text(
+          report.ok ? 'Integrity OK' : 'Integrity issues',
+          style: const TextStyle(color: AppTheme.silver),
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (report.fixed > 0)
+                  Text(
+                    'Repaired ${report.fixed} issue(s)',
+                    style: const TextStyle(color: AppTheme.amber),
+                  ),
+                const SizedBox(height: 8),
+                ...report.checks.map(
+                  (c) => Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(c, style: const TextStyle(color: AppTheme.silver, fontSize: 13)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
+        ],
+      ),
+    );
+    await widget.onChanged();
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListView(
@@ -127,7 +170,7 @@ class _MoreHubState extends State<MoreHub> {
         const Text('More', style: TextStyle(color: AppTheme.silver, fontSize: 22, fontWeight: FontWeight.w700)),
         const SizedBox(height: 4),
         Text(
-          'Search, history, backup, settings',
+          'Search · timeline · upcoming · backup · integrity',
           style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45), fontSize: 12),
         ),
         const SizedBox(height: 16),
@@ -167,14 +210,27 @@ class _MoreHubState extends State<MoreHub> {
             children: [
               ListTile(
                 leading: const Icon(Icons.history, color: AppTheme.amber),
-                title: const Text('Activity', style: TextStyle(color: AppTheme.silver)),
+                title: const Text('Activity timeline', style: TextStyle(color: AppTheme.silver)),
                 subtitle: Text(
-                  'What you did in the OS',
+                  'Human-readable life events',
                   style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 12),
                 ),
                 onTap: () {
                   Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const ActivityScreen()),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.upcoming, color: AppTheme.amber),
+                title: const Text('Upcoming', style: TextStyle(color: AppTheme.silver)),
+                subtitle: Text(
+                  'Tasks · bills · habits · appointments',
+                  style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 12),
+                ),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const UpcomingScreen()),
                   );
                 },
               ),
@@ -192,10 +248,19 @@ class _MoreHubState extends State<MoreHub> {
                 leading: const Icon(Icons.file_download_outlined, color: AppTheme.silver),
                 title: const Text('Import backup', style: TextStyle(color: AppTheme.silver)),
                 subtitle: Text(
-                  'Paste JSON — merges without wiping',
+                  'Verified merge — no wipe',
                   style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 12),
                 ),
                 onTap: _import,
+              ),
+              ListTile(
+                leading: const Icon(Icons.health_and_safety_outlined, color: AppTheme.silver),
+                title: const Text('Data integrity check', style: TextStyle(color: AppTheme.silver)),
+                subtitle: Text(
+                  'Dedupe · link checks · repair',
+                  style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 12),
+                ),
+                onTap: _integrity,
               ),
               const Divider(color: Colors.white12),
               ListTile(
@@ -211,7 +276,7 @@ class _MoreHubState extends State<MoreHub> {
                 leading: const Icon(Icons.info_outline, color: AppTheme.silver),
                 title: const Text('About', style: TextStyle(color: AppTheme.silver)),
                 subtitle: Text(
-                  'Personal Life OS · offline · schema v6',
+                  'Personal Life OS · offline · schema v${AppDatabase.schemaVersion} · 0.11',
                   style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 12),
                 ),
               ),
