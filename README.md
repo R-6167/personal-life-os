@@ -1,56 +1,39 @@
-# Personal Life OS
+# Ordin
 
-A local-first personal life management system designed around a SQLite memory layer, structured goals, tasks, habits, routines, finances, and historical activity tracking.
+Offline personal life OS (`com.aetherion.ordin`).
 
-## Vision
+Everything runs on-device in Flutter + SQLite. No account. No TypeScript runtime. No Expo.
 
-Personal Life OS is a calm, deterministic productivity and life-management app that keeps a complete record of your responsibilities, plans, habits, and money. It is intentionally local-first, with a single source of truth in SQLite and an event-driven history model.
+## Life thread (how the product is meant to feel)
 
-## Product goals
+One system understanding the person's life — not a pile of separate screens:
 
-- Keep personal plans and responsibilities in one place
-- Local-first and privacy-conscious data storage
-- Clear separation between data layer, domain services, and intelligence layer
-- A complete activity history for planning and review
-- Simple recurring patterns for tasks, habits, routines, and bills
-- Financial tracking without requiring external bank integrations
-
-## Architecture overview
-
-- SQLite database as the memory/state layer
-- Repositories for persistence
-- Domain services for business rules
-- Event recorder for historical activity
-- Context builder for planning / local intelligence
-- Optional Momentum integration at the top of the stack
-
-## Getting started
-
-```bash
-npm install
-npm run dev
+```
+Goal
+  → Project
+    → Milestone
+      → Tasks
+        → Scheduled work
+          → Calendar
+            → Completion
+              → Activity history
+                → Progress toward goal
 ```
 
-## Database
+Open a **Goal** or **Project** to see that chain: linked work, next 14 days of scheduled tasks, progress, and activity history.
 
-The project starts with a foundational SQLite schema for:
+## App
 
-- users
-- categories
-- goals
-- projects
-- milestones
-- tasks
-- habit and routine records
-- financial accounts and transactions
-- people, notes, reminders, and activity events
+| Path | Purpose |
+|------|---------|
+| `apps/flutter/` | The only app |
+| `apps/flutter/assets/schema.sql` | Canonical SQLite schema |
+| `.github/workflows/flutter-apk.yml` | Sideloadable APK builds |
 
-See `src/db/schema.sql` for the initial schema starting point.
+## Build APK
 
-## Recommended next steps
+GitHub Actions → **Flutter APK** workflow → download the artifact → install on your phone.
 
-1. Add repository/service layer for tasks, goals, finance, routines
-2. Build a UI for dashboard / today / backlog / calendar
-3. Add recurring occurrence generation
-4. Add event-driven activity streams and insights
-5. Connect optional external intelligence layer via a context contract
+## Privacy
+
+All data stays in local SQLite on the device. Backups are optional export from **More**.
