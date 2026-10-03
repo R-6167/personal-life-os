@@ -93,6 +93,7 @@ class AppTheme {
           borderSide: const BorderSide(color: amber, width: 1.4),
         ),
         hintStyle: TextStyle(color: silver.withValues(alpha: 0.4)),
+        labelStyle: TextStyle(color: silver.withValues(alpha: 0.65)),
       ),
       chipTheme: ChipThemeData(
         backgroundColor: wood.withValues(alpha: 0.35),
@@ -104,6 +105,43 @@ class AppTheme {
         backgroundColor: metal,
         contentTextStyle: const TextStyle(color: silver),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+      dialogTheme: DialogTheme(
+        backgroundColor: metal,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        titleTextStyle: const TextStyle(
+          color: silver,
+          fontSize: 18,
+          fontWeight: FontWeight.w700,
+        ),
+        contentTextStyle: TextStyle(color: silver.withValues(alpha: 0.85), fontSize: 14),
+      ),
+      bottomSheetTheme: const BottomSheetThemeData(
+        backgroundColor: metal,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+      ),
+      listTileTheme: const ListTileThemeData(
+        iconColor: silverMuted,
+        textColor: silver,
+      ),
+      dividerTheme: DividerThemeData(
+        color: silver.withValues(alpha: 0.12),
+        thickness: 1,
+      ),
+      progressIndicatorTheme: const ProgressIndicatorThemeData(
+        color: amber,
+        linearTrackColor: Color(0x33C5CBD3),
+      ),
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: {
+          TargetPlatform.android: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.linux: FadeUpwardsPageTransitionsBuilder(),
+        },
       ),
     );
   }
