@@ -8,6 +8,7 @@ import '../data/database.dart';
 import '../data/extended_repository.dart';
 import '../data/task_repository.dart';
 import '../domain/enums.dart';
+import 'user_prefs.dart';
 
 /// Local notifications for reminders, bills, budgets, and overdue tasks (Android offline).
 class NotificationService {
@@ -80,7 +81,7 @@ class NotificationService {
         id: _stableId('bill', o.id),
         title: 'Bill: ${o.billName ?? 'Payment'}',
         body: o.expectedAmountMinor != null
-            ? 'Due — ~${(o.expectedAmountMinor! / 100).toStringAsFixed(0)}'
+            ? 'Due — ~${(o.expectedAmountMinor! / 100).toStringAsFixed(0)} ${UserPrefs.instance.currency}'
             : 'Due soon',
         when: when,
       );
@@ -98,13 +99,10 @@ class NotificationService {
       n++;
     }
 
-    // Category / budget alerts — fire shortly so user sees them offline.
     n += await notifyBudgetAlerts(delay: const Duration(seconds: 3));
-
     return n;
   }
 
-  /// Immediate (near-term) local alerts for budgets at warning or exceeded.
   Future<int> notifyBudgetAlerts({Duration delay = const Duration(seconds: 2)}) async {
     if (!_ready) await init();
     if (!enabled) return 0;
@@ -120,7 +118,7 @@ class NotificationService {
       await _schedule(
         id: _stableId('bud', b.id),
         title: exceeded ? 'Budget exceeded: ${b.name}' : 'Budget warning: ${b.name}',
-        body: '$cat · $spent / $limit ${Defaults.currency}'
+        body: '$cat · $spent / $limit ${UserPrefs.instance.currency}'
             '${exceeded ? ' — over limit' : ' — near limit'}',
         when: when,
         high: exceeded,
@@ -130,7 +128,6 @@ class NotificationService {
     return n;
   }
 
-  /// After recording an expense against a category — alert only budgets for that category.
   Future<List<BudgetStatus>> checkCategoryAfterExpense(String? categoryId) async {
     if (categoryId == null) {
       final all = await BudgetRepository(AppDatabase.instance).alerts();
@@ -152,7 +149,7 @@ class NotificationService {
       await _schedule(
         id: _stableId('bud', b.id),
         title: exceeded ? 'Category budget exceeded' : 'Category budget warning',
-        body: '${b.categoryName ?? b.name}: $spent / $limit ${Defaults.currency}',
+        body: '${b.categoryName ?? b.name}: $spent / $limit ${UserPrefs.instance.currency}',
         when: when,
         high: exceeded,
       );
