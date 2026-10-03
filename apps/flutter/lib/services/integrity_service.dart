@@ -43,7 +43,9 @@ class IntegrityService {
     'activity_events': [
       'id', 'event_type', 'entity_type', 'entity_id', 'occurred_at', 'recorded_at',
     ],
-    'entity_links': ['id', 'from_type', 'from_id', 'to_type', 'to_id'],
+    'entity_links': ['id'], // from_* or source_* — validated separately
+    'work_sessions': ['id', 'task_id', 'status', 'started_at', 'accumulated_ms'],
+    'time_blocks': ['id', 'start_at', 'end_at', 'task_id'],
   };
 
   Future<IntegrityReport> run({bool repair = true}) async {
@@ -51,11 +53,9 @@ class IntegrityService {
     var fixed = 0;
     final db = await _db.database;
 
-    // ── Users ──────────────────────────────────────────────
     final users = await db.query('users');
     checks.add(users.isEmpty ? 'FAIL: no user row' : 'OK: ${users.length} user(s)');
 
-    // ── Foreign keys pragma ────────────────────────────────
     try {
       final fk = await db.rawQuery('PRAGMA foreign_keys');
       final on = fk.isNotEmpty && (fk.first.values.first == 1 || '${fk.first.values.first}' == '1');
@@ -69,46 +69,30 @@ class IntegrityService {
       checks.add('SKIP: pragma foreign_keys ($e)');
     }
 
-    // ── Migration / column validation ──────────────────────
     fixed += await _validateMigrations(db, checks, repair);
+    fixed += await _ensureIndexes(db, checks, repair);
 
-    // ── Duplicate occurrences ──────────────────────────────
     fixed += await _dedupe(
-      db,
-      checks,
-      repair,
-      table: 'habit_occurrences',
-      group: 'habit_id, scheduled_date',
-      label: 'habit occurrences',
+      db, checks, repair,
+      table: 'habit_occurrences', group: 'habit_id, scheduled_date', label: 'habit occurrences',
     );
     fixed += await _dedupe(
-      db,
-      checks,
-      repair,
-      table: 'bill_occurrences',
-      group: 'bill_id, due_at',
-      label: 'bill occurrences',
+      db, checks, repair,
+      table: 'bill_occurrences', group: 'bill_id, due_at', label: 'bill occurrences',
     );
     fixed += await _dedupe(
-      db,
-      checks,
-      repair,
-      table: 'routine_occurrences',
-      group: 'routine_id, scheduled_date',
-      label: 'routine occurrences',
+      db, checks, repair,
+      table: 'routine_occurrences', group: 'routine_id, scheduled_date', label: 'routine occurrences',
     );
+    fixed += await _dedupeEntityLinks(db, checks, repair);
 
-    // ── Orphan detection ───────────────────────────────────
     fixed += await _orphans(db, checks, repair);
-
-    // ── Status vocabulary ──────────────────────────────────
     fixed += await _statusVocabulary(db, checks, repair);
-
-    // ── Event consistency ──────────────────────────────────
     fixed += await _eventConsistency(db, checks, repair);
-
-    // ── Data quality ───────────────────────────────────────
     fixed += await _dataQuality(db, checks, repair);
+    fixed += await _timeRanges(db, checks, repair);
+    fixed += await _workSessions(db, checks, repair);
+    fixed += await _selfRefs(db, checks, repair);
 
     final ok = checks.every((c) => !c.startsWith('FAIL'));
     return IntegrityReport(ok: ok, checks: checks, fixed: fixed);
@@ -126,6 +110,17 @@ class IntegrityService {
           continue;
         }
         final cols = info.map((r) => '${r['name']}').toSet();
+        // entity_links: accept either schema style
+        if (table == 'entity_links') {
+          final okFrom = cols.contains('from_type') && cols.contains('to_type');
+          final okSrc = cols.contains('source_type') && cols.contains('target_type');
+          if (okFrom || okSrc) {
+            checks.add('OK: entity_links schema');
+          } else {
+            checks.add('WARN: entity_links missing link columns');
+          }
+          continue;
+        }
         final missing = need.where((c) => !cols.contains(c)).toList();
         if (missing.isEmpty) {
           checks.add('OK: $table columns');
@@ -133,7 +128,11 @@ class IntegrityService {
           checks.add('WARN: $table missing ${missing.join(', ')}');
           if (repair) {
             for (final col in missing) {
-              final type = col.endsWith('_at') || col.endsWith('_minutes') || col == 'priority'
+              final type = col.endsWith('_at') ||
+                      col.endsWith('_minutes') ||
+                      col.endsWith('_ms') ||
+                      col == 'priority' ||
+                      col == 'interrupt_count'
                   ? 'INTEGER'
                   : 'TEXT';
               try {
@@ -147,6 +146,47 @@ class IntegrityService {
       } catch (e) {
         checks.add('SKIP: $table schema ($e)');
       }
+    }
+    return fixed;
+  }
+
+  Future<int> _ensureIndexes(dynamic db, List<String> checks, bool repair) async {
+    var fixed = 0;
+    const indexes = <String, String>{
+      'uq_habit_occ_day':
+          'CREATE UNIQUE INDEX IF NOT EXISTS uq_habit_occ_day ON habit_occurrences(habit_id, scheduled_date)',
+      'idx_tasks_status': 'CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)',
+      'idx_tasks_project': 'CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id)',
+      'idx_activity_occurred':
+          'CREATE INDEX IF NOT EXISTS idx_activity_occurred ON activity_events(occurred_at)',
+      'idx_reminders_trigger':
+          'CREATE INDEX IF NOT EXISTS idx_reminders_trigger ON reminders(trigger_at)',
+      'idx_work_sessions_task':
+          'CREATE INDEX IF NOT EXISTS idx_work_sessions_task ON work_sessions(task_id)',
+    };
+    try {
+      final existing = await db.rawQuery("SELECT name FROM sqlite_master WHERE type='index'");
+      final names = existing.map((r) => '${r['name']}').toSet();
+      var missing = 0;
+      for (final e in indexes.entries) {
+        if (names.contains(e.key)) continue;
+        missing++;
+        if (repair) {
+          try {
+            await db.execute(e.value);
+            fixed++;
+          } catch (_) {}
+        }
+      }
+      if (missing == 0) {
+        checks.add('OK: critical indexes present');
+      } else {
+        checks.add(repair
+            ? 'FIXED: ensured $missing indexes'
+            : 'WARN: $missing indexes missing');
+      }
+    } catch (e) {
+      checks.add('SKIP: indexes ($e)');
     }
     return fixed;
   }
@@ -181,6 +221,37 @@ class IntegrityService {
       return dups.length as int;
     } catch (e) {
       checks.add('SKIP: $label dedupe ($e)');
+      return 0;
+    }
+  }
+
+  Future<int> _dedupeEntityLinks(dynamic db, List<String> checks, bool repair) async {
+    try {
+      final info = await db.rawQuery('PRAGMA table_info(entity_links)');
+      final cols = info.map((r) => '${r['name']}').toSet();
+      final fromStyle = cols.contains('from_type');
+      final group = fromStyle
+          ? 'from_type, from_id, to_type, to_id'
+          : 'source_type, source_id, target_type, target_id';
+      final dups = await db.rawQuery('''
+        SELECT $group, COUNT(*) AS c FROM entity_links
+        GROUP BY $group HAVING c > 1
+      ''');
+      if (dups.isEmpty) {
+        checks.add('OK: no duplicate entity_links');
+        return 0;
+      }
+      checks.add('WARN: ${dups.length} duplicate entity_links');
+      if (!repair) return 0;
+      await db.execute('''
+        DELETE FROM entity_links WHERE id NOT IN (
+          SELECT MAX(id) FROM entity_links GROUP BY $group
+        )
+      ''');
+      checks.add('FIXED: duplicate entity_links');
+      return dups.length as int;
+    } catch (e) {
+      checks.add('SKIP: entity_links dedupe ($e)');
       return 0;
     }
   }
@@ -270,6 +341,12 @@ class IntegrityService {
     fixed += await nullBadFk(
       table: 'habits', column: 'goal_id', parentTable: 'goals', label: 'habit→goal',
     );
+    fixed += await nullBadFk(
+      table: 'time_blocks', column: 'task_id', parentTable: 'tasks', label: 'block→task',
+    );
+    fixed += await nullBadFk(
+      table: 'work_sessions', column: 'task_id', parentTable: 'tasks', label: 'session→task',
+    );
 
     fixed += await deleteOrphans(
       table: 'habit_occurrences', column: 'habit_id', parentTable: 'habits', label: 'habit_occ',
@@ -286,8 +363,11 @@ class IntegrityService {
     fixed += await deleteOrphans(
       table: 'savings_contributions', column: 'goal_id', parentTable: 'savings_goals', label: 'savings_contrib',
     );
+    fixed += await deleteOrphans(
+      table: 'shopping_items', column: 'list_id', parentTable: 'shopping_lists', label: 'shopping_items',
+    );
 
-    // entity_links — drop rows with empty endpoints
+    // entity_links — empty endpoints
     try {
       final info = await db.rawQuery('PRAGMA table_info(entity_links)');
       final cols = info.map((r) => '${r['name']}').toSet();
@@ -311,9 +391,51 @@ class IntegrityService {
             checks.add('FIXED: broken entity_links');
           }
         }
+      } else if (cols.contains('source_type')) {
+        final bad = await db.rawQuery('''
+          SELECT COUNT(*) AS c FROM entity_links
+          WHERE source_id IS NULL OR target_id IS NULL OR source_id = '' OR target_id = ''
+        ''');
+        final c = dbIntOr(bad.first['c']);
+        if (c == 0) {
+          checks.add('OK: entity_links endpoints');
+        } else if (repair) {
+          await db.execute('''
+            DELETE FROM entity_links
+            WHERE source_id IS NULL OR target_id IS NULL OR source_id = '' OR target_id = ''
+          ''');
+          fixed += c;
+          checks.add('FIXED: broken entity_links');
+        }
       }
     } catch (e) {
       checks.add('SKIP: entity_links ($e)');
+    }
+
+    // Reminders pointing at deleted sources (nullify, keep reminder)
+    try {
+      final rows = await db.rawQuery('''
+        SELECT COUNT(*) AS c FROM reminders
+        WHERE source_type = 'TASK' AND source_id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id = reminders.source_id)
+      ''');
+      final c = dbIntOr(rows.first['c']);
+      if (c == 0) {
+        checks.add('OK: reminder→task links');
+      } else {
+        checks.add('WARN: $c reminders for missing tasks');
+        if (repair) {
+          await db.execute('''
+            UPDATE reminders SET source_id = NULL, source_type = NULL
+            WHERE source_type = 'TASK' AND source_id IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id = reminders.source_id)
+          ''');
+          fixed += c;
+          checks.add('FIXED: cleared orphan reminder sources');
+        }
+      }
+    } catch (e) {
+      checks.add('SKIP: reminder sources ($e)');
     }
 
     return fixed;
@@ -356,15 +478,14 @@ class IntegrityService {
     await normalize('goals', {'ACTIVE', 'DONE', 'COMPLETED', 'CANCELLED', 'ARCHIVED'}, 'ACTIVE');
     await normalize('reminders', {'PENDING', 'DONE', 'CANCELLED', 'SNOOZED'}, 'PENDING');
     await normalize('debts', {'OPEN', 'ACTIVE', 'PAID', 'CANCELLED'}, 'OPEN');
+    await normalize('work_sessions', {'RUNNING', 'PAUSED', 'COMPLETED', 'CANCELLED'}, 'COMPLETED');
 
     return fixed;
   }
 
-  /// History must not silently disagree with current state.
   Future<int> _eventConsistency(dynamic db, List<String> checks, bool repair) async {
     var fixed = 0;
 
-    // Completed tasks must have completed_at
     try {
       final rows = await db.rawQuery('''
         SELECT COUNT(*) AS c FROM tasks
@@ -388,7 +509,6 @@ class IntegrityService {
       checks.add('SKIP: completed_at ($e)');
     }
 
-    // Completed tasks should have a completion event (detect drift, repair by inserting)
     try {
       final missing = await db.rawQuery('''
         SELECT t.id, t.title, t.completed_at, t.owner_id FROM tasks t
@@ -427,7 +547,6 @@ class IntegrityService {
       checks.add('SKIP: task event consistency ($e)');
     }
 
-    // Paid bill occurrences without BILL_PAID event
     try {
       final missing = await db.rawQuery('''
         SELECT o.id, o.bill_id, o.paid_at FROM bill_occurrences o
@@ -466,7 +585,30 @@ class IntegrityService {
       checks.add('SKIP: bill event consistency ($e)');
     }
 
-    // Orphan activity events pointing at deleted tasks (soft: keep history, flag only)
+    // Events with null entity_id
+    try {
+      final rows = await db.rawQuery('''
+        SELECT COUNT(*) AS c FROM activity_events
+        WHERE entity_id IS NULL OR entity_id = '' OR event_type IS NULL OR event_type = ''
+      ''');
+      final c = dbIntOr(rows.first['c']);
+      if (c == 0) {
+        checks.add('OK: activity_events required fields');
+      } else {
+        checks.add('WARN: $c incomplete activity_events');
+        if (repair) {
+          await db.execute('''
+            DELETE FROM activity_events
+            WHERE entity_id IS NULL OR entity_id = '' OR event_type IS NULL OR event_type = ''
+          ''');
+          fixed += c;
+          checks.add('FIXED: removed incomplete events');
+        }
+      }
+    } catch (e) {
+      checks.add('SKIP: event fields ($e)');
+    }
+
     try {
       final rows = await db.rawQuery('''
         SELECT COUNT(*) AS c FROM activity_events e
@@ -507,7 +649,27 @@ class IntegrityService {
       checks.add('SKIP: task title check ($e)');
     }
 
-    // Negative money amounts
+    try {
+      final rows = await db.rawQuery(
+        "SELECT COUNT(*) AS c FROM notes WHERE content IS NULL OR trim(content) = ''",
+      );
+      final c = dbIntOr(rows.first['c']);
+      if (c == 0) {
+        checks.add('OK: note content');
+      } else {
+        checks.add('WARN: $c empty notes');
+        if (repair) {
+          await db.execute(
+            "UPDATE notes SET content = '(empty)' WHERE content IS NULL OR trim(content) = ''",
+          );
+          fixed += c;
+          checks.add('FIXED: empty notes');
+        }
+      }
+    } catch (e) {
+      checks.add('SKIP: note content ($e)');
+    }
+
     try {
       final rows = await db.rawQuery(
         'SELECT COUNT(*) AS c FROM expenses WHERE amount_minor < 0',
@@ -527,10 +689,214 @@ class IntegrityService {
       checks.add('SKIP: expense amounts ($e)');
     }
 
+    // Debt remaining > original
+    try {
+      final rows = await db.rawQuery('''
+        SELECT COUNT(*) AS c FROM debts
+        WHERE remaining_amount_minor > original_amount_minor
+          AND original_amount_minor IS NOT NULL
+      ''');
+      final c = dbIntOr(rows.first['c']);
+      if (c == 0) {
+        checks.add('OK: debt remaining ≤ original');
+      } else {
+        checks.add('WARN: $c debts with remaining > original');
+        if (repair) {
+          await db.execute('''
+            UPDATE debts SET remaining_amount_minor = original_amount_minor
+            WHERE remaining_amount_minor > original_amount_minor
+              AND original_amount_minor IS NOT NULL
+          ''');
+          fixed += c;
+          checks.add('FIXED: capped debt remaining');
+        }
+      }
+    } catch (e) {
+      checks.add('SKIP: debt remaining ($e)');
+    }
+
+    // Savings current > target (flag only)
+    try {
+      final rows = await db.rawQuery('''
+        SELECT COUNT(*) AS c FROM savings_goals
+        WHERE current_amount_minor > target_amount_minor
+          AND target_amount_minor > 0
+          AND status = 'ACTIVE'
+      ''');
+      final c = dbIntOr(rows.first['c']);
+      if (c == 0) {
+        checks.add('OK: savings within target');
+      } else {
+        checks.add('WARN: $c savings goals over target (mark REACHABLE?)');
+        if (repair) {
+          await db.execute('''
+            UPDATE savings_goals SET status = 'REACHED'
+            WHERE current_amount_minor >= target_amount_minor
+              AND target_amount_minor > 0 AND status = 'ACTIVE'
+          ''');
+          fixed += c;
+          checks.add('FIXED: savings goals marked REACHED');
+        }
+      }
+    } catch (e) {
+      checks.add('SKIP: savings ($e)');
+    }
+
     return fixed;
   }
 
-  /// Structural validation of a backup JSON string (no DB writes).
+  Future<int> _timeRanges(dynamic db, List<String> checks, bool repair) async {
+    var fixed = 0;
+    try {
+      final rows = await db.rawQuery('''
+        SELECT COUNT(*) AS c FROM time_blocks
+        WHERE end_at IS NOT NULL AND start_at IS NOT NULL AND end_at < start_at
+      ''');
+      final c = dbIntOr(rows.first['c']);
+      if (c == 0) {
+        checks.add('OK: time_block ranges');
+      } else {
+        checks.add('WARN: $c time_blocks with end < start');
+        if (repair) {
+          await db.execute('''
+            UPDATE time_blocks SET end_at = start_at + 1800000
+            WHERE end_at IS NOT NULL AND start_at IS NOT NULL AND end_at < start_at
+          ''');
+          fixed += c;
+          checks.add('FIXED: time_block ranges (+30m)');
+        }
+      }
+    } catch (e) {
+      checks.add('SKIP: time_block ranges ($e)');
+    }
+
+    try {
+      final rows = await db.rawQuery('''
+        SELECT COUNT(*) AS c FROM tasks
+        WHERE scheduled_end IS NOT NULL AND scheduled_start IS NOT NULL
+          AND scheduled_end < scheduled_start
+      ''');
+      final c = dbIntOr(rows.first['c']);
+      if (c == 0) {
+        checks.add('OK: task schedule ranges');
+      } else {
+        checks.add('WARN: $c tasks with scheduled_end < start');
+        if (repair) {
+          await db.execute('''
+            UPDATE tasks SET scheduled_end = scheduled_start + 1800000
+            WHERE scheduled_end IS NOT NULL AND scheduled_start IS NOT NULL
+              AND scheduled_end < scheduled_start
+          ''');
+          fixed += c;
+          checks.add('FIXED: task schedule ranges');
+        }
+      }
+    } catch (e) {
+      checks.add('SKIP: task schedule ranges ($e)');
+    }
+
+    try {
+      final rows = await db.rawQuery('''
+        SELECT COUNT(*) AS c FROM calendar_events
+        WHERE end_at IS NOT NULL AND start_at IS NOT NULL AND end_at < start_at
+      ''');
+      final c = dbIntOr(rows.first['c']);
+      if (c == 0) {
+        checks.add('OK: calendar event ranges');
+      } else if (repair) {
+        await db.execute('''
+          UPDATE calendar_events SET end_at = start_at + 3600000
+          WHERE end_at IS NOT NULL AND start_at IS NOT NULL AND end_at < start_at
+        ''');
+        fixed += c;
+        checks.add('FIXED: calendar event ranges');
+      } else {
+        checks.add('WARN: $c calendar events with end < start');
+      }
+    } catch (e) {
+      checks.add('SKIP: calendar ranges ($e)');
+    }
+
+    return fixed;
+  }
+
+  Future<int> _workSessions(dynamic db, List<String> checks, bool repair) async {
+    var fixed = 0;
+    // Stuck RUNNING sessions older than 24h → mark COMPLETED
+    try {
+      final cutoff = AppDatabase.nowMs() - const Duration(hours: 24).inMilliseconds;
+      final rows = await db.rawQuery('''
+        SELECT COUNT(*) AS c FROM work_sessions
+        WHERE status = 'RUNNING' AND started_at < ?
+      ''', [cutoff]);
+      final c = dbIntOr(rows.first['c']);
+      if (c == 0) {
+        checks.add('OK: no stuck work sessions');
+      } else {
+        checks.add('WARN: $c work sessions running >24h');
+        if (repair) {
+          final now = AppDatabase.nowMs();
+          await db.execute('''
+            UPDATE work_sessions
+            SET status = 'COMPLETED', ended_at = COALESCE(ended_at, ?), updated_at = ?
+            WHERE status = 'RUNNING' AND started_at < ?
+          ''', [now, now, cutoff]);
+          fixed += c;
+          checks.add('FIXED: closed stuck work sessions');
+        }
+      }
+    } catch (e) {
+      checks.add('SKIP: work sessions ($e)');
+    }
+
+    // Negative accumulated_ms
+    try {
+      final rows = await db.rawQuery(
+        'SELECT COUNT(*) AS c FROM work_sessions WHERE accumulated_ms < 0',
+      );
+      final c = dbIntOr(rows.first['c']);
+      if (c == 0) {
+        checks.add('OK: session durations');
+      } else if (repair) {
+        await db.execute('UPDATE work_sessions SET accumulated_ms = 0 WHERE accumulated_ms < 0');
+        fixed += c;
+        checks.add('FIXED: negative session durations');
+      } else {
+        checks.add('WARN: $c negative session durations');
+      }
+    } catch (e) {
+      checks.add('SKIP: session durations ($e)');
+    }
+
+    return fixed;
+  }
+
+  Future<int> _selfRefs(dynamic db, List<String> checks, bool repair) async {
+    var fixed = 0;
+    try {
+      final rows = await db.rawQuery('''
+        SELECT COUNT(*) AS c FROM tasks
+        WHERE parent_task_id IS NOT NULL AND parent_task_id = id
+      ''');
+      final c = dbIntOr(rows.first['c']);
+      if (c == 0) {
+        checks.add('OK: no self-parent tasks');
+      } else {
+        checks.add('WARN: $c tasks parent themselves');
+        if (repair) {
+          await db.execute(
+            'UPDATE tasks SET parent_task_id = NULL WHERE parent_task_id = id',
+          );
+          fixed += c;
+          checks.add('FIXED: cleared self-parent tasks');
+        }
+      }
+    } catch (e) {
+      checks.add('SKIP: self-parent ($e)');
+    }
+    return fixed;
+  }
+
   Future<IntegrityReport> verifyBackupJson(String raw) async {
     final checks = <String>[];
     try {
@@ -582,7 +948,6 @@ class IntegrityService {
         checks.add('FAIL: no recognizable table data');
       }
 
-      // Parent-before-child soft check: users should exist if tasks exist
       final hasUsers = (map['users'] is List && (map['users'] as List).isNotEmpty) ||
           (map['Users'] is List && (map['Users'] as List).isNotEmpty);
       final hasTasks = map['tasks'] is List && (map['tasks'] as List).isNotEmpty;
@@ -597,8 +962,6 @@ class IntegrityService {
     }
   }
 
-  /// Dry-run restore: parse backup, verify structure, count rows that would import.
-  /// Does not write to the live database.
   Future<IntegrityReport> verifyRestoreDryRun(String raw) async {
     final structure = await verifyBackupJson(raw);
     if (!structure.ok) return structure;
@@ -615,7 +978,6 @@ class IntegrityService {
         final list = map[key];
         if (list is! List) continue;
         importable += list.length;
-        // Spot-check first row has an id when expected
         if (list.isNotEmpty && list.first is Map) {
           final row = Map<String, dynamic>.from(list.first as Map);
           final id = row['id'] ?? row['Id'];
