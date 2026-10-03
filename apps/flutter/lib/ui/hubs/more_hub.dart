@@ -40,69 +40,65 @@ class _MoreHubState extends State<MoreHub> {
     setState(() => _hits = hits);
   }
 
-  Future<void> _export() async {
+  Future<void> _export({bool encrypted = false}) async {
+    if (_busy) return;
     setState(() => _busy = true);
-    final io = BackupIo();
-    final path = await io.exportToFile();
-    if (mounted) {
-      setState(() => _busy = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(path == null ? 'Export failed' : 'Exported')),
-      );
-    }
-  }
-
-  Future<void> _exportEncrypted() async {
-    final ctrl = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.metal,
-        title: const Text('Encrypt backup'),
-        content: TextField(
-          controller: ctrl,
-          obscureText: true,
-          style: const TextStyle(color: AppTheme.silver),
-          decoration: const InputDecoration(labelText: 'Passphrase'),
+    String? passphrase;
+    if (encrypted) {
+      final ctrl = TextEditingController();
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppTheme.metal,
+          title: const Text('Encrypt backup'),
+          content: TextField(
+            controller: ctrl,
+            obscureText: true,
+            style: const TextStyle(color: AppTheme.silver),
+            decoration: const InputDecoration(labelText: 'Passphrase'),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Encrypt')),
+          ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Encrypt')),
-        ],
-      ),
-    );
-    if (ok != true || ctrl.text.isEmpty) return;
-    setState(() => _busy = true);
-    final path = await BackupIo().exportEncrypted(ctrl.text);
-    if (mounted) {
-      setState(() => _busy = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(path == null ? 'Encrypt export failed' : 'Encrypted export ready')),
       );
+      if (ok != true || ctrl.text.isEmpty) {
+        setState(() => _busy = false);
+        return;
+      }
+      passphrase = ctrl.text;
     }
+    final result = await BackupIo(AppDatabase.instance).exportToFile(
+      encrypted: encrypted,
+      passphrase: passphrase,
+    );
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(result.ok ? (result.message ?? 'Exported') : (result.message ?? 'Export failed'))),
+    );
   }
 
   Future<void> _import() async {
+    if (_busy) return;
     setState(() => _busy = true);
-    final result = await BackupIo().importFromFile();
-    if (mounted) {
-      setState(() => _busy = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(result ? 'Import complete' : 'Import failed')),
-      );
-      if (result) await widget.onChanged?.call();
-    }
+    final result = await BackupIo(AppDatabase.instance).importFromFile();
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(result.ok ? (result.message ?? 'Import complete') : (result.message ?? 'Import failed'))),
+    );
+    if (result.ok) await widget.onChanged?.call();
   }
 
   Future<void> _integrity() async {
+    if (_busy) return;
     setState(() => _busy = true);
     final report = await IntegrityService().run(repair: true);
-    if (mounted) {
-      setState(() => _busy = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(report.summary)),
-      );
-    }
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(report.summary)));
   }
 
   @override
@@ -184,12 +180,12 @@ class _MoreHubState extends State<MoreHub> {
               ListTile(
                 leading: const Icon(Icons.upload_file, color: AppTheme.amber),
                 title: const Text('Export backup', style: TextStyle(color: AppTheme.silver)),
-                onTap: _busy ? null : _export,
+                onTap: _busy ? null : () => _export(),
               ),
               ListTile(
                 leading: const Icon(Icons.lock_outline, color: AppTheme.amber),
                 title: const Text('Export encrypted backup', style: TextStyle(color: AppTheme.silver)),
-                onTap: _busy ? null : _exportEncrypted,
+                onTap: _busy ? null : () => _export(encrypted: true),
               ),
               ListTile(
                 leading: const Icon(Icons.download, color: AppTheme.amber),
