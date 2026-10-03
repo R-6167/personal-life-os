@@ -10,7 +10,9 @@ class BudgetStatus {
     required this.limitMinor,
     required this.spentMinor,
     required this.alertThreshold,
-    required this.matchKey,
+    this.matchKey,
+    this.categoryId,
+    this.categoryName,
   });
 
   final String id;
@@ -19,6 +21,8 @@ class BudgetStatus {
   final int spentMinor;
   final double alertThreshold;
   final String? matchKey;
+  final String? categoryId;
+  final String? categoryName;
 
   double get ratio => limitMinor <= 0 ? 0 : spentMinor / limitMinor;
 
@@ -29,6 +33,12 @@ class BudgetStatus {
   }
 
   int get remainingMinor => (limitMinor - spentMinor).clamp(0, limitMinor);
+
+  String get scopeLabel {
+    if (categoryName != null && categoryName!.isNotEmpty) return categoryName!;
+    if (matchKey != null && matchKey!.isNotEmpty) return 'match: $matchKey';
+    return 'all spend';
+  }
 }
 
 class BudgetRepository {
@@ -49,6 +59,7 @@ class BudgetRepository {
     required String name,
     required double amountMajor,
     String? matchKey,
+    String? categoryId,
     double alertThreshold = 0.8,
   }) async {
     final ownerId = await _db.requireOwnerId();
@@ -61,6 +72,7 @@ class BudgetRepository {
         'owner_id': ownerId,
         'name': name,
         'match_key': (matchKey == null || matchKey.trim().isEmpty) ? null : matchKey.trim(),
+        'category_id': categoryId,
         'amount_minor': minor,
         'period': 'MONTHLY',
         'alert_threshold': alertThreshold,
@@ -96,10 +108,21 @@ class BudgetRepository {
     return DateTime(n.year, n.month, 1).millisecondsSinceEpoch;
   }
 
-  /// Spent this month for a budget. Empty match_key = all expenses (overall budget).
+  /// Spent this month. Priority: category_id → match_key → all expenses.
   Future<int> spentMinorFor(Map<String, Object?> budget) async {
     final db = await _db.database;
     final start = _monthStartMs();
+    final categoryId = budget['category_id'] as String?;
+    if (categoryId != null && categoryId.isNotEmpty) {
+      final rows = await db.rawQuery(
+        '''
+        SELECT COALESCE(SUM(amount_minor), 0) AS s FROM expenses
+        WHERE occurred_at >= ? AND category_id = ?
+        ''',
+        [start, categoryId],
+      );
+      return (rows.first['s'] as int?) ?? 0;
+    }
     final key = budget['match_key'] as String?;
     if (key == null || key.isEmpty) {
       final rows = await db.rawQuery(
@@ -125,8 +148,15 @@ class BudgetRepository {
   Future<List<BudgetStatus>> statuses() async {
     final budgets = await listActive();
     final out = <BudgetStatus>[];
+    final db = await _db.database;
     for (final b in budgets) {
       final spent = await spentMinorFor(b);
+      String? catName;
+      final catId = b['category_id'] as String?;
+      if (catId != null) {
+        final rows = await db.query('categories', where: 'id = ?', whereArgs: [catId], limit: 1);
+        if (rows.isNotEmpty) catName = rows.first['name'] as String?;
+      }
       out.add(BudgetStatus(
         id: b['id'] as String,
         name: b['name'] as String,
@@ -134,12 +164,13 @@ class BudgetRepository {
         spentMinor: spent,
         alertThreshold: (b['alert_threshold'] as num?)?.toDouble() ?? 0.8,
         matchKey: b['match_key'] as String?,
+        categoryId: catId,
+        categoryName: catName,
       ));
     }
     return out;
   }
 
-  /// Budgets at warning or exceeded — for alerts / Needs Attention.
   Future<List<BudgetStatus>> alerts() async {
     final all = await statuses();
     return all.where((s) => s.level != BudgetAlertLevel.ok).toList();
