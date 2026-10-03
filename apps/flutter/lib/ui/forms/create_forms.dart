@@ -14,6 +14,7 @@ import '../../data/project_repository.dart';
 import '../../data/routine_repository.dart';
 import '../../data/task_repository.dart';
 import '../../domain/enums.dart';
+import '../../services/notification_service.dart';
 import '../theme.dart';
 
 enum AddKind {
@@ -389,6 +390,22 @@ Future<bool> _moneyForm(BuildContext context, {required bool isIncome}) async {
       accountId: accountId,
       categoryId: categoryId,
     );
+    final alerts =
+        await NotificationService.instance.checkCategoryAfterExpense(categoryId);
+    if (alerts.isNotEmpty && context.mounted) {
+      final b = alerts.first;
+      final exceeded = b.level == BudgetAlertLevel.exceeded;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            exceeded
+                ? 'Budget exceeded: ${b.categoryName ?? b.name}'
+                : 'Budget warning: ${b.categoryName ?? b.name}',
+          ),
+          backgroundColor: exceeded ? Colors.redAccent : Colors.orangeAccent,
+        ),
+      );
+    }
   }
   return true;
 }
