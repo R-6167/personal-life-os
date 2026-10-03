@@ -48,26 +48,18 @@ enum RecurrenceFrequency {
   }
 }
 
-/// Immutable rule. All dates are local civil dates (time-of-day preserved from dtStart).
+/// Immutable rule. Civil dates; time-of-day preserved from [dtStart].
 class RecurrenceRule {
-  /// Anchor / first occurrence basis.
   final DateTime dtStart;
-
   final RecurrenceFrequency frequency;
-
-  /// Every N periods (N ≥ 1). Weekly: every N weeks; monthly: every N months.
   final int interval;
-
-  /// Inclusive end date (local day). Null = no end by date.
   final DateTime? until;
-
-  /// Max number of occurrences including the first. Null = unbounded (generator still limited).
   final int? count;
 
-  /// Weekdays: DateTime.monday=1 … DateTime.sunday=7. Empty = use dtStart weekday only for weekly.
+  /// DateTime.monday=1 … sunday=7.
   final List<int> byWeekDays;
 
-  /// Days of month 1–31. Use -1 for last day of month. Empty = use dtStart.day.
+  /// 1–31 or -1 (last day of month).
   final List<int> byMonthDays;
 
   const RecurrenceRule({
@@ -82,7 +74,6 @@ class RecurrenceRule {
 
   int get safeInterval => interval < 1 ? 1 : interval;
 
-  /// Parse common DB shapes (task_recurrences, habit_schedules, bills).
   factory RecurrenceRule.fromLegacy({
     required String frequency,
     int interval = 1,
@@ -99,10 +90,14 @@ class RecurrenceRule {
       days.addAll(daysOfWeek.where((d) => d >= 1 && d <= 7));
     } else if (daysOfWeekCsv != null && daysOfWeekCsv.trim().isNotEmpty) {
       for (final p in daysOfWeekCsv.split(RegExp(r'[,;\s]+'))) {
-        final n = int.tryParse(p.trim());
-        if (n != null && n >= 1 && n <= 7) days.add(n);
-        // Accept Mon/Tue style lightly
-        final u = p.trim().toUpperCase();
+        final token = p.trim();
+        if (token.isEmpty) continue;
+        final n = int.tryParse(token);
+        if (n != null && n >= 1 && n <= 7) {
+          days.add(n);
+          continue;
+        }
+        final u = token.toUpperCase();
         const map = {
           'MON': 1,
           'TUE': 2,
@@ -112,7 +107,9 @@ class RecurrenceRule {
           'SAT': 6,
           'SUN': 7,
         };
-        if (map.containsKey(u.take(3))) days.add(map[u.take(3)]!);
+        final key = u.length >= 3 ? u.substring(0, 3) : u;
+        final wd = map[key];
+        if (wd != null) days.add(wd);
       }
     }
     final monthDays = <int>[];
@@ -133,10 +130,9 @@ class RecurrenceRule {
   OccurrenceGenerator generator() => OccurrenceGenerator(this);
 }
 
-/// One concrete instance produced by the generator.
 class Occurrence {
   final DateTime start;
-  final int index; // 0-based from dtStart series
+  final int index;
 
   const Occurrence({required this.start, required this.index});
 
@@ -145,15 +141,13 @@ class Occurrence {
   DateTime get day => DateTime(start.year, start.month, start.day);
 }
 
-/// Expands a [RecurrenceRule] into concrete local datetimes.
 class OccurrenceGenerator {
   OccurrenceGenerator(this.rule);
 
   final RecurrenceRule rule;
 
-  static const _maxScanDays = 366 * 6; // safety for open-ended walks
+  static const _maxScanDays = 366 * 6;
 
-  /// Occurrences with start > [after] (exclusive), optional [before] exclusive, max [limit].
   List<Occurrence> generate({
     DateTime? after,
     DateTime? before,
@@ -173,60 +167,56 @@ class OccurrenceGenerator {
     }
 
     var index = 0;
-    // Seed cursor just before first possible
-    DateTime cursor = DateTime(start.year, start.month, start.day);
-
-    // Fast-forward roughly for daily/weekly to avoid long loops when after >> start
+    var cursor = DateTime(start.year, start.month, start.day);
     if (after != null && after.isAfter(start)) {
       cursor = DateTime(after.year, after.month, after.day);
     }
 
+    // When fast-forwarding, approximate index so count limits stay honest.
+    if (cursor.isAfter(DateTime(start.year, start.month, start.day))) {
+      index = _estimateIndexBefore(cursor);
+    }
+
     for (var scan = 0; scan < _maxScanDays && out.length < limit; scan++) {
-      final candidates = _candidatesOnOrAfter(cursor, indexHint: index);
-      if (candidates.isEmpty) {
-        cursor = cursor.add(const Duration(days: 1));
-        continue;
-      }
-      for (final c in candidates) {
-        if (!c.isAfter(afterEx)) continue;
-        if (before != null && !c.isBefore(before)) return out;
-        if (!_withinUntil(c)) return out;
-        if (!_withinCount(index)) return out;
-        // Interval filter for weekly/monthly/yearly series membership
-        if (!_matchesIntervalSeries(c, index)) {
-          // still advance index only for true series members — handled below
-          continue;
+      final day = DateTime(cursor.year, cursor.month, cursor.day);
+      if (_matches(day)) {
+        final at = _withTime(day);
+        if (at.isAfter(afterEx)) {
+          if (before != null && !at.isBefore(before)) return out;
+          if (!_withinUntil(at)) return out;
+          if (!_withinCount(index)) return out;
+          out.add(Occurrence(start: at, index: index));
+          index++;
+          if (out.length >= limit) return out;
+        } else {
+          index++;
         }
-        out.add(Occurrence(start: _withTime(c), index: index));
-        index++;
-        if (out.length >= limit) return out;
-        if (!_withinCount(index)) return out;
       }
       cursor = cursor.add(const Duration(days: 1));
     }
     return out;
   }
 
-  /// Next occurrence strictly after [after], or null if none.
   DateTime? nextAfter(DateTime after) {
     final list = generate(after: after, limit: 1);
     return list.isEmpty ? null : list.first.start;
   }
 
-  /// Next occurrence on or after [from] (inclusive of same calendar day if still valid).
   DateTime? nextOnOrAfter(DateTime from) {
-    final dayStart = DateTime(from.year, from.month, from.day).subtract(const Duration(milliseconds: 1));
+    final dayStart =
+        DateTime(from.year, from.month, from.day).subtract(const Duration(milliseconds: 1));
     return nextAfter(dayStart);
   }
 
   bool occursOn(DateTime day) {
     final d0 = DateTime(day.year, day.month, day.day);
     final d1 = d0.add(const Duration(days: 1));
-    return generate(after: d0.subtract(const Duration(milliseconds: 1)), before: d1, limit: 1)
-        .isNotEmpty;
+    return generate(
+          after: d0.subtract(const Duration(milliseconds: 1)),
+          before: d1,
+          limit: 1,
+        ).isNotEmpty;
   }
-
-  // —— internals ——
 
   bool _withinUntil(DateTime t) {
     final u = rule.until;
@@ -245,43 +235,55 @@ class OccurrenceGenerator {
     return DateTime(day.year, day.month, day.day, s.hour, s.minute, s.second);
   }
 
-  /// Days that could fire on [cursor] calendar day (0 or 1 for most rules).
-  List<DateTime> _candidatesOnOrAfter(DateTime cursor, {required int indexHint}) {
-    final day = DateTime(cursor.year, cursor.month, cursor.day);
+  int _estimateIndexBefore(DateTime cursor) {
+    // Best-effort for count tracking when starting mid-series.
+    final start = DateTime(rule.dtStart.year, rule.dtStart.month, rule.dtStart.day);
+    if (!cursor.isAfter(start)) return 0;
+    switch (rule.frequency) {
+      case RecurrenceFrequency.daily:
+        return cursor.difference(start).inDays ~/ rule.safeInterval;
+      case RecurrenceFrequency.weekly:
+        final weeks = _mondayOf(cursor).difference(_mondayOf(start)).inDays ~/ 7;
+        final daysPerWeek = (rule.byWeekDays.isEmpty ? 1 : rule.byWeekDays.length);
+        return (weeks ~/ rule.safeInterval) * daysPerWeek;
+      case RecurrenceFrequency.monthly:
+        final sm = start.year * 12 + (start.month - 1);
+        final cm = cursor.year * 12 + (cursor.month - 1);
+        return (cm - sm) ~/ rule.safeInterval;
+      case RecurrenceFrequency.yearly:
+        return (cursor.year - start.year) ~/ rule.safeInterval;
+      case RecurrenceFrequency.once:
+        return 0;
+    }
+  }
+
+  bool _matches(DateTime day) {
     switch (rule.frequency) {
       case RecurrenceFrequency.once:
         final s = DateTime(rule.dtStart.year, rule.dtStart.month, rule.dtStart.day);
-        return day == s ? [day] : [];
+        return day.year == s.year && day.month == s.month && day.day == s.day;
       case RecurrenceFrequency.daily:
-        if (_dailyMatches(day)) return [day];
-        return [];
+        return _dailyMatches(day);
       case RecurrenceFrequency.weekly:
-        if (_weeklyMatches(day)) return [day];
-        return [];
+        return _weeklyMatches(day);
       case RecurrenceFrequency.monthly:
-        if (_monthlyMatches(day)) return [day];
-        return [];
+        return _monthlyMatches(day);
       case RecurrenceFrequency.yearly:
-        if (_yearlyMatches(day)) return [day];
-        return [];
+        return _yearlyMatches(day);
     }
   }
 
   bool _dailyMatches(DateTime day) {
     final start = DateTime(rule.dtStart.year, rule.dtStart.month, rule.dtStart.day);
     if (day.isBefore(start)) return false;
-    final days = day.difference(start).inDays;
-    return days % rule.safeInterval == 0;
+    return day.difference(start).inDays % rule.safeInterval == 0;
   }
 
   bool _weeklyMatches(DateTime day) {
     final start = DateTime(rule.dtStart.year, rule.dtStart.month, rule.dtStart.day);
     if (day.isBefore(start)) return false;
-
     final weekDays = rule.byWeekDays.isEmpty ? [rule.dtStart.weekday] : rule.byWeekDays;
     if (!weekDays.contains(day.weekday)) return false;
-
-    // Interval in weeks from the Monday of dtStart week
     final startMon = _mondayOf(start);
     final dayMon = _mondayOf(day);
     final weeks = dayMon.difference(startMon).inDays ~/ 7;
@@ -296,11 +298,9 @@ class OccurrenceGenerator {
     if (dayMonthIndex < startMonthIndex) return false;
     final months = dayMonthIndex - startMonthIndex;
     if (months % rule.safeInterval != 0) return false;
-
     final targets = rule.byMonthDays.isEmpty ? [start.day] : rule.byMonthDays;
     for (final raw in targets) {
-      final dom = _resolveMonthDay(day.year, day.month, raw);
-      if (day.day == dom) return true;
+      if (day.day == _resolveMonthDay(day.year, day.month, raw)) return true;
     }
     return false;
   }
@@ -309,25 +309,20 @@ class OccurrenceGenerator {
     final start = rule.dtStart;
     if (day.year < start.year) return false;
     if ((day.year - start.year) % rule.safeInterval != 0) return false;
-
-    final targets = rule.byMonthDays.isEmpty ? [start.day] : rule.byMonthDays;
     if (day.month != start.month) return false;
+    final targets = rule.byMonthDays.isEmpty ? [start.day] : rule.byMonthDays;
     for (final raw in targets) {
-      final dom = _resolveMonthDay(day.year, day.month, raw);
-      if (day.day == dom) return true;
+      if (day.day == _resolveMonthDay(day.year, day.month, raw)) return true;
     }
     return false;
   }
-
-  /// Series index filter — already encoded in daily/weekly/monthly matchers.
-  bool _matchesIntervalSeries(DateTime c, int index) => true;
 
   static DateTime _mondayOf(DateTime d) {
     final day = DateTime(d.year, d.month, d.day);
     return day.subtract(Duration(days: day.weekday - DateTime.monday));
   }
 
-  /// [raw] 1–31 or -1 (last day). Clamps to real last day of month (no day-28-only hack).
+  /// [raw] 1–31 or -1 (last day). Clamps to real last day (handles 31 Jan → 28/29 Feb).
   static int _resolveMonthDay(int year, int month, int raw) {
     final last = DateTime(year, month + 1, 0).day;
     if (raw == -1) return last;
@@ -335,7 +330,6 @@ class OccurrenceGenerator {
     return raw > last ? last : raw;
   }
 
-  /// Add [months] to [y]/[m] preserving intent for day-of-month via clamp.
   static DateTime addMonthsClamped(DateTime from, int months, {int? dayOfMonth}) {
     final targetMonthIndex = from.year * 12 + (from.month - 1) + months;
     final y = targetMonthIndex ~/ 12;
@@ -345,10 +339,8 @@ class OccurrenceGenerator {
   }
 }
 
-/// Backward-compatible façade used by older call sites.
+/// Facade for existing call sites (bills, habits, tasks).
 class RecurrenceEngine {
-  /// Next occurrence strictly after [fromMs].
-  /// ONCE returns [fromMs] so callers can treat as terminal.
   static int nextAfter(
     int fromMs, {
     required String frequency,
@@ -370,7 +362,7 @@ class RecurrenceEngine {
       until: until,
       count: count,
       daysOfWeek: daysOfWeek,
-      monthDay: monthDay,
+      monthDay: monthDay ?? from.day,
     );
     final next = rule.generator().nextAfter(from);
     return next?.millisecondsSinceEpoch ?? fromMs;
@@ -393,7 +385,6 @@ class RecurrenceEngine {
     return rule.generator().occursOn(day);
   }
 
-  /// Expand the next [limit] occurrences after [fromMs].
   static List<int> expandAfter(
     int fromMs, {
     required String frequency,
@@ -410,15 +401,8 @@ class RecurrenceEngine {
       dtStart: dtStart ?? from,
       until: until,
       daysOfWeek: daysOfWeek,
+      monthDay: from.day,
     );
-    return rule
-        .generator()
-        .generate(after: from, limit: limit)
-        .map((o) => o.startMs)
-        .toList();
+    return rule.generator().generate(after: from, limit: limit).map((o) => o.startMs).toList();
   }
-}
-
-extension on String {
-  String take(int n) => length <= n ? this : substring(0, n);
 }
