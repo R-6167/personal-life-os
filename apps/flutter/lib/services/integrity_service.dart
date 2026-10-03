@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import '../data/database.dart';
 import '../data/export_service.dart';
+import '../domain/db_map.dart';
 
 class IntegrityReport {
   IntegrityReport({
@@ -22,7 +23,7 @@ class IntegrityReport {
   }
 }
 
-/// Offline integrity: duplicate protection, orphan soft-checks, backup round-trip verify.
+/// Offline integrity: duplicates, orphans, status vocabulary, backup shape.
 class IntegrityService {
   IntegrityService({AppDatabase? db}) : _db = db ?? AppDatabase.instance;
   final AppDatabase _db;
@@ -32,9 +33,11 @@ class IntegrityService {
     var fixed = 0;
     final db = await _db.database;
 
+    // 13. User presence
     final users = await db.query('users');
     checks.add(users.isEmpty ? 'FAIL: no user row' : 'OK: ${users.length} user(s)');
 
+    // 14. Habit occurrence dedupe
     try {
       final dups = await db.rawQuery('''
         SELECT habit_id, scheduled_date, COUNT(*) AS c
@@ -53,13 +56,14 @@ class IntegrityService {
             )
           ''');
           fixed += dups.length;
-          checks.add('FIXED: removed duplicate habit occurrences');
+          checks.add('FIXED: habit occurrence duplicates');
         }
       }
     } catch (e) {
       checks.add('SKIP: habit occurrence dedupe ($e)');
     }
 
+    // 15. Bill occurrence dedupe
     try {
       final dups = await db.rawQuery('''
         SELECT bill_id, due_at, COUNT(*) AS c
@@ -70,7 +74,7 @@ class IntegrityService {
       if (dups.isEmpty) {
         checks.add('OK: no duplicate bill occurrences');
       } else {
-        checks.add('WARN: ${dups.length} duplicate bill occurrence groups');
+        checks.add('WARN: ${dups.length} duplicate bill groups');
         if (repair) {
           await db.execute('''
             DELETE FROM bill_occurrences WHERE id NOT IN (
@@ -78,48 +82,186 @@ class IntegrityService {
             )
           ''');
           fixed += dups.length;
-          checks.add('FIXED: removed duplicate bill occurrences');
+          checks.add('FIXED: bill occurrence duplicates');
         }
       }
     } catch (e) {
       checks.add('SKIP: bill occurrence dedupe ($e)');
     }
 
+    // Task dependencies orphans
     try {
       final orphans = await db.rawQuery('''
         SELECT COUNT(*) AS c FROM task_dependencies d
         WHERE NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id = d.task_id)
            OR NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id = d.depends_on_task_id)
       ''');
-      final c = (orphans.first['c'] as int?) ?? 0;
-      checks.add(c == 0 ? 'OK: task dependencies' : 'WARN: $c orphan task dependencies');
+      final c = dbIntOr(orphans.first['c']);
+      if (c == 0) {
+        checks.add('OK: task dependencies');
+      } else {
+        checks.add('WARN: $c orphan task dependencies');
+        if (repair) {
+          await db.execute('''
+            DELETE FROM task_dependencies WHERE
+              NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id = task_id)
+              OR NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id = depends_on_task_id)
+          ''');
+          fixed += c;
+          checks.add('FIXED: orphan task dependencies');
+        }
+      }
     } catch (e) {
       checks.add('SKIP: dependency check ($e)');
+    }
+
+    // 16. Debt status vocabulary OPEN | PAID (ACTIVE → OPEN)
+    try {
+      final bad = await db.rawQuery(
+        "SELECT COUNT(*) AS c FROM debts WHERE status = 'ACTIVE'",
+      );
+      final c = dbIntOr(bad.first['c']);
+      if (c == 0) {
+        checks.add('OK: debt status vocabulary');
+      } else {
+        checks.add('WARN: $c debts with ACTIVE status');
+        if (repair) {
+          await db.execute("UPDATE debts SET status = 'OPEN' WHERE status = 'ACTIVE'");
+          fixed += c;
+          checks.add('FIXED: debt ACTIVE → OPEN');
+        }
+      }
+    } catch (e) {
+      checks.add('SKIP: debt status ($e)');
+    }
+
+    // Orphan bill occurrences (bill deleted)
+    try {
+      final orphans = await db.rawQuery('''
+        SELECT COUNT(*) AS c FROM bill_occurrences o
+        WHERE NOT EXISTS (SELECT 1 FROM bills b WHERE b.id = o.bill_id)
+      ''');
+      final c = dbIntOr(orphans.first['c']);
+      if (c == 0) {
+        checks.add('OK: bill occurrences linked');
+      } else {
+        checks.add('WARN: $c orphan bill occurrences');
+        if (repair) {
+          await db.execute('''
+            DELETE FROM bill_occurrences WHERE NOT EXISTS (
+              SELECT 1 FROM bills b WHERE b.id = bill_id
+            )
+          ''');
+          fixed += c;
+          checks.add('FIXED: orphan bill occurrences');
+        }
+      }
+    } catch (e) {
+      checks.add('SKIP: bill orphan check ($e)');
+    }
+
+    // Negative money amounts (data quality)
+    try {
+      final neg = await db.rawQuery('''
+        SELECT
+          (SELECT COUNT(*) FROM expenses WHERE amount_minor < 0) +
+          (SELECT COUNT(*) FROM income WHERE amount_minor < 0) AS c
+      ''');
+      final c = dbIntOr(neg.first['c']);
+      checks.add(c == 0 ? 'OK: non-negative money amounts' : 'WARN: $c negative money rows');
+    } catch (e) {
+      checks.add('SKIP: money sign check ($e)');
+    }
+
+    // Empty required titles
+    try {
+      final empty = await db.rawQuery('''
+        SELECT COUNT(*) AS c FROM tasks WHERE title IS NULL OR trim(title) = ''
+      ''');
+      final c = dbIntOr(empty.first['c']);
+      if (c == 0) {
+        checks.add('OK: task titles present');
+      } else {
+        checks.add('WARN: $c tasks with empty title');
+        if (repair) {
+          await db.execute(
+            "UPDATE tasks SET title = 'Untitled' WHERE title IS NULL OR trim(title) = ''",
+          );
+          fixed += c;
+          checks.add('FIXED: empty task titles');
+        }
+      }
+    } catch (e) {
+      checks.add('SKIP: task title check ($e)');
     }
 
     final ok = checks.every((c) => !c.startsWith('FAIL'));
     return IntegrityReport(ok: ok, checks: checks, fixed: fixed);
   }
 
+  /// Validates actual ExportService payload shape (table keys at top level).
   Future<IntegrityReport> verifyBackupJson(String raw) async {
     final checks = <String>[];
     try {
+      if (raw.isEmpty) {
+        return IntegrityReport(ok: false, checks: ['FAIL: empty backup']);
+      }
+      if (raw.length > ExportService.maxRawChars) {
+        return IntegrityReport(ok: false, checks: ['FAIL: backup exceeds size limit']);
+      }
+
       final decoded = jsonDecode(raw);
       if (decoded is! Map) {
         return IntegrityReport(ok: false, checks: ['FAIL: not a JSON object']);
       }
-      final map = decoded as Map<String, dynamic>;
-      checks.add(map.containsKey('tables') || map.containsKey('version')
-          ? 'OK: backup shape'
-          : 'WARN: unusual backup keys');
-      if (map['tables'] is Map) {
-        final tables = map['tables'] as Map;
-        checks.add('OK: ${tables.length} tables in backup');
+      final map = Map<String, dynamic>.from(decoded);
+
+      final app = map['app']?.toString();
+      if (app != null && app != 'personal-life-os') {
+        checks.add('FAIL: app tag is $app');
+      } else if (app == 'personal-life-os') {
+        checks.add('OK: app tag');
+      } else {
+        checks.add('WARN: missing app tag (legacy backup?)');
       }
+
+      if (map.containsKey('schemaVersion') || map.containsKey('contractVersion')) {
+        checks.add('OK: version metadata');
+      } else {
+        checks.add('WARN: no schema/contract version');
+      }
+
+      // Export writes tables as top-level keys, not nested under "tables".
+      var tableHits = 0;
+      for (final t in ExportService.tables) {
+        if (map.containsKey(t) || map.containsKey(_toCamel(t))) tableHits++;
+      }
+      if (tableHits == 0 && map['tables'] is Map) {
+        tableHits = (map['tables'] as Map).length;
+        checks.add('OK: nested tables map ($tableHits)');
+      } else if (tableHits > 0) {
+        checks.add('OK: $tableHits known tables present');
+      } else {
+        checks.add('FAIL: no recognizable table data');
+      }
+
+      // Require at least users or tasks/notes for a meaningful restore
+      final hasUsers = map['users'] is List || map['Users'] is List;
+      if (!hasUsers && tableHits < 2) {
+        checks.add('WARN: thin backup (few tables)');
+      }
+
       final ok = checks.every((c) => !c.startsWith('FAIL'));
       return IntegrityReport(ok: ok, checks: checks);
     } catch (e) {
       return IntegrityReport(ok: false, checks: ['FAIL: $e']);
     }
+  }
+
+  String _toCamel(String snake) {
+    final parts = snake.split('_');
+    if (parts.length == 1) return snake;
+    return parts.first +
+        parts.skip(1).map((p) => p.isEmpty ? '' : '${p[0].toUpperCase()}${p.substring(1)}').join();
   }
 }

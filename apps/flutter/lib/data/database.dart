@@ -14,7 +14,7 @@ class AppDatabase {
   static const _uuid = Uuid();
 
   /// Bump only when adding a non-destructive migration in onUpgrade.
-  static const schemaVersion = 11;
+  static const schemaVersion = 12;
 
   Future<Database> get database async {
     if (_db != null) return _db!;
@@ -40,16 +40,10 @@ class AppDatabase {
       path,
       version: schemaVersion,
       onConfigure: (db) async {
-        // foreign_keys does not return rows → execute is fine
         await db.execute('PRAGMA foreign_keys = ON');
-
-        // journal_mode returns a result row on Android → must use rawQuery,
-        // not execute (otherwise SQLITE_OK "Queries can be performed using… only").
         try {
           await db.rawQuery('PRAGMA journal_mode = WAL');
-        } catch (_) {
-          // Non-fatal: default DELETE journal still works offline single-user.
-        }
+        } catch (_) {}
         try {
           await db.execute('PRAGMA synchronous = NORMAL');
         } catch (_) {}
@@ -61,6 +55,7 @@ class AppDatabase {
         await _applySchema(db);
         await _seedDefaultUser(db);
         await _applyV6Constraints(db);
+        await _migrateToV12(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 6) await _migrateToV6(db);
@@ -69,6 +64,7 @@ class AppDatabase {
         if (oldVersion < 9) await _migrateToV9(db);
         if (oldVersion < 10) await _migrateToV10(db);
         if (oldVersion < 11) await _migrateToV11(db);
+        if (oldVersion < 12) await _migrateToV12(db);
       },
     );
   }
@@ -89,9 +85,7 @@ class AppDatabase {
 
   Future<void> _migrateToV9(Database db) async {
     await _applySchema(db);
-    try {
-      await db.execute('ALTER TABLE budgets ADD COLUMN category_id TEXT');
-    } catch (_) {}
+    await _tryAlter(db, 'ALTER TABLE budgets ADD COLUMN category_id TEXT');
   }
 
   Future<void> _migrateToV10(Database db) async {
@@ -99,30 +93,93 @@ class AppDatabase {
   }
 
   Future<void> _migrateToV11(Database db) async {
-    await _applySchema(db); // creates new indexes via IF NOT EXISTS
+    await _applySchema(db);
+  }
+
+  /// Explicit additive columns + indexes for older installs (CREATE IF NOT EXISTS
+  /// does not add missing columns to existing tables).
+  Future<void> _migrateToV12(Database db) async {
+    await _applySchema(db);
+
+    // Tasks
+    await _tryAlter(db, 'ALTER TABLE tasks ADD COLUMN description TEXT');
+    await _tryAlter(db, 'ALTER TABLE tasks ADD COLUMN milestone_id TEXT');
+    await _tryAlter(db, 'ALTER TABLE tasks ADD COLUMN scheduled_start INTEGER');
+    await _tryAlter(db, 'ALTER TABLE tasks ADD COLUMN scheduled_end INTEGER');
+    await _tryAlter(db, 'ALTER TABLE tasks ADD COLUMN estimated_minutes INTEGER');
+    await _tryAlter(db, 'ALTER TABLE tasks ADD COLUMN completed_at INTEGER');
+    await _tryAlter(db, 'ALTER TABLE tasks ADD COLUMN archived_at INTEGER');
+
+    // Habits / routines
+    await _tryAlter(db, 'ALTER TABLE habits ADD COLUMN description TEXT');
+    await _tryAlter(db, 'ALTER TABLE habits ADD COLUMN archived_at INTEGER');
+    await _tryAlter(db, 'ALTER TABLE routines ADD COLUMN archived_at INTEGER');
+
+    // Finance
+    await _tryAlter(db, 'ALTER TABLE expenses ADD COLUMN account_id TEXT');
+    await _tryAlter(db, 'ALTER TABLE expenses ADD COLUMN category_id TEXT');
+    await _tryAlter(db, 'ALTER TABLE expenses ADD COLUMN payment_method TEXT');
+    await _tryAlter(db, 'ALTER TABLE income ADD COLUMN account_id TEXT');
+    await _tryAlter(db, 'ALTER TABLE income ADD COLUMN category_id TEXT');
+    await _tryAlter(db, 'ALTER TABLE bills ADD COLUMN default_account_id TEXT');
+    await _tryAlter(db, 'ALTER TABLE bills ADD COLUMN archived_at INTEGER');
+    await _tryAlter(db, 'ALTER TABLE bill_occurrences ADD COLUMN paid_at INTEGER');
+    await _tryAlter(db, 'ALTER TABLE bill_occurrences ADD COLUMN actual_amount_minor INTEGER');
+    await _tryAlter(db, 'ALTER TABLE bill_occurrences ADD COLUMN expense_id TEXT');
+
+    // Notes / people
+    await _tryAlter(db, 'ALTER TABLE notes ADD COLUMN archived_at INTEGER');
+    await _tryAlter(db, 'ALTER TABLE people ADD COLUMN phone TEXT');
+    await _tryAlter(db, 'ALTER TABLE people ADD COLUMN archived_at INTEGER');
+
+    // Budgets
+    await _tryAlter(db, 'ALTER TABLE budgets ADD COLUMN category_id TEXT');
+
+    // Reminders
+    await _tryAlter(db, 'ALTER TABLE reminders ADD COLUMN message TEXT');
+    await _tryAlter(db, 'ALTER TABLE reminders ADD COLUMN source_type TEXT');
+    await _tryAlter(db, 'ALTER TABLE reminders ADD COLUMN source_id TEXT');
+
+    // Indexes (idempotent)
+    await _tryAlter(
+      db,
+      'CREATE UNIQUE INDEX IF NOT EXISTS uq_habit_occ_day ON habit_occurrences(habit_id, scheduled_date)',
+    );
+    await _tryAlter(
+      db,
+      'CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)',
+    );
+    await _tryAlter(
+      db,
+      'CREATE INDEX IF NOT EXISTS idx_expenses_occurred ON expenses(occurred_at)',
+    );
+    await _tryAlter(
+      db,
+      'CREATE INDEX IF NOT EXISTS idx_activity_occurred ON activity_events(occurred_at)',
+    );
+
+    // Normalize debt vocabulary
+    try {
+      await db.execute("UPDATE debts SET status = 'OPEN' WHERE status = 'ACTIVE'");
+    } catch (_) {}
+  }
+
+  Future<void> _tryAlter(Database db, String sql) async {
+    try {
+      await db.execute(sql);
+    } catch (_) {
+      // Column/index already exists or table missing — non-fatal.
+    }
   }
 
   Future<void> _applyV6Constraints(Database db) async {
     try {
       await db.execute('''
-        DELETE FROM habit_occurrences
-        WHERE id NOT IN (
-          SELECT id FROM (
-            SELECT id, ROW_NUMBER() OVER (
-              PARTITION BY habit_id, scheduled_date ORDER BY updated_at DESC, created_at DESC
-            ) AS rn FROM habit_occurrences
-          ) WHERE rn = 1
+        DELETE FROM habit_occurrences WHERE id NOT IN (
+          SELECT MAX(id) FROM habit_occurrences GROUP BY habit_id, scheduled_date
         )
       ''');
-    } catch (_) {
-      try {
-        await db.execute('''
-          DELETE FROM habit_occurrences WHERE id NOT IN (
-            SELECT MAX(id) FROM habit_occurrences GROUP BY habit_id, scheduled_date
-          )
-        ''');
-      } catch (_) {}
-    }
+    } catch (_) {}
     try {
       await db.execute(
         'CREATE UNIQUE INDEX IF NOT EXISTS uq_habit_occ_day ON habit_occurrences(habit_id, scheduled_date)',

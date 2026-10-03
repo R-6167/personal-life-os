@@ -3,8 +3,8 @@ import '../data/database.dart';
 import '../data/habit_repository.dart';
 import '../data/routine_repository.dart';
 import 'error_log_service.dart';
+import 'integrity_service.dart';
 
-/// Describes what the app can do with zero network.
 class OfflineCapabilities {
   const OfflineCapabilities({
     required this.localDatabase,
@@ -41,16 +41,15 @@ class OfflineHealth {
   final DateTime? lastMaintenanceAt;
 }
 
-/// Offline-first runtime: no servers, local maintenance only.
 class OfflineRuntime {
   OfflineRuntime._();
   static final instance = OfflineRuntime._();
 
   DateTime? lastMaintenanceAt;
   DateTime? lastSuccessfulWriteAt;
+  DateTime? lastIntegrityAt;
   bool _running = false;
 
-  /// Always true for this product — there is no online mode.
   bool get isOfflineFirst => true;
 
   OfflineCapabilities get capabilities => const OfflineCapabilities(
@@ -65,8 +64,7 @@ class OfflineRuntime {
     lastSuccessfulWriteAt = DateTime.now();
   }
 
-  /// Generate today's habit/routine occurrences, refresh bill statuses.
-  /// Safe to call on resume; skips if already running.
+  /// Habit/routine occurrences, bill statuses, light integrity repair.
   Future<void> runMaintenance({bool force = false}) async {
     if (_running) return;
     if (!force &&
@@ -77,7 +75,7 @@ class OfflineRuntime {
     _running = true;
     try {
       final db = AppDatabase.instance;
-      await db.database; // ensure open
+      await db.database;
       final habits = HabitRepository(db);
       final routines = RoutineRepository(db);
       final bills = BillRepository(db);
@@ -90,6 +88,22 @@ class OfflineRuntime {
         routines.markMissedBeforeToday(),
         bills.refreshOccurrenceStatuses(),
       ]);
+
+      // Integrity at most once per 30 minutes unless forced
+      final needIntegrity = force ||
+          lastIntegrityAt == null ||
+          DateTime.now().difference(lastIntegrityAt!) > const Duration(minutes: 30);
+      if (needIntegrity) {
+        final report = await IntegrityService(db: db).run(repair: true);
+        lastIntegrityAt = DateTime.now();
+        if (!report.ok || report.fixed > 0) {
+          await ErrorLogService.instance.log(
+            message: 'Integrity: ${report.summary}',
+            level: 'INTEGRITY',
+          );
+        }
+      }
+
       lastMaintenanceAt = DateTime.now();
     } catch (e, st) {
       await ErrorLogService.instance.log(
@@ -116,7 +130,6 @@ class OfflineRuntime {
       );
       checks.add('OK: ${tables.length} local tables');
 
-      // Smoke-read hot tables
       for (final t in ['tasks', 'habits', 'expenses', 'activity_events']) {
         try {
           await db.query(t, limit: 1);
@@ -126,6 +139,10 @@ class OfflineRuntime {
           ok = false;
         }
       }
+
+      final integrity = await IntegrityService().run(repair: false);
+      checks.addAll(integrity.checks.take(4));
+      if (!integrity.ok) ok = false;
 
       checks.add('OK: offline-first (no network required)');
       if (lastMaintenanceAt != null) {
