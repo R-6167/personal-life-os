@@ -40,6 +40,17 @@ class ExtendedRepository {
     );
   }
 
+  Future<List<Map<String, Object?>>> listUpcomingAppointments({int days = 7}) async {
+    final now = AppDatabase.nowMs();
+    final end = now + Duration(days: days).inMilliseconds;
+    return (await _db.database).query(
+      'calendar_events',
+      where: 'start_at >= ? AND start_at <= ? AND status != ?',
+      whereArgs: [now, end, 'CANCELLED'],
+      orderBy: 'start_at ASC',
+    );
+  }
+
   Future<void> addEvent({required String title, int? hoursFromNow}) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
@@ -61,6 +72,43 @@ class ExtendedRepository {
         'id': AppDatabase.newId(),
         'owner_id': ownerId,
         'event_type': 'EVENT_CREATED',
+        'entity_type': 'CALENDAR_EVENT',
+        'entity_id': id,
+        'occurred_at': now,
+        'recorded_at': now,
+        'source': EventSource.user,
+      });
+    });
+  }
+
+  Future<void> addAppointment({
+    required String title,
+    required DateTime start,
+    int durationMinutes = 60,
+    String? location,
+    String? description,
+  }) async {
+    final ownerId = await _db.requireOwnerId();
+    final now = AppDatabase.nowMs();
+    final end = start.add(Duration(minutes: durationMinutes));
+    await _db.txn((txn) async {
+      final id = AppDatabase.newId();
+      await txn.insert('calendar_events', {
+        'id': id,
+        'owner_id': ownerId,
+        'title': title,
+        'description': description,
+        'start_at': start.millisecondsSinceEpoch,
+        'end_at': end.millisecondsSinceEpoch,
+        'location': location,
+        'status': 'SCHEDULED',
+        'created_at': now,
+        'updated_at': now,
+      });
+      await txn.insert('activity_events', {
+        'id': AppDatabase.newId(),
+        'owner_id': ownerId,
+        'event_type': 'APPOINTMENT_CREATED',
         'entity_type': 'CALENDAR_EVENT',
         'entity_id': id,
         'occurred_at': now,
@@ -342,7 +390,13 @@ class ExtendedRepository {
     return db.query('practical_items', where: 'archived_at IS NULL', orderBy: 'due_at ASC');
   }
 
-  Future<void> addPractical(String title, {String type = 'OTHER'}) async {
+  Future<void> addPractical(
+    String title, {
+    String type = 'OTHER',
+    DateTime? dueAt,
+    DateTime? expiresAt,
+    String? notes,
+  }) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
     await (await _db.database).insert('practical_items', {
@@ -351,9 +405,26 @@ class ExtendedRepository {
       'type': type,
       'title': title,
       'status': 'ACTIVE',
+      'due_at': dueAt?.millisecondsSinceEpoch,
+      'expires_at': expiresAt?.millisecondsSinceEpoch,
+      'notes': notes,
       'created_at': now,
       'updated_at': now,
     });
+  }
+
+  Future<void> addVehicleService({equired String title, DateTime? dueAt, String? notes}) async {
+    await addPractical(title, type: 'VEHICLE', dueAt: dueAt, notes: notes);
+  }
+
+  Future<void> completePractical(String id) async {
+    final now = AppDatabase.nowMs();
+    await (await _db.database).update(
+      'practical_items',
+      {'status': 'DONE', 'updated_at': now},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<List<Map<String, Object?>>> listDocuments() async {
@@ -361,7 +432,13 @@ class ExtendedRepository {
     return db.query('documents', orderBy: 'expires_at ASC');
   }
 
-  Future<void> addDocument(String title, {String type = 'OTHER'}) async {
+  Future<void> addDocument(
+    String title, {
+    String type = 'OTHER',
+    DateTime? expiresAt,
+    String? documentNumber,
+    String? issuer,
+  }) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
     await _db.txn((txn) async {
@@ -371,6 +448,9 @@ class ExtendedRepository {
         'owner_id': ownerId,
         'title': title,
         'document_type': type,
+        'document_number': documentNumber,
+        'issuer': issuer,
+        'expires_at': expiresAt?.millisecondsSinceEpoch,
         'created_at': now,
         'updated_at': now,
       });
@@ -392,16 +472,18 @@ class ExtendedRepository {
     return db.query('shopping_lists', where: 'status != ?', whereArgs: ['COMPLETED']);
   }
 
-  Future<void> addShoppingList(String name) async {
+  Future<String> addShoppingList(String name) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
+    final id = AppDatabase.newId();
     await (await _db.database).insert('shopping_lists', {
-      'id': AppDatabase.newId(),
+      'id': id,
       'owner_id': ownerId,
       'name': name,
       'status': 'ACTIVE',
       'created_at': now,
     });
+    return id;
   }
 
   Future<void> addShoppingItem(String listId, String name) async {
@@ -411,6 +493,37 @@ class ExtendedRepository {
       'name': name,
       'purchased': 0,
     });
+  }
+
+  Future<List<Map<String, Object?>>> listShoppingItems(String listId) async {
+    return (await _db.database).query(
+      'shopping_items',
+      where: 'shopping_list_id = ?',
+      whereArgs: [listId],
+      orderBy: 'purchased ASC, name ASC',
+    );
+  }
+
+  Future<void> toggleShoppingItem(String itemId, bool purchased) async {
+    await (await _db.database).update(
+      'shopping_items',
+      {
+        'purchased': purchased ? 1 : 0,
+        'purchased_at': purchased ? AppDatabase.nowMs() : null,
+      },
+      where: 'id = ?',
+      whereArgs: [itemId],
+    );
+  }
+
+  Future<void> completeShoppingList(String listId) async {
+    final now = AppDatabase.nowMs();
+    await (await _db.database).update(
+      'shopping_lists',
+      {'status': 'COMPLETED', 'completed_at': now},
+      where: 'id = ?',
+      whereArgs: [listId],
+    );
   }
 
   Future<List<Map<String, String>>> search(String query) async {
@@ -435,6 +548,10 @@ class ExtendedRepository {
     await scan('bills', 'name', 'BILL');
     await scan('people', 'name', 'PERSON');
     await scan('expenses', 'description', 'EXPENSE');
+    await scan('habits', 'title', 'HABIT');
+    await scan('routines', 'name', 'ROUTINE');
+    await scan('documents', 'title', 'DOCUMENT');
+    await scan('practical_items', 'title', 'PRACTICAL');
     return results;
   }
 
