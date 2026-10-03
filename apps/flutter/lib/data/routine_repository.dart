@@ -6,6 +6,11 @@ class RoutineRepository {
   RoutineRepository(this._db);
   final AppDatabase _db;
 
+  static int dayKey([DateTime? day]) {
+    final d = day ?? DateTime.now();
+    return DateTime(d.year, d.month, d.day).millisecondsSinceEpoch;
+  }
+
   Future<List<Routine>> listActive() async {
     final db = await _db.database;
     final rows = await db.query(
@@ -31,12 +36,11 @@ class RoutineRepository {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
     final id = AppDatabase.newId();
+    // routines table: id, owner_id, name, status, timestamps only
     await (await _db.database).insert('routines', {
       'id': id,
       'owner_id': ownerId,
       'name': name,
-      'description': description,
-      'estimated_minutes': estimatedMinutes,
       'status': EntityStatus.active,
       'created_at': now,
       'updated_at': now,
@@ -46,6 +50,7 @@ class RoutineRepository {
       ownerId: ownerId,
       name: name,
       status: EntityStatus.active,
+      estimatedMinutes: estimatedMinutes,
       createdAt: now,
       updatedAt: now,
     );
@@ -56,7 +61,7 @@ class RoutineRepository {
       'routine_steps',
       where: 'routine_id = ?',
       whereArgs: [routineId],
-      orderBy: 'sort_order ASC',
+      orderBy: 'position ASC',
     );
   }
 
@@ -67,7 +72,7 @@ class RoutineRepository {
       'id': AppDatabase.newId(),
       'routine_id': routineId,
       'title': title,
-      'sort_order': existing.length,
+      'position': existing.length,
       'estimated_minutes': estimatedMinutes,
       'created_at': AppDatabase.nowMs(),
       'updated_at': AppDatabase.nowMs(),
@@ -75,33 +80,45 @@ class RoutineRepository {
   }
 
   Future<String?> ensureTodayOccurrence(String routineId) async {
-    final start = AppDatabase.startOfTodayMs();
-    final end = AppDatabase.endOfTodayMs();
+    final day = dayKey();
     final db = await _db.database;
     final existing = await db.query(
       'routine_occurrences',
-      where: 'routine_id = ? AND expected_at >= ? AND expected_at <= ?',
-      whereArgs: [routineId, start, end],
+      where: 'routine_id = ? AND scheduled_date = ?',
+      whereArgs: [routineId, day],
       limit: 1,
     );
     if (existing.isNotEmpty) return existing.first['id'] as String;
     final now = AppDatabase.nowMs();
     final id = AppDatabase.newId();
-    await db.insert('routine_occurrences', {
-      'id': id,
-      'routine_id': routineId,
-      'expected_at': now,
-      'status': RoutineOccurrenceStatus.expected,
-      'created_at': now,
-      'updated_at': now,
-    });
+    try {
+      await db.insert('routine_occurrences', {
+        'id': id,
+        'routine_id': routineId,
+        'scheduled_date': day,
+        'status': RoutineOccurrenceStatus.expected,
+        'created_at': now,
+        'updated_at': now,
+      });
+    } catch (_) {
+      final again = await db.query(
+        'routine_occurrences',
+        where: 'routine_id = ? AND scheduled_date = ?',
+        whereArgs: [routineId, day],
+        limit: 1,
+      );
+      if (again.isNotEmpty) return again.first['id'] as String;
+      rethrow;
+    }
     return id;
   }
 
   Future<void> ensureAllTodayOccurrences() async {
     final routines = await listActive();
     for (final r in routines) {
-      await ensureTodayOccurrence(r.id);
+      try {
+        await ensureTodayOccurrence(r.id);
+      } catch (_) {}
     }
   }
 
@@ -162,16 +179,16 @@ class RoutineRepository {
   }
 
   Future<int> markMissedBeforeToday() async {
-    final start = AppDatabase.startOfTodayMs();
+    final day = dayKey();
     final db = await _db.database;
     return db.rawUpdate(
-      "UPDATE routine_occurrences SET status = ?, updated_at = ? "
-      "WHERE status = ? AND expected_at < ?",
+      'UPDATE routine_occurrences SET status = ?, updated_at = ? '
+      'WHERE status = ? AND scheduled_date < ?',
       [
         RoutineOccurrenceStatus.missed,
         AppDatabase.nowMs(),
         RoutineOccurrenceStatus.expected,
-        start,
+        day,
       ],
     );
   }
@@ -181,18 +198,17 @@ class RoutineRepository {
       'routine_occurrences',
       where: 'status = ?',
       whereArgs: [RoutineOccurrenceStatus.missed],
-      orderBy: 'expected_at DESC',
+      orderBy: 'scheduled_date DESC',
       limit: limit,
     );
   }
 
   Future<String?> todayStatus(String routineId) async {
-    final start = AppDatabase.startOfTodayMs();
-    final end = AppDatabase.endOfTodayMs();
+    final day = dayKey();
     final rows = await (await _db.database).query(
       'routine_occurrences',
-      where: 'routine_id = ? AND expected_at >= ? AND expected_at <= ?',
-      whereArgs: [routineId, start, end],
+      where: 'routine_id = ? AND scheduled_date = ?',
+      whereArgs: [routineId, day],
       limit: 1,
     );
     if (rows.isEmpty) return null;
@@ -203,7 +219,7 @@ class RoutineRepository {
     required String routineId,
     required String frequency,
     String? daysOfWeek,
-    int? preferredTime,
+    String? preferredTime,
   }) async {
     final now = AppDatabase.nowMs();
     final db = await _db.database;
@@ -215,8 +231,6 @@ class RoutineRepository {
         'frequency': frequency,
         'days_of_week': daysOfWeek,
         'preferred_time': preferredTime,
-        'enabled': 1,
-        'start_date': now,
         'created_at': now,
         'updated_at': now,
       });

@@ -6,6 +6,12 @@ class HabitRepository {
   HabitRepository(this._db);
   final AppDatabase _db;
 
+  /// Day key for occurrence uniqueness (start of local day, ms).
+  static int dayKey([DateTime? day]) {
+    final d = day ?? DateTime.now();
+    return DateTime(d.year, d.month, d.day).millisecondsSinceEpoch;
+  }
+
   Future<List<Habit>> listActive() async {
     final db = await _db.database;
     final rows = await db.query(
@@ -79,33 +85,46 @@ class HabitRepository {
   }
 
   Future<String?> ensureTodayOccurrence(String habitId) async {
-    final start = AppDatabase.startOfTodayMs();
-    final end = AppDatabase.endOfTodayMs();
+    final day = dayKey();
     final db = await _db.database;
     final existing = await db.query(
       'habit_occurrences',
-      where: 'habit_id = ? AND expected_at >= ? AND expected_at <= ?',
-      whereArgs: [habitId, start, end],
+      where: 'habit_id = ? AND scheduled_date = ?',
+      whereArgs: [habitId, day],
       limit: 1,
     );
     if (existing.isNotEmpty) return existing.first['id'] as String;
     final now = AppDatabase.nowMs();
     final id = AppDatabase.newId();
-    await db.insert('habit_occurrences', {
-      'id': id,
-      'habit_id': habitId,
-      'expected_at': now,
-      'status': HabitOccurrenceStatus.expected,
-      'created_at': now,
-      'updated_at': now,
-    });
+    try {
+      await db.insert('habit_occurrences', {
+        'id': id,
+        'habit_id': habitId,
+        'scheduled_date': day,
+        'status': HabitOccurrenceStatus.expected,
+        'created_at': now,
+        'updated_at': now,
+      });
+    } catch (_) {
+      // Unique index race: re-read
+      final again = await db.query(
+        'habit_occurrences',
+        where: 'habit_id = ? AND scheduled_date = ?',
+        whereArgs: [habitId, day],
+        limit: 1,
+      );
+      if (again.isNotEmpty) return again.first['id'] as String;
+      rethrow;
+    }
     return id;
   }
 
   Future<void> ensureAllTodayOccurrences() async {
     final habits = await listActive();
     for (final h in habits) {
-      await ensureTodayOccurrence(h.id);
+      try {
+        await ensureTodayOccurrence(h.id);
+      } catch (_) {}
     }
   }
 
@@ -138,7 +157,6 @@ class HabitRepository {
     });
   }
 
-  /// Alias used by home/life hubs.
   Future<void> completeToday(String habitId) => markDoneToday(habitId);
 
   Future<void> skipToday(String habitId, {String? reason}) async {
@@ -171,27 +189,26 @@ class HabitRepository {
   }
 
   Future<int> markMissedBeforeToday() async {
-    final start = AppDatabase.startOfTodayMs();
+    final day = dayKey();
     final db = await _db.database;
     return db.rawUpdate(
-      "UPDATE habit_occurrences SET status = ?, updated_at = ? "
-      "WHERE status = ? AND expected_at < ?",
+      'UPDATE habit_occurrences SET status = ?, updated_at = ? '
+      'WHERE status = ? AND scheduled_date < ?',
       [
         HabitOccurrenceStatus.missed,
         AppDatabase.nowMs(),
         HabitOccurrenceStatus.expected,
-        start,
+        day,
       ],
     );
   }
 
   Future<String?> todayStatus(String habitId) async {
-    final start = AppDatabase.startOfTodayMs();
-    final end = AppDatabase.endOfTodayMs();
+    final day = dayKey();
     final rows = await (await _db.database).query(
       'habit_occurrences',
-      where: 'habit_id = ? AND expected_at >= ? AND expected_at <= ?',
-      whereArgs: [habitId, start, end],
+      where: 'habit_id = ? AND scheduled_date = ?',
+      whereArgs: [habitId, day],
       limit: 1,
     );
     if (rows.isEmpty) return null;
@@ -203,7 +220,7 @@ class HabitRepository {
       'habit_occurrences',
       where: 'habit_id = ? AND status = ?',
       whereArgs: [habitId, HabitOccurrenceStatus.completed],
-      orderBy: 'expected_at DESC',
+      orderBy: 'scheduled_date DESC',
       limit: 90,
     );
     if (rows.isEmpty) return 0;
@@ -211,7 +228,7 @@ class HabitRepository {
     var day = DateTime.now();
     final completedDays = <String>{};
     for (final r in rows) {
-      final ms = r['expected_at'] as int? ?? r['completed_at'] as int? ?? 0;
+      final ms = r['scheduled_date'] as int? ?? r['completed_at'] as int? ?? 0;
       final d = DateTime.fromMillisecondsSinceEpoch(ms);
       completedDays.add('${d.year}-${d.month}-${d.day}');
     }
@@ -299,7 +316,7 @@ class HabitRepository {
       'habit_occurrences',
       where: 'habit_id = ?',
       whereArgs: [habitId],
-      orderBy: 'expected_at DESC',
+      orderBy: 'scheduled_date DESC',
       limit: limit,
     );
   }
