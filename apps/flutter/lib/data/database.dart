@@ -14,7 +14,7 @@ class AppDatabase {
   static const _uuid = Uuid();
 
   /// Bump only when adding a non-destructive migration in onUpgrade.
-  static const schemaVersion = 7;
+  static const schemaVersion = 8;
 
   Future<Database> get database async {
     if (_db != null) return _db!;
@@ -35,12 +35,9 @@ class AppDatabase {
         await _applyV6Constraints(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
-        if (oldVersion < 6) {
-          await _migrateToV6(db);
-        }
-        if (oldVersion < 7) {
-          await _migrateToV7(db);
-        }
+        if (oldVersion < 6) await _migrateToV6(db);
+        if (oldVersion < 7) await _migrateToV7(db);
+        if (oldVersion < 8) await _migrateToV8(db);
       },
     );
   }
@@ -52,6 +49,10 @@ class AppDatabase {
   }
 
   Future<void> _migrateToV7(Database db) async {
+    await _applySchema(db);
+  }
+
+  Future<void> _migrateToV8(Database db) async {
     await _applySchema(db);
   }
 
