@@ -13,7 +13,7 @@ class AppDatabase {
   Database? _db;
   static const _uuid = Uuid();
 
-  static const schemaVersion = 17;
+  static const schemaVersion = 18;
 
   Future<Database> get database async {
     if (_db != null) return _db!;
@@ -60,6 +60,7 @@ class AppDatabase {
         await _migrateToV15(db);
         await _migrateToV16(db);
         await _migrateToV17(db);
+        await _migrateToV18(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 6) await _migrateToV6(db);
@@ -74,6 +75,7 @@ class AppDatabase {
         if (oldVersion < 15) await _migrateToV15(db);
         if (oldVersion < 16) await _migrateToV16(db);
         if (oldVersion < 17) await _migrateToV17(db);
+        if (oldVersion < 18) await _migrateToV18(db);
       },
     );
   }
@@ -193,6 +195,14 @@ class AppDatabase {
     await _tryAlter(db, 'ALTER TABLE documents ADD COLUMN kind TEXT');
     await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_practical_due ON practical_items(due_at)');
     await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_documents_expires ON documents(expires_at)');
+  }
+
+  Future<void> _migrateToV18(Database db) async {
+    await _applySchema(db);
+    await _tryAlter(db, 'ALTER TABLE notes ADD COLUMN title TEXT');
+    await _tryAlter(db, 'ALTER TABLE notes ADD COLUMN archived_at INTEGER');
+    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_entity_links_from ON entity_links(from_type, from_id)');
+    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_entity_links_to ON entity_links(to_type, to_id)');
   }
 
   Future<void> _tryAlter(Database db, String sql) async {
