@@ -5,7 +5,6 @@ import 'package:timezone/timezone.dart' as tz;
 import '../data/budget_repository.dart';
 import '../data/database.dart';
 import '../data/extended_repository.dart';
-import '../domain/enums.dart';
 import 'notification_payload.dart';
 import 'notification_router.dart';
 import 'reminder_generator_service.dart';
@@ -26,7 +25,6 @@ class NotificationService {
   static const _channelDesc = 'Tasks, bills, habits, and life reminders';
   static const _iosCategory = 'ordin_actions';
 
-  /// Notification action ids (must match Android + iOS definitions).
   static const actionSnooze15 = 'SNOOZE_15';
   static const actionSnooze60 = 'SNOOZE_60';
   static const actionDelete = 'DELETE';
@@ -100,7 +98,6 @@ class NotificationService {
     _handleResponse(response);
   }
 
-  /// Shared path for foreground, background, and cold-start taps/actions.
   static Future<void> _handleResponse(NotificationResponse response) async {
     final action = response.actionId;
     final payload = response.payload;
@@ -114,11 +111,9 @@ class NotificationService {
       return;
     }
 
-    // Default body tap → open relevant screen
     await NotificationRouter.handle(payload);
   }
 
-  /// Process Snooze / Delete from the notification shade (no full UI required).
   static Future<void> handleNotificationAction({
     required String actionId,
     String? payload,
@@ -127,7 +122,6 @@ class NotificationService {
     final parsed = NotificationPayload.tryParse(payload);
     final reminderId = parsed?.reminderId;
 
-    // Always dismiss the current notification entry
     try {
       if (notificationId != null) {
         await instance._plugin.cancel(notificationId);
@@ -135,7 +129,6 @@ class NotificationService {
     } catch (_) {}
 
     if (reminderId == null || reminderId.isEmpty) {
-      // Budget / synthetic alerts: Delete = dismiss only; Snooze = re-fire later
       if (actionId == actionSnooze15 || actionId == actionSnooze60) {
         final mins = actionId == actionSnooze15 ? 15 : 60;
         try {
@@ -152,7 +145,6 @@ class NotificationService {
     }
 
     try {
-      // Ensure DB is available (esp. background isolate)
       await AppDatabase.instance.database;
       final ext = ExtendedRepository(AppDatabase.instance);
 
@@ -166,7 +158,6 @@ class NotificationService {
             snoozeMinutes: mins,
           );
         } catch (_) {}
-        // Push updated schedule to OS
         try {
           await instance.syncFromDatabase();
         } catch (_) {}
@@ -185,9 +176,7 @@ class NotificationService {
           await instance.syncFromDatabase();
         } catch (_) {}
       }
-    } catch (_) {
-      // Best-effort in background; next maintenance will realign
-    }
+    } catch (_) {}
   }
 
   static Future<void> _cancelReminder(String id) async {
@@ -204,7 +193,6 @@ class NotificationService {
 
   Future<void> cancelId(int id) => _plugin.cancel(id);
 
-  /// Full pipeline: generate entity reminders → schedule OS notifications.
   Future<int> syncFromDatabase() async {
     if (!_ready) await init();
     if (!enabled) {
@@ -286,6 +274,21 @@ class NotificationService {
     return n;
   }
 
+  Future<List<BudgetStatus>> checkCategoryAfterExpense(String? categoryId) async {
+    if (categoryId == null) {
+      final all = await BudgetRepository(AppDatabase.instance).alerts();
+      if (all.isNotEmpty) await notifyBudgetAlerts();
+      return all;
+    }
+    final statuses = await BudgetRepository(AppDatabase.instance).statuses();
+    final hit = statuses
+        .where((s) => s.categoryId == categoryId || s.scopeLabel == categoryId)
+        .toList();
+    final alerts = hit.where((s) => s.level != BudgetAlertLevel.ok).toList();
+    if (alerts.isNotEmpty) await notifyBudgetAlerts();
+    return hit;
+  }
+
   Future<void> _schedule({
     required int id,
     required String title,
@@ -353,6 +356,5 @@ class NotificationService {
 
 @pragma('vm:entry-point')
 void notificationTapBackground(NotificationResponse response) {
-  // Background isolate — process snooze/delete without opening the app UI.
   NotificationService._handleResponse(response);
 }
