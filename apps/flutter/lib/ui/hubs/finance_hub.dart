@@ -54,46 +54,52 @@ class _FinanceHubState extends State<FinanceHub> {
   }
 
   Future<void> _loadExtra() async {
-    await softFuture(
+    await softRun(
       () => BillRepository(AppDatabase.instance).refreshOccurrenceStatuses(),
-      null,
       label: 'finance.bills.refresh',
     );
     final accounts = await softFuture(
-      () => AccountRepository(AppDatabase.instance).list(),
-      <Map<String, Object?>>[],
-      label: 'finance.accounts',
-    );
+          () => AccountRepository(AppDatabase.instance).list(),
+          fallback: <Map<String, Object?>>[],
+          label: 'finance.accounts',
+        ) ??
+        <Map<String, Object?>>[];
     final debts = await softFuture(
-      () => ExtendedRepository(AppDatabase.instance).listDebts(),
-      <Map<String, Object?>>[],
-      label: 'finance.debts',
-    );
+          () => ExtendedRepository(AppDatabase.instance).listDebts(),
+          fallback: <Map<String, Object?>>[],
+          label: 'finance.debts',
+        ) ??
+        <Map<String, Object?>>[];
     final subs = await softFuture(
-      () => ExtendedRepository(AppDatabase.instance).listSubscriptions(),
-      <Map<String, Object?>>[],
-      label: 'finance.subs',
-    );
+          () => ExtendedRepository(AppDatabase.instance).listSubscriptions(),
+          fallback: <Map<String, Object?>>[],
+          label: 'finance.subs',
+        ) ??
+        <Map<String, Object?>>[];
     final savings = await softFuture(
-      () => ExtendedRepository(AppDatabase.instance).listSavings(),
-      <Map<String, Object?>>[],
-      label: 'finance.savings',
-    );
+          () => ExtendedRepository(AppDatabase.instance).listSavings(),
+          fallback: <Map<String, Object?>>[],
+          label: 'finance.savings',
+        ) ??
+        <Map<String, Object?>>[];
     final cash = await softFuture(
-      () => _finance.cashFlowThisMonth(),
-      <String, Object?>{},
-      label: 'finance.cash',
-    );
+          () => _finance.cashFlowThisMonth(),
+          fallback: <String, Object?>{},
+          label: 'finance.cash',
+        ) ??
+        <String, Object?>{};
     final ledger = await softFuture(
-      () => _finance.ledger(limit: 20),
-      <Map<String, Object?>>[],
-      label: 'finance.ledger',
-    );
+          () => _finance.ledger(limit: 20),
+          fallback: <Map<String, Object?>>[],
+          label: 'finance.ledger',
+        ) ??
+        <Map<String, Object?>>[];
     final budgetAlerts = await softFuture(
-      () => BudgetRepository(AppDatabase.instance).alerts(),
-      <BudgetStatus>[],
-      label: 'finance.budgets',
-    );
+          () => BudgetRepository(AppDatabase.instance).alerts(),
+          fallback: <BudgetStatus>[],
+          label: 'finance.budgets',
+        ) ??
+        <BudgetStatus>[];
     if (!mounted) return;
     setState(() {
       _accounts = accounts;
