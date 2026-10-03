@@ -7,14 +7,20 @@ class AccountRepository {
 
   Future<List<Map<String, Object?>>> list() async {
     final db = await _db.database;
-    return db.query(
-      'financial_accounts',
-      where: 'archived_at IS NULL',
-      orderBy: 'name ASC',
-    );
+    return db.query('financial_accounts', orderBy: 'name ASC');
   }
 
-  Future<void> create({
+  Future<Map<String, Object?>?> getById(String id) async {
+    final rows = await (await _db.database).query(
+      'financial_accounts',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  Future<String> create({
     required String name,
     required String type,
     double? balanceMajor,
@@ -22,31 +28,41 @@ class AccountRepository {
   }) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
-    final minor = balanceMajor == null ? null : (balanceMajor * 100).round();
+    final id = AppDatabase.newId();
+    final minor = balanceMajor == null ? 0 : (balanceMajor * 100).round();
     await (await _db.database).insert('financial_accounts', {
-      'id': AppDatabase.newId(),
+      'id': id,
       'owner_id': ownerId,
       'name': name,
       'type': type,
       'currency': currency ?? Defaults.currency,
-      'current_balance_minor': minor ?? 0,
+      'current_balance_minor': minor,
+      'is_tracked': 1,
       'created_at': now,
       'updated_at': now,
     });
+    return id;
   }
 
   Future<void> adjustBalance({
     required String accountId,
     required double deltaMajor,
   }) async {
+    await applyDeltaMinor(accountId: accountId, deltaMinor: (deltaMajor * 100).round());
+  }
+
+  /// Signed minor units: negative = debit (expense/payment), positive = credit (income).
+  Future<void> applyDeltaMinor({equired String accountId, required int deltaMinor}) async {
     final db = await _db.database;
     final rows = await db.query('financial_accounts', where: 'id = ?', whereArgs: [accountId], limit: 1);
     if (rows.isEmpty) return;
     final current = (rows.first['current_balance_minor'] as int?) ?? 0;
-    final next = current + (deltaMajor * 100).round();
     await db.update(
       'financial_accounts',
-      {'current_balance_minor': next, 'updated_at': AppDatabase.nowMs()},
+      {
+        'current_balance_minor': current + deltaMinor,
+        'updated_at': AppDatabase.nowMs(),
+      },
       where: 'id = ?',
       whereArgs: [accountId],
     );
@@ -56,6 +72,7 @@ class AccountRepository {
     final rows = await list();
     var sum = 0;
     for (final r in rows) {
+      if ((r['is_tracked'] as int?) == 0) continue;
       sum += (r['current_balance_minor'] as int?) ?? 0;
     }
     return sum;
