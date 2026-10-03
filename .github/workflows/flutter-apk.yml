@@ -63,6 +63,16 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
+      - name: Sanitize Dart sources
+        run: |
+          # CR + missing-r on required (historical corruption)
+          find lib -name '*.dart' -exec perl -pi -e 's/\r//g' {} +
+          find lib -name '*.dart' -exec perl -pi -e 's/(?<![A-Za-z])equired /required /g' {} +
+          # Slider API on Flutter 3.27 still uses activeColor
+          find lib -name '*.dart' -exec perl -pi -e 's/activeTrackColor:/activeColor:/g' {} +
+          echo "Sanitized. Remaining equired (should be empty):"
+          grep -Rn --include='*.dart' -P '(?<![A-Za-z])equired ' lib || true
+
       - name: Analyze
         run: |
           set +e
