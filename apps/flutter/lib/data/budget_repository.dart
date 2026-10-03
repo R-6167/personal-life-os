@@ -24,6 +24,9 @@ class BudgetStatus {
   final String? categoryId;
   final String? categoryName;
   final String scopeLabel;
+
+  double get ratio => limitMinor <= 0 ? 0 : spentMinor / limitMinor;
+  int get remainingMinor => (limitMinor - spentMinor).clamp(0, limitMinor);
 }
 
 class BudgetRepository {
@@ -121,5 +124,15 @@ class BudgetRepository {
   Future<List<BudgetStatus>> alerts() async {
     final all = await statuses();
     return all.where((s) => s.level != BudgetAlertLevel.ok).toList();
+  }
+
+  Future<void> delete(String id) async {
+    final db = await _db.database;
+    await db.update(
+      'budgets',
+      {'status': 'CANCELLED', 'updated_at': AppDatabase.nowMs()},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 }
