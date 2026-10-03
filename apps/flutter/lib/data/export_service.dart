@@ -18,6 +18,7 @@ class ExportService {
     'subscriptions', 'debts', 'debt_payments', 'savings_goals', 'savings_contributions',
     'practical_items', 'documents', 'shopping_lists', 'shopping_items',
     'wellness_checkins', 'health_metrics', 'goal_reflections', 'budgets',
+    'app_usage_events', 'error_logs', 'feedback_items',
     'activity_events',
   ];
 
@@ -40,7 +41,6 @@ class ExportService {
     return const JsonEncoder.withIndent('  ').convert(data);
   }
 
-  /// Validate structure then import. Uses IntegrityService for pre-check.
   Future<ImportResult> importBackupJson(String raw, {bool replaceUsers = false}) async {
     final verify = await IntegrityService(_db).verifyBackupJson(raw);
     if (!verify.ok) {
@@ -86,7 +86,6 @@ class ExportService {
       }
     });
 
-    // Post-import integrity repair
     final report = await IntegrityService(_db).run(repair: true);
 
     return ImportResult(
