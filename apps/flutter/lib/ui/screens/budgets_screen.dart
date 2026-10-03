@@ -171,12 +171,12 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
                     ..._budgets.map((b) {
                       final color = b.level == BudgetAlertLevel.exceeded
                           ? Colors.redAccent
-                          : (b.level == BudgetAlertLevel.warning
+                          : (b.level == BudgetAlertLevel.near
                               ? Colors.orangeAccent
                               : AppTheme.amber);
                       final label = b.level == BudgetAlertLevel.exceeded
                           ? 'Exceeded'
-                          : (b.level == BudgetAlertLevel.warning ? 'Near limit' : 'On track');
+                          : (b.level == BudgetAlertLevel.near ? 'Near limit' : 'On track');
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 10),
                         child: GlassCard(
