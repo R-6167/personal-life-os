@@ -3,7 +3,6 @@ import '../data/database.dart';
 import '../data/habit_repository.dart';
 import '../data/planning_repository.dart';
 import '../data/task_repository.dart';
-import '../domain/models.dart';
 
 enum PlanItemKind { overdueTask, dueTodayTask, openTask, habit, bill, event }
 
@@ -75,7 +74,7 @@ class DayPlanner {
         score: 70 + dueBoost,
         reason: dueBoost > 0 ? 'Bill due / overdue' : 'Open bill',
         subtitle: o.expectedAmountMinor != null
-            ? '${(o.expectedAmountMinor! / 100).toStringAsFixed(0)}'
+            ? (o.expectedAmountMinor! / 100).toStringAsFixed(0)
             : null,
       ));
     }
