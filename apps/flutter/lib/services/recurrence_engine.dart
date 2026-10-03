@@ -1,6 +1,7 @@
 /// Shared recurrence math for bills, habits, tasks (offline, deterministic).
 class RecurrenceEngine {
   /// Next occurrence after [fromMs] for a simple frequency rule.
+  /// Returns [fromMs] for ONCE / ONE_TIME / NONE (caller should not schedule again).
   static int nextAfter(
     int fromMs, {
     required String frequency,
@@ -10,16 +11,19 @@ class RecurrenceEngine {
     final from = DateTime.fromMillisecondsSinceEpoch(fromMs);
     final f = frequency.toUpperCase();
     switch (f) {
+      case 'ONCE':
+      case 'ONE_TIME':
+      case 'NONE':
+        return fromMs;
       case 'DAILY':
         return from.add(Duration(days: interval)).millisecondsSinceEpoch;
       case 'WEEKLY':
         if (daysOfWeek == null || daysOfWeek.isEmpty) {
           return from.add(Duration(days: 7 * interval)).millisecondsSinceEpoch;
         }
-        // Next matching weekday within interval weeks
         var cursor = from.add(const Duration(days: 1));
         for (var i = 0; i < 14 * interval; i++) {
-          final wd = cursor.weekday; // 1-7
+          final wd = cursor.weekday;
           if (daysOfWeek.contains(wd)) {
             return DateTime(cursor.year, cursor.month, cursor.day).millisecondsSinceEpoch;
           }
@@ -42,7 +46,6 @@ class RecurrenceEngine {
     }
   }
 
-  /// Whether [dayMs] (start-of-day) is a scheduled day for a weekly rule.
   static bool isScheduledDay(
     int dayMs, {
     required String frequency,
@@ -50,6 +53,7 @@ class RecurrenceEngine {
   }) {
     final d = DateTime.fromMillisecondsSinceEpoch(dayMs);
     final f = frequency.toUpperCase();
+    if (f == 'ONCE' || f == 'ONE_TIME' || f == 'NONE') return true;
     if (f == 'DAILY') return true;
     if (f == 'WEEKLY') {
       if (daysOfWeek == null || daysOfWeek.isEmpty) return true;
