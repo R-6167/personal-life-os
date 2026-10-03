@@ -3,11 +3,13 @@ import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../data/bill_repository.dart';
+import '../data/budget_repository.dart';
 import '../data/database.dart';
 import '../data/extended_repository.dart';
 import '../data/task_repository.dart';
+import '../domain/enums.dart';
 
-/// Local notifications for reminders, bills, and overdue tasks (Android offline).
+/// Local notifications for reminders, bills, budgets, and overdue tasks (Android offline).
 class NotificationService {
   NotificationService._();
   static final instance = NotificationService._();
@@ -96,7 +98,66 @@ class NotificationService {
       n++;
     }
 
+    // Category / budget alerts — fire shortly so user sees them offline.
+    n += await notifyBudgetAlerts(delay: const Duration(seconds: 3));
+
     return n;
+  }
+
+  /// Immediate (near-term) local alerts for budgets at warning or exceeded.
+  Future<int> notifyBudgetAlerts({Duration delay = const Duration(seconds: 2)}) async {
+    if (!_ready) await init();
+    if (!enabled) return 0;
+    final alerts = await BudgetRepository(AppDatabase.instance).alerts();
+    if (alerts.isEmpty) return 0;
+    var n = 0;
+    final when = DateTime.now().add(delay);
+    for (final b in alerts) {
+      final spent = (b.spentMinor / 100).toStringAsFixed(0);
+      final limit = (b.limitMinor / 100).toStringAsFixed(0);
+      final cat = b.categoryName ?? b.scopeLabel;
+      final exceeded = b.level == BudgetAlertLevel.exceeded;
+      await _schedule(
+        id: _stableId('bud', b.id),
+        title: exceeded ? 'Budget exceeded: ${b.name}' : 'Budget warning: ${b.name}',
+        body: '$cat · $spent / $limit ${Defaults.currency}'
+            '${exceeded ? ' — over limit' : ' — near limit'}',
+        when: when,
+        high: exceeded,
+      );
+      n++;
+    }
+    return n;
+  }
+
+  /// After recording an expense against a category — alert only budgets for that category.
+  Future<List<BudgetStatus>> checkCategoryAfterExpense(String? categoryId) async {
+    if (categoryId == null) {
+      final all = await BudgetRepository(AppDatabase.instance).alerts();
+      if (all.isNotEmpty) await notifyBudgetAlerts();
+      return all;
+    }
+    final statuses = await BudgetRepository(AppDatabase.instance).statuses();
+    final hit = statuses
+        .where((s) => s.categoryId == categoryId && s.level != BudgetAlertLevel.ok)
+        .toList();
+    if (hit.isEmpty) return hit;
+    if (!_ready) await init();
+    if (!enabled) return hit;
+    final when = DateTime.now().add(const Duration(seconds: 1));
+    for (final b in hit) {
+      final spent = (b.spentMinor / 100).toStringAsFixed(0);
+      final limit = (b.limitMinor / 100).toStringAsFixed(0);
+      final exceeded = b.level == BudgetAlertLevel.exceeded;
+      await _schedule(
+        id: _stableId('bud', b.id),
+        title: exceeded ? 'Category budget exceeded' : 'Category budget warning',
+        body: '${b.categoryName ?? b.name}: $spent / $limit ${Defaults.currency}',
+        when: when,
+        high: exceeded,
+      );
+    }
+    return hit;
   }
 
   Future<void> _schedule({
@@ -104,13 +165,16 @@ class NotificationService {
     required String title,
     required String body,
     required DateTime when,
+    bool high = false,
   }) async {
     final details = AndroidNotificationDetails(
-      'plos_ops',
-      'Personal Life OS',
-      channelDescription: 'Reminders, bills, and task nudges',
-      importance: Importance.defaultImportance,
-      priority: Priority.defaultPriority,
+      high ? 'plos_budget_alerts' : 'plos_ops',
+      high ? 'Budget alerts' : 'Personal Life OS',
+      channelDescription: high
+          ? 'Category budget warnings and overspend alerts'
+          : 'Reminders, bills, and task nudges',
+      importance: high ? Importance.high : Importance.defaultImportance,
+      priority: high ? Priority.high : Priority.defaultPriority,
     );
     final tzWhen = tz.TZDateTime.from(when, tz.local);
     await _plugin.zonedSchedule(
