@@ -27,7 +27,9 @@ class _SchedDrag {
 }
 
 class ScheduleScreen extends StatefulWidget {
-  const ScheduleScreen({super.key});
+  const ScheduleScreen({super.key, this.initialDay});
+
+  final DateTime? initialDay;
 
   @override
   State<ScheduleScreen> createState() => _ScheduleScreenState();
@@ -38,7 +40,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   final _tasks = TaskRepository(AppDatabase.instance);
   final _engine = BuildMyDayEngine();
 
-  DateTime _day = DateTime.now();
+  late DateTime _day;
   BuiltDay? _built;
   List<Task> _open = [];
   bool _loading = true;
@@ -46,6 +48,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   @override
   void initState() {
     super.initState();
+    final d = widget.initialDay ?? DateTime.now();
+    _day = DateTime(d.year, d.month, d.day);
     _load();
   }
 
@@ -100,12 +104,28 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       }
     }
 
+    // Keep _open referenced so analyzer is clean if tray is restored later.
+    final trayHint = _open.isEmpty ? 0 : _open.length;
+
     return GlassBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(
           title: const Text('Schedule'),
           actions: [
+            if (trayHint > 0)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Center(
+                  child: Text(
+                    '$trayHint open',
+                    style: TextStyle(
+                      color: AppTheme.silver.withValues(alpha: 0.5),
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ),
             IconButton(
               icon: const Icon(Icons.refresh),
               onPressed: _loading ? null : _load,
