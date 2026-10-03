@@ -40,11 +40,22 @@ class AppDatabase {
       path,
       version: schemaVersion,
       onConfigure: (db) async {
+        // foreign_keys does not return rows → execute is fine
         await db.execute('PRAGMA foreign_keys = ON');
-        // Performance pragmas (safe for local single-user app).
-        await db.execute('PRAGMA journal_mode = WAL');
-        await db.execute('PRAGMA synchronous = NORMAL');
-        await db.execute('PRAGMA temp_store = MEMORY');
+
+        // journal_mode returns a result row on Android → must use rawQuery,
+        // not execute (otherwise SQLITE_OK "Queries can be performed using… only").
+        try {
+          await db.rawQuery('PRAGMA journal_mode = WAL');
+        } catch (_) {
+          // Non-fatal: default DELETE journal still works offline single-user.
+        }
+        try {
+          await db.execute('PRAGMA synchronous = NORMAL');
+        } catch (_) {}
+        try {
+          await db.execute('PRAGMA temp_store = MEMORY');
+        } catch (_) {}
       },
       onCreate: (db, version) async {
         await _applySchema(db);
