@@ -5,8 +5,14 @@ import '../data/expense_repository.dart';
 import '../data/extended_repository.dart';
 import '../data/income_repository.dart';
 import '../domain/enums.dart';
+import 'recurrence_engine.dart';
 
-/// Connected financial operations and cash-flow views.
+/// Connected financial operations — one system, not isolated screens.
+///
+/// Bill → reminder → payment → expense → account → history
+/// Subscription → renewal → payment → expense → history
+/// Debt → payment → remaining → history
+/// Savings → contribution → progress → history
 class FinanceService {
   FinanceService({AppDatabase? db}) : _db = db ?? AppDatabase.instance;
 
@@ -43,6 +49,11 @@ class FinanceService {
     for (final s in subs) {
       subsMonthly += (s['amount_minor'] as int?) ?? 0;
     }
+    final savings = await ext.listSavings();
+    var savingsTotal = 0;
+    for (final s in savings) {
+      savingsTotal += (s['current_amount_minor'] as int?) ?? 0;
+    }
     return {
       'income_minor': inMinor,
       'expense_minor': outMinor,
@@ -52,6 +63,7 @@ class FinanceService {
       'debt_owed_by_me_minor': debtOwedByMe,
       'debt_owed_to_me_minor': debtOwedToMe,
       'subscriptions_monthly_minor': subsMonthly,
+      'savings_total_minor': savingsTotal,
     };
   }
 
@@ -71,6 +83,8 @@ class FinanceService {
     return rows;
   }
 
+  // ── Debt: payment → remaining → expense/income → account → history ──
+
   Future<void> payDebtFromAccount({
     required String debtId,
     required double amountMajor,
@@ -82,7 +96,8 @@ class FinanceService {
     final db = await _db.database;
     final rows = await db.query('debts', where: 'id = ?', whereArgs: [debtId], limit: 1);
     if (rows.isEmpty) return;
-    final remaining = ((rows.first['remaining_amount_minor'] as int?) ?? 0) - minor;
+    final prevRem = (rows.first['remaining_amount_minor'] as int?) ?? 0;
+    final remaining = prevRem - minor;
     final direction = rows.first['direction'] as String?;
     final title = rows.first['title'] as String? ?? 'Debt';
 
@@ -103,18 +118,7 @@ class FinanceService {
           'created_at': now,
           'updated_at': now,
         });
-        if (accountId != null) {
-          final ar = await txn.query('financial_accounts', where: 'id = ?', whereArgs: [accountId], limit: 1);
-          if (ar.isNotEmpty) {
-            final bal = ((ar.first['current_balance_minor'] as int?) ?? 0) - minor;
-            await txn.update(
-              'financial_accounts',
-              {'current_balance_minor': bal, 'updated_at': now},
-              where: 'id = ?',
-              whereArgs: [accountId],
-            );
-          }
-        }
+        await _debitAccount(txn, accountId, minor, now);
       } else {
         await txn.insert('income', {
           'id': ledgerId,
@@ -127,21 +131,9 @@ class FinanceService {
           'created_at': now,
           'updated_at': now,
         });
-        if (accountId != null) {
-          final ar = await txn.query('financial_accounts', where: 'id = ?', whereArgs: [accountId], limit: 1);
-          if (ar.isNotEmpty) {
-            final bal = ((ar.first['current_balance_minor'] as int?) ?? 0) + minor;
-            await txn.update(
-              'financial_accounts',
-              {'current_balance_minor': bal, 'updated_at': now},
-              where: 'id = ?',
-              whereArgs: [accountId],
-            );
-          }
-        }
+        await _creditAccount(txn, accountId, minor, now);
       }
 
-      // Schema: id, debt_id, amount_minor, occurred_at, account_id, expense_id, created_at
       await txn.insert('debt_payments', {
         'id': AppDatabase.newId(),
         'debt_id': debtId,
@@ -172,10 +164,13 @@ class FinanceService {
         'occurred_at': now,
         'recorded_at': now,
         'source': EventSource.user,
-        'metadata': '{"amount":$minor,"accountId":"${accountId ?? ''}"}',
+        'metadata':
+            '{"amount":$minor,"remaining":${remaining < 0 ? 0 : remaining},"accountId":"${accountId ?? ''}"}',
       });
     });
   }
+
+  // ── Savings: contribution → progress → expense → account → history ──
 
   Future<void> contributeSavingsFromAccount({
     required String goalId,
@@ -189,7 +184,9 @@ class FinanceService {
     final rows = await db.query('savings_goals', where: 'id = ?', whereArgs: [goalId], limit: 1);
     if (rows.isEmpty) return;
     final current = ((rows.first['current_amount_minor'] as int?) ?? 0) + minor;
+    final target = (rows.first['target_amount_minor'] as int?) ?? 0;
     final name = rows.first['name'] as String? ?? 'Savings';
+    final reached = target > 0 && current >= target;
 
     await _db.txn((txn) async {
       final expenseId = AppDatabase.newId();
@@ -205,19 +202,8 @@ class FinanceService {
         'created_at': now,
         'updated_at': now,
       });
-      if (accountId != null) {
-        final ar = await txn.query('financial_accounts', where: 'id = ?', whereArgs: [accountId], limit: 1);
-        if (ar.isNotEmpty) {
-          final bal = ((ar.first['current_balance_minor'] as int?) ?? 0) - minor;
-          await txn.update(
-            'financial_accounts',
-            {'current_balance_minor': bal, 'updated_at': now},
-            where: 'id = ?',
-            whereArgs: [accountId],
-          );
-        }
-      }
-      // Schema: goal_id (not savings_goal_id)
+      await _debitAccount(txn, accountId, minor, now);
+
       await txn.insert('savings_contributions', {
         'id': AppDatabase.newId(),
         'goal_id': goalId,
@@ -229,20 +215,204 @@ class FinanceService {
       });
       await txn.update(
         'savings_goals',
-        {'current_amount_minor': current, 'updated_at': now},
+        {
+          'current_amount_minor': current,
+          if (reached) 'status': 'REACHED',
+          'updated_at': now,
+        },
         where: 'id = ?',
         whereArgs: [goalId],
       );
       await txn.insert('activity_events', {
         'id': AppDatabase.newId(),
         'owner_id': ownerId,
-        'event_type': 'SAVINGS_CONTRIBUTION_RECORDED',
+        'event_type': reached ? 'SAVINGS_GOAL_REACHED' : 'SAVINGS_CONTRIBUTION_RECORDED',
         'entity_type': 'SAVINGS_GOAL',
         'entity_id': goalId,
         'occurred_at': now,
         'recorded_at': now,
         'source': EventSource.user,
+        'metadata': '{"amount":$minor,"current":$current,"target":$target}',
       });
     });
+  }
+
+  // ── Subscription: renewal → payment → expense → account → next reminder ──
+
+  Future<String> createSubscription({
+    required String name,
+    required double amountMajor,
+    String frequency = 'MONTHLY',
+    int daysToRenewal = 30,
+    String? accountId,
+  }) async {
+    final ownerId = await _db.requireOwnerId();
+    final now = AppDatabase.nowMs();
+    final id = AppDatabase.newId();
+    final renewal = now + Duration(days: daysToRenewal).inMilliseconds;
+    final minor = (amountMajor * 100).round();
+
+    await _db.txn((txn) async {
+      await txn.insert('subscriptions', {
+        'id': id,
+        'owner_id': ownerId,
+        'service_name': name,
+        'amount_minor': minor,
+        'currency': Defaults.currency,
+        'status': 'ACTIVE',
+        'frequency': frequency,
+        'next_renewal_at': renewal,
+        'default_account_id': accountId,
+        'created_at': now,
+        'updated_at': now,
+      });
+      await txn.insert('reminders', {
+        'id': AppDatabase.newId(),
+        'owner_id': ownerId,
+        'title': 'Subscription renews: $name',
+        'message': 'Renewal due — ${Defaults.currency} ${(minor / 100).toStringAsFixed(0)}',
+        'trigger_at': renewal - const Duration(days: 1).inMilliseconds,
+        'source_type': 'SUBSCRIPTION',
+        'source_id': id,
+        'status': 'PENDING',
+        'created_at': now,
+        'updated_at': now,
+      });
+      await txn.insert('activity_events', {
+        'id': AppDatabase.newId(),
+        'owner_id': ownerId,
+        'event_type': 'SUBSCRIPTION_CREATED',
+        'entity_type': 'SUBSCRIPTION',
+        'entity_id': id,
+        'occurred_at': now,
+        'recorded_at': now,
+        'source': EventSource.user,
+      });
+    });
+    return id;
+  }
+
+  /// Pay a subscription renewal (records expense, updates balance, schedules next).
+  Future<void> paySubscription({
+    required String subscriptionId,
+    double? amountMajor,
+    String? accountId,
+  }) async {
+    final ownerId = await _db.requireOwnerId();
+    final now = AppDatabase.nowMs();
+    final db = await _db.database;
+    final rows = await db.query('subscriptions', where: 'id = ?', whereArgs: [subscriptionId], limit: 1);
+    if (rows.isEmpty) return;
+    final s = rows.first;
+    final name = s['service_name'] as String? ?? 'Subscription';
+    final minor = amountMajor != null
+        ? (amountMajor * 100).round()
+        : ((s['amount_minor'] as int?) ?? 0);
+    final freq = (s['frequency'] as String?) ?? 'MONTHLY';
+    final account = accountId ?? s['default_account_id'] as String?;
+    final next = RecurrenceEngine.nextAfter(
+      now,
+      frequency: freq,
+      interval: 1,
+      monthDay: DateTime.now().day,
+    );
+
+    await _db.txn((txn) async {
+      final expenseId = AppDatabase.newId();
+      await txn.insert('expenses', {
+        'id': expenseId,
+        'owner_id': ownerId,
+        'account_id': account,
+        'description': 'Subscription: $name',
+        'amount_minor': minor,
+        'currency': Defaults.currency,
+        'occurred_at': now,
+        'payment_method': 'SUBSCRIPTION',
+        'created_at': now,
+        'updated_at': now,
+      });
+      await _debitAccount(txn, account, minor, now);
+
+      await txn.update(
+        'subscriptions',
+        {
+          'next_renewal_at': next,
+          'updated_at': now,
+        },
+        where: 'id = ?',
+        whereArgs: [subscriptionId],
+      );
+
+      // Cancel old pending sub reminders, add next
+      try {
+        await txn.update(
+          'reminders',
+          {'status': 'CANCELLED', 'updated_at': now},
+          where: "source_type = ? AND source_id = ? AND status = 'PENDING'",
+          whereArgs: ['SUBSCRIPTION', subscriptionId],
+        );
+      } catch (_) {}
+
+      await txn.insert('reminders', {
+        'id': AppDatabase.newId(),
+        'owner_id': ownerId,
+        'title': 'Subscription renews: $name',
+        'message': 'Next renewal',
+        'trigger_at': next - const Duration(days: 1).inMilliseconds,
+        'source_type': 'SUBSCRIPTION',
+        'source_id': subscriptionId,
+        'status': 'PENDING',
+        'created_at': now,
+        'updated_at': now,
+      });
+
+      await txn.insert('activity_events', {
+        'id': AppDatabase.newId(),
+        'owner_id': ownerId,
+        'event_type': 'SUBSCRIPTION_PAID',
+        'entity_type': 'SUBSCRIPTION',
+        'entity_id': subscriptionId,
+        'occurred_at': now,
+        'recorded_at': now,
+        'source': EventSource.user,
+        'metadata': '{"amount":$minor,"expenseId":"$expenseId","nextRenewal":$next}',
+      });
+      await txn.insert('activity_events', {
+        'id': AppDatabase.newId(),
+        'owner_id': ownerId,
+        'event_type': 'EXPENSE_RECORDED',
+        'entity_type': 'EXPENSE',
+        'entity_id': expenseId,
+        'occurred_at': now,
+        'recorded_at': now,
+        'source': EventSource.user,
+      });
+    });
+  }
+
+  Future<void> _debitAccount(dynamic txn, String? accountId, int minor, int now) async {
+    if (accountId == null) return;
+    final ar = await txn.query('financial_accounts', where: 'id = ?', whereArgs: [accountId], limit: 1);
+    if (ar.isEmpty) return;
+    final bal = ((ar.first['current_balance_minor'] as int?) ?? 0) - minor;
+    await txn.update(
+      'financial_accounts',
+      {'current_balance_minor': bal, 'updated_at': now},
+      where: 'id = ?',
+      whereArgs: [accountId],
+    );
+  }
+
+  Future<void> _creditAccount(dynamic txn, String? accountId, int minor, int now) async {
+    if (accountId == null) return;
+    final ar = await txn.query('financial_accounts', where: 'id = ?', whereArgs: [accountId], limit: 1);
+    if (ar.isEmpty) return;
+    final bal = ((ar.first['current_balance_minor'] as int?) ?? 0) + minor;
+    await txn.update(
+      'financial_accounts',
+      {'current_balance_minor': bal, 'updated_at': now},
+      where: 'id = ?',
+      whereArgs: [accountId],
+    );
   }
 }
