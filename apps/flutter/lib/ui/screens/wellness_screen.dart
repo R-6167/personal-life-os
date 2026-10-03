@@ -106,7 +106,7 @@ class _WellnessScreenState extends State<WellnessScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('Today\'s check-in',
+                        const Text("Today's check-in",
                             style: TextStyle(
                                 color: AppTheme.silver,
                                 fontWeight: FontWeight.w700,
@@ -122,7 +122,7 @@ class _WellnessScreenState extends State<WellnessScreen> {
                           min: 0,
                           max: 14,
                           divisions: 28,
-                          activeTrackColor: AppTheme.amber,
+                          activeColor: AppTheme.amber,
                           onChanged: (v) => setState(() => _sleep = v),
                         ),
                         FilledButton(onPressed: _saveCheckin, child: const Text('Save check-in')),
@@ -208,7 +208,7 @@ class _WellnessScreenState extends State<WellnessScreen> {
           min: 1,
           max: 5,
           divisions: 4,
-          activeTrackColor: AppTheme.amber,
+          activeColor: AppTheme.amber,
           onChanged: (v) => onChanged(v.round()),
         ),
       ],
