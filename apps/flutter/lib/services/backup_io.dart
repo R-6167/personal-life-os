@@ -22,7 +22,9 @@ class BackupIo {
     final plain = await ExportService(_db).buildBackupJson();
     if (!encrypted) return plain;
     if (passphrase == null || passphrase.length < 6) {
-      throw ArgumentError('Passphrase must be at least 6 characters');
+      throw ArgumentError(
+        'Passphrase must be at least 6 characters',
+      );
     }
     return SecureBackup.encrypt(plain, passphrase);
   }
@@ -37,14 +39,18 @@ class BackupIo {
       if (!encrypted) {
         final v = await IntegrityService(db: _db).verifyBackupJson(json);
         if (!v.ok) {
-          return BackupIoResult(ok: false, message: 'Export verification failed: ${v.summary}');
+          return BackupIoResult(
+            ok: false,
+            message: 'Export verification failed: ${v.summary}',
+          );
         }
       }
       final bytes = utf8.encode(json);
       if (bytes.length > maxBytes) {
         return BackupIoResult(
           ok: false,
-          message: 'Backup too large (${_kb(bytes.length)} KB). Export fewer tables or clear logs.',
+          message:
+              'Backup too large (${_kb(bytes.length)} KB). Export fewer tables or clear logs.',
         );
       }
 
@@ -71,7 +77,8 @@ class BackupIo {
         }
         return BackupIoResult(
           ok: true,
-          message: 'Saved ${encrypted ? 'encrypted ' : ''}backup (${_kb(bytes.length)} KB)',
+          message:
+              'Saved ${encrypted ? 'encrypted ' : ''}backup (${_kb(bytes.length)} KB)',
           path: saved,
         );
       }
@@ -79,7 +86,10 @@ class BackupIo {
       final dir = await getTemporaryDirectory();
       final file = File('${dir.path}/$name');
       await file.writeAsString(json);
-      await Share.shareXFiles([XFile(file.path)], text: 'Personal Life OS backup');
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        text: 'Personal Life OS backup',
+      );
       return BackupIoResult(
         ok: true,
         message: 'Shared via system sheet (${_kb(bytes.length)} KB)',
@@ -107,7 +117,8 @@ class BackupIo {
       if (file.size > maxBytes) {
         return BackupIoResult(
           ok: false,
-          message: 'File too large (${_kb(file.size)} KB). Max ${_kb(maxBytes)} KB.',
+          message:
+              'File too large (${_kb(file.size)} KB). Max ${_kb(maxBytes)} KB.',
         );
       }
 
@@ -118,11 +129,17 @@ class BackupIo {
         final f = File(file.path!);
         final len = await f.length();
         if (len > maxBytes) {
-          return BackupIoResult(ok: false, message: 'File too large (${_kb(len)} KB)');
+          return BackupIoResult(
+            ok: false,
+            message: 'File too large (${_kb(len)} KB)',
+          );
         }
         raw = await f.readAsString();
       } else {
-        return BackupIoResult(ok: false, message: 'Could not read selected file');
+        return BackupIoResult(
+          ok: false,
+          message: 'Could not read selected file',
+        );
       }
 
       raw = raw.trim();
@@ -177,12 +194,18 @@ class BackupIo {
     }
   }
 
-  Future<BackupIoResult> importEncryptedRaw(String encrypted, String passphrase) async {
+  Future<BackupIoResult> importEncryptedRaw(
+    String encrypted,
+    String passphrase,
+  ) async {
     try {
       final plain = SecureBackup.decrypt(encrypted, passphrase);
       final verify = await IntegrityService(db: _db).verifyRestoreDryRun(plain);
       if (!verify.ok) {
-        return BackupIoResult(ok: false, message: 'Backup failed verification: ${verify.summary}');
+        return BackupIoResult(
+          ok: false,
+          message: 'Backup failed verification: ${verify.summary}',
+        );
       }
       final imported = await ExportService(_db).importBackupJson(plain);
       try {
