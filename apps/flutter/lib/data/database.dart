@@ -13,7 +13,7 @@ class AppDatabase {
   Database? _db;
   static const _uuid = Uuid();
 
-  static const schemaVersion = 14;
+  static const schemaVersion = 15;
 
   Future<Database> get database async {
     if (_db != null) return _db!;
@@ -57,6 +57,7 @@ class AppDatabase {
         await _migrateToV12(db);
         await _migrateToV13(db);
         await _migrateToV14(db);
+        await _migrateToV15(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 6) await _migrateToV6(db);
@@ -68,6 +69,7 @@ class AppDatabase {
         if (oldVersion < 12) await _migrateToV12(db);
         if (oldVersion < 13) await _migrateToV13(db);
         if (oldVersion < 14) await _migrateToV14(db);
+        if (oldVersion < 15) await _migrateToV15(db);
       },
     );
   }
@@ -161,6 +163,23 @@ class AppDatabase {
     await _applySchema(db);
     await _tryAlter(db, 'ALTER TABLE habits ADD COLUMN goal_id TEXT');
     await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_habits_goal ON habits(goal_id)');
+  }
+
+  Future<void> _migrateToV15(Database db) async {
+    await _applySchema(db);
+    await db.execute(
+      'CREATE TABLE IF NOT EXISTS work_sessions ('
+      'id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, task_id TEXT, time_block_id TEXT, '
+      "status TEXT NOT NULL DEFAULT 'RUNNING', planned_start INTEGER, planned_end INTEGER, "
+      'planned_minutes INTEGER, started_at INTEGER NOT NULL, ended_at INTEGER, paused_at INTEGER, '
+      'accumulated_ms INTEGER NOT NULL DEFAULT 0, interrupt_count INTEGER NOT NULL DEFAULT 0, '
+      'note TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)',
+    );
+    await _tryAlter(db, 'ALTER TABLE time_blocks ADD COLUMN status TEXT');
+    await _tryAlter(db, 'ALTER TABLE time_blocks ADD COLUMN actual_minutes INTEGER');
+    await _tryAlter(db, 'ALTER TABLE time_blocks ADD COLUMN type TEXT');
+    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_work_sessions_task ON work_sessions(task_id)');
+    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_work_sessions_status ON work_sessions(status)');
   }
 
   Future<void> _tryAlter(Database db, String sql) async {
