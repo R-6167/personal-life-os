@@ -22,6 +22,18 @@ class AppDatabase {
     return _db!;
   }
 
+  Future<void> close() async {
+    if (_db != null) {
+      await _db!.close();
+      _db = null;
+    }
+  }
+
+  /// Force next [database] call to re-open (after wipe).
+  void resetHandle() {
+    _db = null;
+  }
+
   Future<Database> _open() async {
     final dir = await getApplicationDocumentsDirectory();
     final path = p.join(dir.path, 'personal_life_os.db');
@@ -98,33 +110,37 @@ class AppDatabase {
     final raw = await rootBundle.loadString('assets/schema.sql');
     for (final stmt in _splitSql(raw)) {
       final s = stmt.trim();
-      if (s.isEmpty || s.toUpperCase().startsWith('PRAGMA')) continue;
-      try {
-        await db.execute(s);
-      } catch (_) {}
+      if (s.isEmpty) continue;
+      await db.execute(s);
     }
   }
 
   List<String> _splitSql(String raw) {
-    final withoutBlock = raw.replaceAll(RegExp(r'/\*[\s\S]*?\*/'), ' ');
+    final out = <String>[];
     final buf = StringBuffer();
-    for (final line in withoutBlock.split('\n')) {
-      final idx = line.indexOf('--');
-      buf.writeln(idx >= 0 ? line.substring(0, idx) : line);
+    for (final line in raw.split('\n')) {
+      final t = line.trim();
+      if (t.startsWith('--')) continue;
+      buf.writeln(line);
+      if (t.endsWith(';')) {
+        out.add(buf.toString());
+        buf.clear();
+      }
     }
-    return buf.toString().split(';').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+    final tail = buf.toString().trim();
+    if (tail.isNotEmpty) out.add(tail);
+    return out;
   }
 
   Future<void> _seedDefaultUser(Database db) async {
     final existing = await db.query('users', limit: 1);
     if (existing.isNotEmpty) return;
-    final now = DateTime.now().millisecondsSinceEpoch;
+    final now = nowMs();
+    final id = newId();
     await db.insert('users', {
-      'id': _uuid.v4(),
-      'name': 'Owner',
+      'id': id,
       'display_name': 'Me',
-      'timezone': 'Africa/Nairobi',
-      'locale': Defaults.locale,
+      'name': 'Me',
       'currency': Defaults.currency,
       'week_start_day': Defaults.weekStartDay,
       'created_at': now,
@@ -135,7 +151,11 @@ class AppDatabase {
   Future<String> requireOwnerId() async {
     final db = await database;
     final rows = await db.query('users', limit: 1);
-    if (rows.isEmpty) throw StateError('No user row');
+    if (rows.isEmpty) {
+      await _seedDefaultUser(db);
+      final again = await db.query('users', limit: 1);
+      return again.first['id'] as String;
+    }
     return rows.first['id'] as String;
   }
 
@@ -145,12 +165,16 @@ class AppDatabase {
   }
 
   static String newId() => _uuid.v4();
+
   static int nowMs() => DateTime.now().millisecondsSinceEpoch;
+
   static int startOfTodayMs() {
     final n = DateTime.now();
     return DateTime(n.year, n.month, n.day).millisecondsSinceEpoch;
   }
 
-  static int endOfTodayMs() =>
-      startOfTodayMs() + const Duration(days: 1).inMilliseconds - 1;
+  static int endOfTodayMs() {
+    final n = DateTime.now();
+    return DateTime(n.year, n.month, n.day, 23, 59, 59, 999).millisecondsSinceEpoch;
+  }
 }
