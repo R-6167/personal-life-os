@@ -7,9 +7,10 @@
     <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
 
     <application
-        android:label="Personal Life OS"
+        android:label="Ordin"
         android:name="${applicationName}"
-        android:icon="@android:drawable/ic_menu_my_calendar"
+        android:icon="@drawable/ic_launcher_ordin"
+        android:roundIcon="@drawable/ic_launcher_ordin"
         android:usesCleartextTraffic="false">
         <activity
             android:name=".MainActivity"
@@ -30,7 +31,6 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
-        <!-- Re-schedule local notifications after reboot (still offline). -->
         <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED"/>

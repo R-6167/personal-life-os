@@ -1,7 +1,7 @@
-name: personal_life_os
-description: Offline Personal Life OS — Material 3 glass, local intelligence, local SQLite.
+name: ordin
+description: Ordin — offline personal life OS. Material 3 glass, local intelligence, local SQLite.
 publish_to: "none"
-version: 0.18.2+24
+version: 0.19.0+25
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
