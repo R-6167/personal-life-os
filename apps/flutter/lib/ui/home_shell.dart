@@ -18,6 +18,7 @@ import '../domain/models.dart';
 import '../services/day_planner.dart';
 import '../services/local_analytics.dart';
 import '../services/notification_service.dart';
+import '../services/query_cache.dart';
 import 'assistant_screen.dart';
 import 'forms/create_forms.dart';
 import 'hubs/finance_hub.dart';
@@ -44,6 +45,7 @@ class _HomeShellState extends State<HomeShell> {
   int _tab = 0;
   bool _ready = false;
   String? _error;
+  bool _notifsSynced = false;
 
   final _tasks = TaskRepository(AppDatabase.instance);
   final _habits = HabitRepository(AppDatabase.instance);
@@ -98,50 +100,61 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   Future<void> _reload() async {
-    final t = await _tasks.listOpen();
-    final o = await _tasks.listOverdue();
-    final h = await _habits.listActive();
-    final g = await _goals.listActive();
-    final n = await _notes.list();
-    final p = await _projects.listActive();
-    final e = await _expenses.listRecent();
-    final spend = await _expenses.totalMinorThisMonth();
-    final occ = await _bills.listOpenOccurrences();
-    final r = await _routines.listActive();
-    final inc = await _income.listRecent();
-    final ev = await _ext.listEventsToday();
+    QueryCache.instance.invalidate();
+
     try {
-      await _habits.ensureAllTodayOccurrences();
-      await _habits.markMissedBeforeToday();
-      await _routines.ensureAllTodayOccurrences();
-      await _routines.markMissedBeforeToday();
+      await Future.wait([
+        _habits.ensureAllTodayOccurrences(),
+        _routines.ensureAllTodayOccurrences(),
+      ]);
+      await Future.wait([
+        _habits.markMissedBeforeToday(),
+        _routines.markMissedBeforeToday(),
+      ]);
     } catch (_) {}
-    final plan = await DayPlanner().buildPlan(limit: 6);
-    final scheduled = await _tasks.listScheduledOnDay(DateTime.now());
-    int free = 0;
-    try {
-      free = await PlanningRepository(AppDatabase.instance).availableMinutes(day: DateTime.now());
-    } catch (_) {}
-    try {
-      await NotificationService.instance.syncFromDatabase();
-    } catch (_) {}
+
+    final results = await Future.wait([
+      _tasks.listOpen(),
+      _tasks.listOverdue(),
+      _habits.listActive(),
+      _goals.listActive(),
+      _notes.list(),
+      _projects.listActive(),
+      _expenses.listRecent(),
+      _expenses.totalMinorThisMonth(),
+      _bills.listOpenOccurrences(),
+      _routines.listActive(),
+      _income.listRecent(),
+      _ext.listEventsToday(),
+      DayPlanner().buildPlan(limit: 6),
+      _tasks.listScheduledOnDay(DateTime.now()),
+      PlanningRepository(AppDatabase.instance).availableMinutes(day: DateTime.now()).catchError((_) => 0),
+    ]);
+
+    if (!_notifsSynced) {
+      try {
+        await NotificationService.instance.syncFromDatabase();
+        _notifsSynced = true;
+      } catch (_) {}
+    }
+
     if (!mounted) return;
     setState(() {
-      _taskList = t;
-      _overdue = o;
-      _habitList = h;
-      _goalList = g;
-      _noteList = n;
-      _projectList = p;
-      _expenseList = e;
-      _monthSpendMinor = spend;
-      _billOcc = occ;
-      _routineList = r;
-      _incomeList = inc;
-      _eventsToday = ev;
-      _plan = plan;
-      _scheduledToday = scheduled;
-      _freeMinutes = free;
+      _taskList = results[0] as List<Task>;
+      _overdue = results[1] as List<Task>;
+      _habitList = results[2] as List<Habit>;
+      _goalList = results[3] as List<Goal>;
+      _noteList = results[4] as List<Note>;
+      _projectList = results[5] as List<Project>;
+      _expenseList = results[6] as List<Expense>;
+      _monthSpendMinor = results[7] as int;
+      _billOcc = results[8] as List<BillOccurrence>;
+      _routineList = results[9] as List<Routine>;
+      _incomeList = results[10] as List<Income>;
+      _eventsToday = results[11] as List<Map<String, Object?>>;
+      _plan = results[12] as List<PlanItem>;
+      _scheduledToday = results[13] as List<Task>;
+      _freeMinutes = results[14] as int;
     });
   }
 
@@ -535,9 +548,10 @@ class _HomeShellState extends State<HomeShell> {
               : RefreshIndicator(
                   color: AppTheme.amber,
                   onRefresh: _reload,
-                  child: ListView(
+                  child: ListView.builder(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-                    children: _taskList.map(_taskTile).toList(),
+                    itemCount: _taskList.length,
+                    itemBuilder: (ctx, i) => _taskTile(_taskList[i]),
                   ),
                 ),
         ),
