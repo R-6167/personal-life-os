@@ -11,6 +11,7 @@ import '../services/data_management.dart';
 import '../services/notification_service.dart';
 import '../services/secure_backup.dart';
 import '../services/security_service.dart';
+import 'app_meta.dart';
 import 'theme.dart';
 import 'widgets/glass.dart';
 
@@ -228,7 +229,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45), fontSize: 12),
                     ),
                     value: NotificationService.instance.enabled,
-                    activeColor: AppTheme.amber,
+                    activeTrackColor: AppTheme.amber,
                     onChanged: (v) async {
                       NotificationService.instance.enabled = v;
                       try {
@@ -268,7 +269,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45), fontSize: 12),
                           ),
                           value: _lockEnabled && SecurityService.instance.hasPin,
-                          activeColor: AppTheme.amber,
+                          activeTrackColor: AppTheme.amber,
                           onChanged: (v) async {
                             try {
                               if (v && !SecurityService.instance.hasPin) {
@@ -348,7 +349,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45), fontSize: 12),
                           ),
                           value: _hideBalances,
-                          activeColor: AppTheme.amber,
+                          activeTrackColor: AppTheme.amber,
                           onChanged: (v) async {
                             await SecurityService.instance.setHideBalances(v);
                             await _load();
@@ -491,18 +492,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('About', style: Theme.of(context).textTheme.titleMedium),
-                        const ListTile(
+                        ListTile(
                           contentPadding: EdgeInsets.zero,
-                          title: Text('Personal Life OS'),
+                          title: const Text('Personal Life OS'),
                           subtitle: Text(
-                            'Offline · local-first · no cloud account\nSchema-backed SQLite · optional PIN lock',
-                            style: TextStyle(fontSize: 12, color: Colors.white54),
+                            '${AppMeta.tagline}\nSchema-backed SQLite · optional PIN lock',
+                            style: const TextStyle(fontSize: 12, color: Colors.white54),
                           ),
                         ),
-                        const ListTile(
+                        ListTile(
                           contentPadding: EdgeInsets.zero,
-                          title: Text('Version'),
-                          subtitle: Text('0.12.0'),
+                          title: const Text('Version'),
+                          subtitle: Text(AppMeta.versionLabel),
                         ),
                       ],
                     ),
