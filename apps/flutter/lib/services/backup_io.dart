@@ -22,7 +22,8 @@ class BackupIo {
     final plain = await ExportService(_db).buildBackupJson();
     if (!encrypted) return plain;
     if (passphrase == null || passphrase.length < 6) {
-      throw ArgumentError('Passphrase must be at least 6 characters');\n    }
+      throw ArgumentError('Passphrase must be at least 6 characters');
+    }
     return SecureBackup.encrypt(plain, passphrase);
   }
 
