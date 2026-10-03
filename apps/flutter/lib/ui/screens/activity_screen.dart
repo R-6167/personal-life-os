@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../data/database.dart';
-import '../../data/export_service.dart';
+import '../../services/activity_timeline.dart';
 import '../theme.dart';
 import '../widgets/glass.dart';
 
@@ -13,7 +12,7 @@ class ActivityScreen extends StatefulWidget {
 }
 
 class _ActivityScreenState extends State<ActivityScreen> {
-  List<Map<String, Object?>> _rows = [];
+  List<TimelineEntry> _entries = [];
   bool _loading = true;
 
   @override
@@ -23,17 +22,19 @@ class _ActivityScreenState extends State<ActivityScreen> {
   }
 
   Future<void> _load() async {
-    final rows = await ExportService(AppDatabase.instance).recentActivity();
+    final rows = await ActivityTimelineService().build();
+    if (!mounted) return;
     setState(() {
-      _rows = rows;
+      _entries = rows;
       _loading = false;
     });
   }
 
-  String _fmt(int? ms) {
-    if (ms == null) return '';
+  String _fmt(int ms) {
+    if (ms == 0) return '';
     final d = DateTime.fromMillisecondsSinceEpoch(ms);
-    return '${d.month}/${d.day} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+    return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')} '
+        '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
   }
 
   @override
@@ -41,36 +42,71 @@ class _ActivityScreenState extends State<ActivityScreen> {
     return GlassBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
-        appBar: AppBar(title: const Text('Activity')),
+        appBar: AppBar(
+          title: const Text('Activity timeline'),
+          actions: [
+            IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
+          ],
+        ),
         body: _loading
             ? const Center(child: CircularProgressIndicator(color: AppTheme.amber))
-            : _rows.isEmpty
+            : _entries.isEmpty
                 ? Center(
                     child: Text(
-                      'No activity yet — actions you take are recorded here.',
+                      'No activity yet — actions across goals, tasks, habits, and finance are recorded here.',
                       style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4)),
                       textAlign: TextAlign.center,
                     ),
                   )
                 : ListView.builder(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                    itemCount: _rows.length,
+                    itemCount: _entries.length,
                     itemBuilder: (ctx, i) {
-                      final r = _rows[i];
+                      final e = _entries[i];
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 8),
                         child: GlassCard(
-                          child: Column(
+                          child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                '${r['event_type']}',
-                                style: const TextStyle(color: AppTheme.amber, fontWeight: FontWeight.w600),
+                              Container(
+                                width: 4,
+                                height: 48,
+                                decoration: BoxDecoration(
+                                  color: AppTheme.amber,
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
                               ),
-                              const SizedBox(height: 4),
-                              Text(
-                                '${r['entity_type']} · ${_fmt(r['occurred_at'] as int?)}',
-                                style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.5), fontSize: 12),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      e.headline,
+                                      style: const TextStyle(
+                                        color: AppTheme.silver,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      e.detail,
+                                      style: TextStyle(
+                                        color: AppTheme.silver.withValues(alpha: 0.55),
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      _fmt(e.occurredAt),
+                                      style: TextStyle(
+                                        color: AppTheme.silver.withValues(alpha: 0.35),
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ],
                           ),
