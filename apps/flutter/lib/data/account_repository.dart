@@ -1,3 +1,4 @@
+import '../domain/db_map.dart';
 import '../domain/enums.dart';
 import '../services/user_prefs.dart';
 import 'database.dart';
@@ -34,18 +35,26 @@ class AccountRepository {
     return id;
   }
 
+  /// Single balance write path used by UI adjustments.
   Future<void> adjustBalance({required String accountId, required double deltaMajor}) async {
-    final db = await _db.database;
-    final rows = await db.query('financial_accounts', where: 'id = ?', whereArgs: [accountId], limit: 1);
-    if (rows.isEmpty) return;
-    final current = (rows.first['current_balance_minor'] as int?) ?? 0;
-    final next = current + (deltaMajor * 100).round();
-    await db.update(
-      'financial_accounts',
-      {'current_balance_minor': next, 'updated_at': AppDatabase.nowMs()},
-      where: 'id = ?',
-      whereArgs: [accountId],
-    );
+    final delta = (deltaMajor * 100).round();
+    await _db.txn((txn) async {
+      final rows = await txn.query(
+        'financial_accounts',
+        where: 'id = ?',
+        whereArgs: [accountId],
+        limit: 1,
+      );
+      if (rows.isEmpty) return;
+      final current = dbIntOr(rows.first['current_balance_minor']);
+      final next = current + delta;
+      await txn.update(
+        'financial_accounts',
+        {'current_balance_minor': next, 'updated_at': AppDatabase.nowMs()},
+        where: 'id = ?',
+        whereArgs: [accountId],
+      );
+    });
   }
 
   Future<int> totalBalanceMinor() async {
@@ -53,6 +62,6 @@ class AccountRepository {
     final rows = await db.rawQuery(
       'SELECT COALESCE(SUM(current_balance_minor), 0) AS t FROM financial_accounts',
     );
-    return (rows.first['t'] as int?) ?? 0;
+    return dbIntOr(rows.first['t']);
   }
 }
