@@ -20,7 +20,6 @@ class MilestoneRepository {
   Future<Milestone> create({required String projectId, required String title}) async {
     final db = await _db.database;
     final now = AppDatabase.nowMs();
-    final ownerId = await _db.requireOwnerId();
     final id = AppDatabase.newId();
     await db.insert('milestones', {
       'id': id,
@@ -31,7 +30,14 @@ class MilestoneRepository {
       'created_at': now,
       'updated_at': now,
     });
-    return Milestone(id: id, projectId: projectId, title: title, status: MilestoneStatus.planned, createdAt: now, updatedAt: now);
+    return Milestone(
+      id: id,
+      projectId: projectId,
+      title: title,
+      status: MilestoneStatus.planned,
+      createdAt: now,
+      updatedAt: now,
+    );
   }
 
   Future<void> complete(String id) async {
