@@ -119,29 +119,6 @@ class _FinanceHubState extends State<FinanceHub> {
 
   String _money(Object? minor) => formatMoneyMinor(minor);
 
-  Future<String?> _pickAccount() async {
-    if (_accounts.isEmpty) return null;
-    return showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: AppTheme.metal,
-      builder: (ctx) => SafeArea(
-        child: ListView(
-          children: [
-            const ListTile(
-              title: Text('Choose account', style: TextStyle(color: AppTheme.silver, fontWeight: FontWeight.w700)),
-            ),
-            ..._accounts.map((a) => ListTile(
-                  title: Text('${a['name']}', style: const TextStyle(color: AppTheme.silver)),
-                  subtitle: Text(_money(a['current_balance_minor']),
-                      style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45))),
-                  onTap: () => Navigator.pop(ctx, a['id'] as String),
-                )),
-          ],
-        ),
-      ),
-    );
-  }
-
   Future<void> _addAccount() async {
     final name = TextEditingController();
     final balance = TextEditingController();
@@ -337,8 +314,7 @@ class _FinanceHubState extends State<FinanceHub> {
         child: Row(
           children: [
             Expanded(
-              child: Text(title,
-                  style: const TextStyle(color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
+              child: Text(title, style: const TextStyle(color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
             ),
             TextButton(onPressed: onAdd, child: const Text('Add')),
           ],
@@ -356,38 +332,7 @@ class _FinanceHubState extends State<FinanceHub> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
       children: [
-        const Text('Finance', style: TextStyle(color: AppTheme.silver, fontSize: 22, fontWeight: FontWeight.w700)),
-        Text('Accounts · budgets · bills · debts · savings · history',
-            style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45), fontSize: 12)),
-        const SizedBox(height: 12),
-        Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: GlassCard(
-            onTap: () {
-              Navigator.of(context)
-                  .push(MaterialPageRoute(builder: (_) => const BudgetsScreen()))
-                  .then((_) => _refresh());
-            },
-            child: Row(
-              children: [
-                const Icon(Icons.pie_chart_outline, color: AppTheme.amber),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Budgets & limits',
-                          style: TextStyle(color: AppTheme.silver, fontWeight: FontWeight.w600)),
-                      Text('Monthly caps · 80% warning · overspend alerts',
-                          style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45), fontSize: 12)),
-                    ],
-                  ),
-                ),
-                const Icon(Icons.chevron_right, color: AppTheme.silverMuted),
-              ],
-            ),
-          ),
-        ),
+        // AppBar shows Finance — no second title.
         if (_budgetAlerts.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
@@ -397,32 +342,9 @@ class _FinanceHubState extends State<FinanceHub> {
                     .push(MaterialPageRoute(builder: (_) => const BudgetsScreen()))
                     .then((_) => _refresh());
               },
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Category budget alerts',
-                    style: TextStyle(
-                      color: _budgetAlerts.any((b) => b.level == BudgetAlertLevel.exceeded)
-                          ? Colors.redAccent
-                          : Colors.orangeAccent,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  ..._budgetAlerts.take(4).map((b) {
-                    final spent = formatMoneyMinor(b.spentMinor);
-                    final limit = formatMoneyMinor(b.limitMinor);
-                    final tag = b.level == BudgetAlertLevel.exceeded ? 'Exceeded' : 'Near limit';
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Text(
-                        '• ${b.categoryName ?? b.name}: $spent / $limit ($tag)',
-                        style: const TextStyle(color: AppTheme.silver, fontSize: 13),
-                      ),
-                    );
-                  }),
-                ],
+              child: Text(
+                'Budget alerts · ${_budgetAlerts.length}',
+                style: const TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.w700),
               ),
             ),
           ),
@@ -441,14 +363,8 @@ class _FinanceHubState extends State<FinanceHub> {
                 'Net ${_money(netMinor)}',
                 style: TextStyle(color: netOk ? AppTheme.woodLight : Colors.redAccent, fontWeight: FontWeight.w700),
               ),
-              Text('Accounts $bal · bills due ${_money(_cash['bills_open_minor'])}',
+              Text('Accounts $bal',
                   style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.65), fontSize: 12)),
-              Text(
-                'Debt I owe ${_money(_cash['debt_owed_by_me_minor'])} · owed to me ${_money(_cash['debt_owed_to_me_minor'])}',
-                style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.55), fontSize: 11),
-              ),
-              Text('Subscriptions ~${_money(_cash['subscriptions_monthly_minor'])}/mo',
-                  style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.55), fontSize: 11)),
               const SizedBox(height: 8),
               Row(children: [
                 FilledButton(
@@ -479,10 +395,7 @@ class _FinanceHubState extends State<FinanceHub> {
                   child: ListTile(
                     onTap: () => _adjust(a),
                     title: Text('${a['name']}', style: const TextStyle(color: AppTheme.silver)),
-                    subtitle: Text('${a['type']} · tap to adjust',
-                        style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11)),
-                    trailing: Text(_money(a['current_balance_minor']),
-                        style: const TextStyle(color: AppTheme.amber)),
+                    trailing: Text(_money(a['current_balance_minor']), style: const TextStyle(color: AppTheme.amber)),
                   ),
                 ),
               )),
@@ -499,9 +412,7 @@ class _FinanceHubState extends State<FinanceHub> {
                     title: Text(o.billName ?? 'Bill', style: const TextStyle(color: AppTheme.silver)),
                     trailing: FilledButton(
                       onPressed: () async {
-                        if (widget.onPayBill != null) {
-                          await widget.onPayBill!(o);
-                        }
+                        if (widget.onPayBill != null) await widget.onPayBill!(o);
                         await _refresh();
                       },
                       child: const Text('Pay'),
@@ -518,7 +429,6 @@ class _FinanceHubState extends State<FinanceHub> {
                 child: GlassCard(
                   child: ListTile(
                     title: Text('${d['title']}', style: const TextStyle(color: AppTheme.silver)),
-                    subtitle: Text('${d['direction']}', style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11)),
                     trailing: Text(_money(d['remaining_amount_minor']), style: const TextStyle(color: AppTheme.amber)),
                   ),
                 ),
@@ -563,7 +473,6 @@ class _FinanceHubState extends State<FinanceHub> {
                   child: ListTile(
                     dense: true,
                     title: Text('${row['title']}', style: const TextStyle(color: AppTheme.silver)),
-                    subtitle: Text('${row['kind']}', style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11)),
                     trailing: Text(_money(row['amount_minor']), style: const TextStyle(color: AppTheme.amber)),
                   ),
                 ),
