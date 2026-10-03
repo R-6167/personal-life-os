@@ -75,6 +75,119 @@ class PlanningRepository {
     return blockId;
   }
 
+  /// Move a task session to a new start (keeps duration unless overridden).
+  Future<void> rescheduleTaskSession({
+    required String taskId,
+    required DateTime start,
+    int? durationMinutes,
+  }) async {
+    final db = await _db.database;
+    final taskRows = await db.query('tasks', where: 'id = ?', whereArgs: [taskId], limit: 1);
+    if (taskRows.isEmpty) return;
+
+    final existingStart = taskRows.first['scheduled_start'] as int?;
+    final existingEnd = taskRows.first['scheduled_end'] as int?;
+    var minutes = durationMinutes;
+    if (minutes == null && existingStart != null && existingEnd != null) {
+      minutes = ((existingEnd - existingStart) / 60000).round().clamp(15, 180);
+    }
+    minutes ??= (taskRows.first['estimated_minutes'] as int?) ?? 30;
+
+    await TaskRepository(_db).scheduleSession(
+      taskId: taskId,
+      start: start,
+      durationMinutes: minutes,
+    );
+
+    // Update matching time blocks for this task on that day
+    final dayStart = DateTime(start.year, start.month, start.day);
+    final dayEnd = dayStart.add(const Duration(days: 1));
+    final blocks = await db.query(
+      'time_blocks',
+      where: 'task_id = ? AND start_at >= ? AND start_at < ? AND status != ?',
+      whereArgs: [
+        taskId,
+        dayStart.millisecondsSinceEpoch,
+        dayEnd.millisecondsSinceEpoch,
+        'CANCELLED',
+      ],
+    );
+    final now = AppDatabase.nowMs();
+    final endMs = start.add(Duration(minutes: minutes)).millisecondsSinceEpoch;
+    if (blocks.isEmpty) {
+      await scheduleTaskSession(
+        taskId: taskId,
+        start: start,
+        durationMinutes: minutes,
+        title: taskRows.first['title'] as String?,
+      );
+    } else {
+      for (final b in blocks) {
+        await db.update(
+          'time_blocks',
+          {
+            'start_at': start.millisecondsSinceEpoch,
+            'end_at': endMs,
+            'updated_at': now,
+          },
+          where: 'id = ?',
+          whereArgs: [b['id']],
+        );
+      }
+    }
+  }
+
+  /// Move a time block by id.
+  Future<void> moveBlock({
+    required String blockId,
+    required DateTime start,
+    int? durationMinutes,
+  }) async {
+    final db = await _db.database;
+    final rows = await db.query('time_blocks', where: 'id = ?', whereArgs: [blockId], limit: 1);
+    if (rows.isEmpty) return;
+    final b = rows.first;
+    final oldStart = b['start_at'] as int;
+    final oldEnd = b['end_at'] as int;
+    final mins = durationMinutes ??
+        ((oldEnd - oldStart) / 60000).round().clamp(10, 240);
+    final end = start.add(Duration(minutes: mins));
+    final now = AppDatabase.nowMs();
+    await db.update(
+      'time_blocks',
+      {
+        'start_at': start.millisecondsSinceEpoch,
+        'end_at': end.millisecondsSinceEpoch,
+        'updated_at': now,
+      },
+      where: 'id = ?',
+      whereArgs: [blockId],
+    );
+    final taskId = b['task_id'] as String?;
+    if (taskId != null) {
+      await TaskRepository(_db).scheduleSession(
+        taskId: taskId,
+        start: start,
+        durationMinutes: mins,
+      );
+    }
+  }
+
+  /// Place an unscheduled task onto the day at [start].
+  Future<void> dropTaskOntoDay({
+    required String taskId,
+    required DateTime start,
+    int durationMinutes = 30,
+    String? title,
+  }) async {
+    await scheduleTaskSession(
+      taskId: taskId,
+      start: start,
+      durationMinutes: durationMinutes,
+      title: title,
+    );
+  }
+
   Future<void> completeBlock(String blockId, {bool completeTask = false}) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
