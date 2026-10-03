@@ -1,5 +1,6 @@
 import '../domain/enums.dart';
 import '../domain/models.dart';
+import '../services/recurrence_engine.dart';
 import 'database.dart';
 
 class TaskRepository {
@@ -262,30 +263,37 @@ class TaskRepository {
   }
 
   Future<Task?> spawnNextOccurrence(String completedTaskId) async {
-    final rule = await getRecurrence(completedTaskId);
-    if (rule == null) return null;
+    final ruleRow = await getRecurrence(completedTaskId);
+    if (ruleRow == null) return null;
     final src = await getById(completedTaskId);
     if (src == null) return null;
-    final freq = '${rule['frequency']}'.toUpperCase();
-    final n = (rule['interval_n'] as int?) ?? 1;
+
+    final freq = '${ruleRow['frequency'] ?? 'DAILY'}';
+    final n = (ruleRow['interval_n'] as int?) ?? 1;
+    final daysCsv = ruleRow['days_of_week'] as String?;
+    final untilMs = ruleRow['until_at'] as int? ?? ruleRow['end_at'] as int?;
     final base = src.dueAt != null
         ? DateTime.fromMillisecondsSinceEpoch(src.dueAt!)
         : DateTime.now();
-    DateTime next;
-    switch (freq) {
-      case 'WEEKLY':
-        next = base.add(Duration(days: 7 * n));
-        break;
-      case 'MONTHLY':
-        next = DateTime(base.year, base.month + n, base.day);
-        break;
-      default:
-        next = base.add(Duration(days: n));
-    }
+    final dtStart = ruleRow['start_date'] != null
+        ? DateTime.fromMillisecondsSinceEpoch(ruleRow['start_date'] as int)
+        : base;
+
+    final rule = RecurrenceRule.fromLegacy(
+      frequency: freq,
+      interval: n,
+      dtStart: dtStart,
+      until: untilMs == null ? null : DateTime.fromMillisecondsSinceEpoch(untilMs),
+      daysOfWeekCsv: daysCsv,
+      monthDay: base.day,
+    );
+    final next = rule.generator().nextAfter(base);
+    if (next == null) return null;
+
     return create(
       title: src.title,
       status: EntityStatus.planned,
-      dueAt: next.millisecondsSinceEpoch,
+      dueAt: DateTime(next.year, next.month, next.day, 23, 59).millisecondsSinceEpoch,
       priority: src.priority,
       projectId: src.projectId,
       goalId: src.goalId,
