@@ -275,9 +275,32 @@ CREATE TABLE IF NOT EXISTS activity_events (
   FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS wellness_checkins (
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, day INTEGER NOT NULL,
+  mood INTEGER, energy INTEGER, sleep_hours REAL, stress INTEGER,
+  notes TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE(owner_id, day)
+);
+
+CREATE TABLE IF NOT EXISTS health_metrics (
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, metric_type TEXT NOT NULL,
+  value REAL NOT NULL, unit TEXT, measured_at INTEGER NOT NULL, notes TEXT,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS goal_reflections (
+  id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, content TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(goal_id) REFERENCES goals(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_tasks_owner ON tasks(owner_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_at);
 CREATE INDEX IF NOT EXISTS idx_bills_owner ON bills(owner_id);
 CREATE INDEX IF NOT EXISTS idx_calendar_start ON calendar_events(start_at);
 CREATE INDEX IF NOT EXISTS idx_reminders_trigger ON reminders(trigger_at);
 CREATE INDEX IF NOT EXISTS idx_activity_owner ON activity_events(owner_id);
+CREATE INDEX IF NOT EXISTS idx_wellness_day ON wellness_checkins(day);
+CREATE INDEX IF NOT EXISTS idx_health_metrics_type ON health_metrics(metric_type, measured_at);
