@@ -14,7 +14,7 @@ class AppDatabase {
   static const _uuid = Uuid();
 
   /// Bump only when adding a non-destructive migration in onUpgrade.
-  static const schemaVersion = 8;
+  static const schemaVersion = 9;
 
   Future<Database> get database async {
     if (_db != null) return _db!;
@@ -38,6 +38,7 @@ class AppDatabase {
         if (oldVersion < 6) await _migrateToV6(db);
         if (oldVersion < 7) await _migrateToV7(db);
         if (oldVersion < 8) await _migrateToV8(db);
+        if (oldVersion < 9) await _migrateToV9(db);
       },
     );
   }
@@ -54,6 +55,15 @@ class AppDatabase {
 
   Future<void> _migrateToV8(Database db) async {
     await _applySchema(db);
+  }
+
+  Future<void> _migrateToV9(Database db) async {
+    await _applySchema(db);
+    try {
+      await db.execute('ALTER TABLE budgets ADD COLUMN category_id TEXT');
+    } catch (_) {
+      // Column already present on fresh installs from updated schema.sql
+    }
   }
 
   Future<void> _applyV6Constraints(Database db) async {
