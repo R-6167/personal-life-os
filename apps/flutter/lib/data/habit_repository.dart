@@ -1,7 +1,7 @@
 import '../domain/enums.dart';
 import '../domain/models.dart';
-import '../services/recurrence_engine.dart';
 import 'database.dart';
+import '../services/recurrence_engine.dart';
 
 class HabitRepository {
   HabitRepository(this._db);
@@ -173,15 +173,113 @@ class HabitRepository {
     });
   }
 
-  Future<void> markMissedBeforeToday() async {
+  Future<void> completeToday(String habitId) => markDoneToday(habitId);
+
+  Future<void> skipToday(String habitId, {String? reason}) async {
+    final ownerId = await _db.requireOwnerId();
+    final now = AppDatabase.nowMs();
+    final occId = await ensureTodayOccurrence(habitId);
+    if (occId == null) return;
+    await _db.txn((txn) async {
+      await txn.update(
+        'habit_occurrences',
+        {
+          'status': HabitOccurrenceStatus.skipped,
+          'updated_at': now,
+        },
+        where: 'id = ?',
+        whereArgs: [occId],
+      );
+      await txn.insert('activity_events', {
+        'id': AppDatabase.newId(),
+        'owner_id': ownerId,
+        'event_type': 'HABIT_SKIPPED',
+        'entity_type': 'HABIT',
+        'entity_id': habitId,
+        'occurred_at': now,
+        'recorded_at': now,
+        'source': EventSource.user,
+        'metadata': reason,
+      });
+    });
+  }
+
+  Future<int> markMissedBeforeToday() async {
     final db = await _db.database;
     final today = dayKey();
     try {
-      await db.rawUpdate(
-        "UPDATE habit_occurrences SET status = ? WHERE status = ? AND scheduled_date < ?",
+      return await db.rawUpdate(
+        'UPDATE habit_occurrences SET status = ? WHERE status = ? AND scheduled_date < ?',
         [HabitOccurrenceStatus.missed, HabitOccurrenceStatus.expected, today],
       );
-    } catch (_) {}
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  Future<String?> todayStatus(String habitId) async {
+    final day = dayKey();
+    final rows = await (await _db.database).query(
+      'habit_occurrences',
+      where: 'habit_id = ? AND scheduled_date = ?',
+      whereArgs: [habitId, day],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return rows.first['status'] as String?;
+  }
+
+  Future<int> streakDays(String habitId) async {
+    final db = await _db.database;
+    final rows = await db.query(
+      'habit_occurrences',
+      where: 'habit_id = ? AND status = ?',
+      whereArgs: [habitId, HabitOccurrenceStatus.completed],
+      orderBy: 'scheduled_date DESC',
+      limit: 120,
+    );
+    if (rows.isEmpty) return 0;
+    var streak = 0;
+    var expect = dayKey();
+    for (final r in rows) {
+      final ms = r['scheduled_date'] as int? ?? 0;
+      if (ms == expect) {
+        streak++;
+        final d = DateTime.fromMillisecondsSinceEpoch(expect);
+        expect = DateTime(d.year, d.month, d.day - 1).millisecondsSinceEpoch;
+      } else if (ms < expect) {
+        break;
+      }
+    }
+    return streak;
+  }
+
+  Future<void> pause(String habitId) async {
+    await (await _db.database).update(
+      'habits',
+      {'status': EntityStatus.paused, 'updated_at': AppDatabase.nowMs()},
+      where: 'id = ?',
+      whereArgs: [habitId],
+    );
+  }
+
+  Future<void> resume(String habitId) async {
+    await (await _db.database).update(
+      'habits',
+      {'status': EntityStatus.active, 'updated_at': AppDatabase.nowMs()},
+      where: 'id = ?',
+      whereArgs: [habitId],
+    );
+  }
+
+  Future<void> archive(String habitId) async {
+    final now = AppDatabase.nowMs();
+    await (await _db.database).update(
+      'habits',
+      {'status': EntityStatus.archived, 'archived_at': now, 'updated_at': now},
+      where: 'id = ?',
+      whereArgs: [habitId],
+    );
   }
 
   Future<void> setSchedule({
@@ -216,5 +314,15 @@ class HabitRepository {
         whereArgs: [habitId],
       );
     }
+  }
+
+  Future<List<Map<String, Object?>>> recentOccurrences(String habitId, {int limit = 30}) async {
+    return (await _db.database).query(
+      'habit_occurrences',
+      where: 'habit_id = ?',
+      whereArgs: [habitId],
+      orderBy: 'scheduled_date DESC',
+      limit: limit,
+    );
   }
 }
