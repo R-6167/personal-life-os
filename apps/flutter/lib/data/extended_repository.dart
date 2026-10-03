@@ -129,6 +129,16 @@ class ExtendedRepository {
     );
   }
 
+  Future<void> deleteReminder(String id) async {
+    final now = AppDatabase.nowMs();
+    await (await _db.database).update(
+      'reminders',
+      {'status': 'CANCELLED', 'updated_at': now},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
   Future<void> snoozeReminder(String id, {int minutes = 30}) async {
     final now = AppDatabase.nowMs();
     final rows = await (await _db.database).query('reminders', where: 'id = ?', whereArgs: [id], limit: 1);
@@ -312,7 +322,7 @@ class ExtendedRepository {
     });
     if (dueAt != null) {
       try {
-        await SmartReminderService(_db).scheduleForPractical(
+        await SmartReminderService(db: _db).scheduleForPractical(
           id: id,
           title: title,
           kind: type,
@@ -340,7 +350,7 @@ class ExtendedRepository {
       whereArgs: [id],
     );
     try {
-      await SmartReminderService(_db).cancelFor(
+      await SmartReminderService(db: _db).cancelFor(
         sourceType: SmartReminderService.sourcePractical,
         sourceId: id,
       );
@@ -376,7 +386,7 @@ class ExtendedRepository {
     });
     if (expiresAt != null) {
       try {
-        await SmartReminderService(_db).scheduleForDocument(
+        await SmartReminderService(db: _db).scheduleForDocument(
           id: id,
           title: title,
           expiresAt: expiresAt,
