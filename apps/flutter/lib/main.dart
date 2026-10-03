@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'services/error_log_service.dart';
 import 'services/local_analytics.dart';
 import 'services/notification_service.dart';
+import 'services/offline_runtime.dart';
 import 'services/security_service.dart';
 import 'ui/home_shell.dart';
 import 'ui/lock_screen.dart';
@@ -22,6 +23,10 @@ Future<void> main() async {
     await NotificationService.instance.init();
   } catch (_) {}
   await SecurityService.instance.load();
+  // Local-only maintenance — never waits on a network.
+  try {
+    await OfflineRuntime.instance.runMaintenance();
+  } catch (_) {}
   runApp(const PersonalLifeOsApp());
 }
 
@@ -58,6 +63,7 @@ class _PersonalLifeOsAppState extends State<PersonalLifeOsApp> with WidgetsBindi
     }
     if (state == AppLifecycleState.resumed) {
       LocalAnalytics.instance.track('app_resume');
+      OfflineRuntime.instance.runMaintenance();
       if (SecurityService.instance.shouldLockOnResume()) {
         setState(() => _unlocked = false);
       }
@@ -75,6 +81,7 @@ class _PersonalLifeOsAppState extends State<PersonalLifeOsApp> with WidgetsBindi
           : LockScreen(
               onUnlocked: () {
                 LocalAnalytics.instance.track('app_unlock');
+                OfflineRuntime.instance.runMaintenance();
                 setState(() => _unlocked = true);
               },
             ),
