@@ -4,8 +4,6 @@ import '../../data/database.dart';
 import '../../data/extended_repository.dart';
 import '../../data/goal_repository.dart';
 import '../../data/habit_repository.dart';
-import '../../data/note_repository.dart';
-import '../../data/project_repository.dart';
 import '../../domain/models.dart';
 import '../forms/create_forms.dart';
 import '../screens/calendar_screen.dart';
