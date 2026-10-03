@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'services/error_log_service.dart';
+import 'services/local_analytics.dart';
 import 'services/notification_service.dart';
 import 'services/security_service.dart';
 import 'ui/home_shell.dart';
@@ -9,6 +11,7 @@ import 'ui/theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  ErrorLogService.instance.install();
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -38,6 +41,7 @@ class _PersonalLifeOsAppState extends State<PersonalLifeOsApp> with WidgetsBindi
     WidgetsBinding.instance.addObserver(this);
     final sec = SecurityService.instance;
     _unlocked = !(sec.lockEnabled && sec.hasPin);
+    LocalAnalytics.instance.track('app_open');
   }
 
   @override
@@ -50,8 +54,10 @@ class _PersonalLifeOsAppState extends State<PersonalLifeOsApp> with WidgetsBindi
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
       SecurityService.instance.markBackground();
+      LocalAnalytics.instance.track('app_background');
     }
     if (state == AppLifecycleState.resumed) {
+      LocalAnalytics.instance.track('app_resume');
       if (SecurityService.instance.shouldLockOnResume()) {
         setState(() => _unlocked = false);
       }
@@ -67,7 +73,10 @@ class _PersonalLifeOsAppState extends State<PersonalLifeOsApp> with WidgetsBindi
       home: _unlocked
           ? const HomeShell()
           : LockScreen(
-              onUnlocked: () => setState(() => _unlocked = true),
+              onUnlocked: () {
+                LocalAnalytics.instance.track('app_unlock');
+                setState(() => _unlocked = true);
+              },
             ),
     );
   }
