@@ -8,6 +8,7 @@ import '../../data/database.dart';
 import '../../data/export_service.dart';
 import '../../data/extended_repository.dart';
 import '../../services/integrity_service.dart';
+import '../../services/secure_backup.dart';
 import '../screens/activity_screen.dart';
 import '../screens/upcoming_screen.dart';
 import '../settings_screen.dart';
@@ -60,7 +61,7 @@ class _MoreHubState extends State<MoreHub> {
             maxLines: 10,
             style: const TextStyle(color: AppTheme.silver, fontSize: 12, fontFamily: 'monospace'),
             decoration: const InputDecoration(
-              hintText: 'Paste backup JSON here',
+              hintText: 'Paste backup JSON (plain or encrypted)',
               alignLabelWithHint: true,
             ),
           ),
@@ -78,7 +79,36 @@ class _MoreHubState extends State<MoreHub> {
       ),
     );
     if (ok != true) return;
-    final result = await ExportService(AppDatabase.instance).importBackupJson(ctrl.text.trim());
+    var raw = ctrl.text.trim();
+    if (SecureBackup.looksEncrypted(raw)) {
+      final pass = TextEditingController();
+      final unlocked = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppTheme.metal,
+          title: const Text('Encrypted backup', style: TextStyle(color: AppTheme.silver)),
+          content: TextField(
+            controller: pass,
+            obscureText: true,
+            style: const TextStyle(color: AppTheme.silver),
+            decoration: const InputDecoration(labelText: 'Passphrase'),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Decrypt')),
+          ],
+        ),
+      );
+      if (unlocked != true) return;
+      try {
+        raw = SecureBackup.decrypt(raw, pass.text);
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+        return;
+      }
+    }
+    final result = await ExportService(AppDatabase.instance).importBackupJson(raw);
     if (!mounted) return;
 
     await showDialog(
@@ -248,7 +278,7 @@ class _MoreHubState extends State<MoreHub> {
                 leading: const Icon(Icons.file_download_outlined, color: AppTheme.silver),
                 title: const Text('Import backup', style: TextStyle(color: AppTheme.silver)),
                 subtitle: Text(
-                  'Verified merge — no wipe',
+                  'Plain or encrypted · verified merge',
                   style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 12),
                 ),
                 onTap: _import,
@@ -276,7 +306,7 @@ class _MoreHubState extends State<MoreHub> {
                 leading: const Icon(Icons.info_outline, color: AppTheme.silver),
                 title: const Text('About', style: TextStyle(color: AppTheme.silver)),
                 subtitle: Text(
-                  'Personal Life OS · offline · schema v${AppDatabase.schemaVersion} · 0.11',
+                  'Personal Life OS · offline · schema v${AppDatabase.schemaVersion} · 0.12',
                   style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 12),
                 ),
               ),
