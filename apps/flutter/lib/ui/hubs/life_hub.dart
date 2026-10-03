@@ -16,6 +16,7 @@ import '../screens/planning_screen.dart';
 import '../screens/practical_life_screen.dart';
 import '../screens/project_detail_screen.dart';
 import '../screens/routine_detail_screen.dart';
+import '../screens/wellness_screen.dart';
 import '../theme.dart';
 import '../widgets/glass.dart';
 
@@ -125,7 +126,7 @@ class _LifeHubState extends State<LifeHub> {
         const Text('Life', style: TextStyle(color: AppTheme.silver, fontSize: 22, fontWeight: FontWeight.w700)),
         const SizedBox(height: 4),
         Text(
-          'Habits · routines · practical · plans',
+          'Goals · wellness · habits · routines · plans',
           style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45), fontSize: 12),
         ),
         const SizedBox(height: 12),
@@ -137,6 +138,14 @@ class _LifeHubState extends State<LifeHub> {
             Navigator.of(context)
                 .push(MaterialPageRoute(builder: (_) => const NeedsAttentionScreen()))
                 .then((_) => widget.onChanged());
+          },
+        ),
+        _navCard(
+          icon: Icons.favorite_outline,
+          title: 'Health & wellness',
+          subtitle: 'Check-in · sleep · mood · metrics',
+          onTap: () {
+            Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WellnessScreen()));
           },
         ),
         _navCard(
