@@ -6,6 +6,7 @@ import '../services/backup_io.dart';
 import '../services/data_management.dart';
 import '../services/notification_service.dart';
 import '../services/security_service.dart';
+import '../services/user_prefs.dart';
 import 'app_meta.dart';
 import 'theme.dart';
 import 'widgets/glass.dart';
@@ -75,6 +76,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       where: 'id = ?',
       whereArgs: [id],
     );
+    UserPrefs.instance.applyLocal(currency: currency, weekStartDay: weekStart, displayName: name);
+    await UserPrefs.instance.load();
     await _load();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -233,9 +236,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             TextField(
               controller: typed,
               style: const TextStyle(color: AppTheme.silver),
-              decoration: const InputDecoration(
-                labelText: 'Type WIPE to confirm',
-              ),
+              decoration: const InputDecoration(labelText: 'Type WIPE to confirm'),
             ),
           ],
         ),
@@ -453,7 +454,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               builder: (ctx) => SimpleDialog(
                                 title: const Text('Currency'),
                                 children: [
-                                  for (final c in ['KES', 'USD', 'EUR', 'GBP', 'UGX', 'TZS'])
+                                  for (final c in [
+                                    'KES', 'USD', 'EUR', 'GBP', 'UGX', 'TZS',
+                                    'NGN', 'GHS', 'ZAR', 'INR', 'CAD', 'AUD',
+                                  ])
                                     SimpleDialogOption(
                                       onPressed: () => Navigator.pop(ctx, c),
                                       child: Text(c),
@@ -501,24 +505,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           contentPadding: EdgeInsets.zero,
                           leading: const Icon(Icons.folder_open, color: AppTheme.seed),
                           title: const Text('Export backup to file'),
-                          subtitle: const Text('File picker · plain JSON',
-                              style: TextStyle(fontSize: 12, color: Colors.white54)),
                           onTap: _busy ? null : () => _export(encrypted: false),
                         ),
                         ListTile(
                           contentPadding: EdgeInsets.zero,
                           leading: const Icon(Icons.lock, color: AppTheme.amber),
                           title: const Text('Export encrypted backup'),
-                          subtitle: const Text('AES + passphrase → file',
-                              style: TextStyle(fontSize: 12, color: Colors.white54)),
                           onTap: _busy ? null : () => _export(encrypted: true),
                         ),
                         ListTile(
                           contentPadding: EdgeInsets.zero,
                           leading: const Icon(Icons.file_download_outlined, color: AppTheme.silver),
                           title: const Text('Import backup from file'),
-                          subtitle: const Text('Pick .json · verified merge',
-                              style: TextStyle(fontSize: 12, color: Colors.white54)),
                           onTap: _busy ? null : _import,
                         ),
                         ListTile(
@@ -526,8 +524,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           leading: const Icon(Icons.delete_forever, color: Colors.redAccent),
                           title: const Text('Wipe all local data',
                               style: TextStyle(color: Colors.redAccent)),
-                          subtitle: const Text('Type WIPE to confirm',
-                              style: TextStyle(fontSize: 12, color: Colors.white54)),
                           onTap: _wipe,
                         ),
                       ],
