@@ -40,24 +40,18 @@ jobs:
       - name: Flutter version
         run: flutter --version
 
-      - name: Ensure Android platform present
+      - name: Sync Android platform files
         run: |
-          if [ ! -f android/app/build.gradle ] && [ ! -f android/app/build.gradle.kts ]; then
-            echo "Android folder incomplete — generating once"
-            flutter create . \
-              --project-name personal_life_os \
-              --org com.personallifeos \
-              --platforms=android
-          else
-            echo "Using committed Android platform"
-            ls -la android/app/
-          fi
-          # Local notifications permissions (idempotent)
+          # Non-destructive: fills missing files (gradlew, wrapper jar) without wiping custom config.
+          flutter create . \
+            --project-name personal_life_os \
+            --org com.personallifeos \
+            --platforms=android
+          test -f android/gradlew || test -f android/gradlew.bat
+          chmod +x android/gradlew || true
           MANIFEST=android/app/src/main/AndroidManifest.xml
-          if [ -f "$MANIFEST" ]; then
-            if ! grep -q POST_NOTIFICATIONS "$MANIFEST"; then
-              sed -i 's|<application|<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>\n    <uses-permission android:name="android.permission.VIBRATE"/>\n    <application|' "$MANIFEST"
-            fi
+          if [ -f "$MANIFEST" ] && ! grep -q POST_NOTIFICATIONS "$MANIFEST"; then
+            sed -i 's|<application|<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>\n    <uses-permission android:name="android.permission.VIBRATE"/>\n    <application|' "$MANIFEST"
           fi
 
       - name: Get dependencies
