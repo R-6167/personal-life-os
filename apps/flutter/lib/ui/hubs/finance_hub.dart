@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../data/account_repository.dart';
 import '../../data/bill_repository.dart';
+import '../../data/budget_repository.dart';
 import '../../data/database.dart';
 import '../../data/extended_repository.dart';
 import '../../domain/enums.dart';
@@ -42,6 +43,7 @@ class _FinanceHubState extends State<FinanceHub> {
   List<Map<String, Object?>> _savings = [];
   List<Map<String, Object?>> _ledger = [];
   Map<String, Object?> _cash = {};
+  List<BudgetStatus> _budgetAlerts = [];
 
   @override
   void initState() {
@@ -57,6 +59,7 @@ class _FinanceHubState extends State<FinanceHub> {
     final savings = await ExtendedRepository(AppDatabase.instance).listSavings();
     final cash = await _finance.cashFlowThisMonth();
     final ledger = await _finance.ledger(limit: 20);
+    final budgetAlerts = await BudgetRepository(AppDatabase.instance).alerts();
     if (!mounted) return;
     setState(() {
       _accounts = accounts;
@@ -65,6 +68,7 @@ class _FinanceHubState extends State<FinanceHub> {
       _savings = savings;
       _cash = cash;
       _ledger = ledger;
+      _budgetAlerts = budgetAlerts;
     });
   }
 
@@ -334,6 +338,44 @@ class _FinanceHubState extends State<FinanceHub> {
             ),
           ),
         ),
+        if (_budgetAlerts.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: GlassCard(
+              onTap: () {
+                Navigator.of(context)
+                    .push(MaterialPageRoute(builder: (_) => const BudgetsScreen()))
+                    .then((_) => _refresh());
+              },
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Category budget alerts',
+                    style: TextStyle(
+                      color: _budgetAlerts.any((b) => b.level == BudgetAlertLevel.exceeded)
+                          ? Colors.redAccent
+                          : Colors.orangeAccent,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  ..._budgetAlerts.take(4).map((b) {
+                    final spent = (b.spentMinor / 100).toStringAsFixed(0);
+                    final limit = (b.limitMinor / 100).toStringAsFixed(0);
+                    final tag = b.level == BudgetAlertLevel.exceeded ? 'Exceeded' : 'Near limit';
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(
+                        '• ${b.categoryName ?? b.name}: $spent / $limit ($tag)',
+                        style: const TextStyle(color: AppTheme.silver, fontSize: 13),
+                      ),
+                    );
+                  }),
+                ],
+              ),
+            ),
+          ),
         GlassCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
