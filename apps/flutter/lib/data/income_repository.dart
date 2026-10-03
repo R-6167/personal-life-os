@@ -72,4 +72,15 @@ class IncomeRepository {
       occurredAt: now,
     );
   }
+
+  Future<int> totalMinorThisMonth() async {
+    final db = await _db.database;
+    final now = DateTime.now();
+    final start = DateTime(now.year, now.month, 1).millisecondsSinceEpoch;
+    final rows = await db.rawQuery(
+      'SELECT COALESCE(SUM(amount_minor), 0) AS t FROM income WHERE occurred_at >= ?',
+      [start],
+    );
+    return (rows.first['t'] as int?) ?? 0;
+  }
 }
