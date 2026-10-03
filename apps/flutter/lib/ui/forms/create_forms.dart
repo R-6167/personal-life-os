@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../data/account_repository.dart';
 import '../../data/bill_repository.dart';
+import '../../data/category_repository.dart';
 import '../../data/database.dart';
 import '../../data/expense_repository.dart';
 import '../../data/extended_repository.dart';
@@ -283,7 +284,11 @@ Future<bool> _moneyForm(BuildContext context, {required bool isIncome}) async {
   final label = TextEditingController();
   final amount = TextEditingController();
   final accounts = await AccountRepository(AppDatabase.instance).list();
+  final categories = isIncome
+      ? <Map<String, Object?>>[]
+      : await CategoryRepository(AppDatabase.instance).listExpense();
   String? accountId;
+  String? categoryId = categories.isEmpty ? null : categories.first['id'] as String?;
 
   if (!context.mounted) return false;
   final ok = await showDialog<bool>(
@@ -295,45 +300,65 @@ Future<bool> _moneyForm(BuildContext context, {required bool isIncome}) async {
           isIncome ? 'Record income' : 'Record expense',
           style: const TextStyle(color: AppTheme.silver),
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: label,
-              autofocus: true,
-              style: const TextStyle(color: AppTheme.silver),
-              decoration: InputDecoration(
-                labelText: isIncome ? 'Source *' : 'What for? *',
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: label,
+                autofocus: true,
+                style: const TextStyle(color: AppTheme.silver),
+                decoration: InputDecoration(
+                  labelText: isIncome ? 'Source *' : 'What for? *',
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: amount,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              style: const TextStyle(color: AppTheme.silver),
-              decoration: InputDecoration(
-                labelText: 'Amount (${Defaults.currency}) *',
-              ),
-            ),
-            if (accounts.isNotEmpty) ...[
               const SizedBox(height: 8),
-              DropdownButtonFormField<String?>(
-                value: accountId,
-                dropdownColor: AppTheme.metal,
-                decoration: const InputDecoration(labelText: 'Account (optional)'),
-                items: [
-                  const DropdownMenuItem(value: null, child: Text('None')),
-                  ...accounts.map(
-                    (a) => DropdownMenuItem(
-                      value: a['id'] as String,
-                      child: Text('${a['name']}'),
-                    ),
-                  ),
-                ],
-                onChanged: (v) => setLocal(() => accountId = v),
+              TextField(
+                controller: amount,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                style: const TextStyle(color: AppTheme.silver),
+                decoration: InputDecoration(
+                  labelText: 'Amount (${Defaults.currency}) *',
+                ),
               ),
+              if (!isIncome && categories.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                DropdownButtonFormField<String?>(
+                  value: categoryId,
+                  dropdownColor: AppTheme.metal,
+                  decoration: const InputDecoration(labelText: 'Category'),
+                  items: [
+                    const DropdownMenuItem(value: null, child: Text('None')),
+                    ...categories.map(
+                      (c) => DropdownMenuItem(
+                        value: c['id'] as String,
+                        child: Text('${c['name']}'),
+                      ),
+                    ),
+                  ],
+                  onChanged: (v) => setLocal(() => categoryId = v),
+                ),
+              ],
+              if (accounts.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                DropdownButtonFormField<String?>(
+                  value: accountId,
+                  dropdownColor: AppTheme.metal,
+                  decoration: const InputDecoration(labelText: 'Account (optional)'),
+                  items: [
+                    const DropdownMenuItem(value: null, child: Text('None')),
+                    ...accounts.map(
+                      (a) => DropdownMenuItem(
+                        value: a['id'] as String,
+                        child: Text('${a['name']}'),
+                      ),
+                    ),
+                  ],
+                  onChanged: (v) => setLocal(() => accountId = v),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
@@ -362,6 +387,7 @@ Future<bool> _moneyForm(BuildContext context, {required bool isIncome}) async {
       description: label.text.trim(),
       amountMajor: a,
       accountId: accountId,
+      categoryId: categoryId,
     );
   }
   return true;
