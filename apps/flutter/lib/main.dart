@@ -6,6 +6,7 @@ import 'services/local_analytics.dart';
 import 'services/notification_service.dart';
 import 'services/offline_runtime.dart';
 import 'services/security_service.dart';
+import 'services/user_prefs.dart';
 import 'ui/home_shell.dart';
 import 'ui/lock_screen.dart';
 import 'ui/theme.dart';
@@ -23,6 +24,7 @@ Future<void> main() async {
     await NotificationService.instance.init();
   } catch (_) {}
   await SecurityService.instance.load();
+  await UserPrefs.instance.load();
   // Local-only maintenance — never waits on a network.
   try {
     await OfflineRuntime.instance.runMaintenance();
