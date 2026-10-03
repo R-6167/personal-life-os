@@ -35,16 +35,22 @@ class _ActivityScreenState extends State<ActivityScreen> {
   }
 
   Color _dotColor(String eventType) {
-    if (eventType.contains('COMPLETED') || eventType.contains('PAID') || eventType.contains('REACHED')) {
+    if (eventType.contains('COMPLETED') ||
+        eventType.contains('PAID') ||
+        eventType.contains('REACHED')) {
       return const Color(0xFF6BCB77);
     }
-    if (eventType.contains('MISSED') || eventType.contains('DELETED') || eventType.contains('SKIPPED')) {
+    if (eventType.contains('MISSED') ||
+        eventType.contains('DELETED') ||
+        eventType.contains('SKIPPED')) {
       return Colors.orangeAccent;
     }
     if (eventType.contains('WORK_') || eventType.contains('SESSION')) {
       return AppTheme.amber;
     }
-    if (eventType.contains('EXPENSE') || eventType.contains('BILL') || eventType.contains('DEBT')) {
+    if (eventType.contains('EXPENSE') ||
+        eventType.contains('BILL') ||
+        eventType.contains('DEBT')) {
       return AppTheme.woodLight;
     }
     return AppTheme.silver.withValues(alpha: 0.5);
@@ -135,7 +141,6 @@ class _ActivityScreenState extends State<ActivityScreen> {
                                                 color: AppTheme.silver.withValues(alpha: 0.55),
                                                 fontSize: 12,
                                                 fontWeight: FontWeight.w600,
-                                                fontFeatures: const [FontFeature.tabularFigures()],
                                               ),
                                             ),
                                             const SizedBox(height: 6),
