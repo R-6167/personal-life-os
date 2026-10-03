@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../ui/hubs/finance_hub.dart';
 import '../ui/screens/goal_detail_screen.dart';
 import '../ui/screens/needs_attention_screen.dart';
 import '../ui/screens/practical_life_screen.dart';
@@ -46,16 +45,15 @@ class NotificationRouter {
       case NotificationPayload.billOcc:
       case NotificationPayload.subscription:
       case NotificationPayload.budget:
-        nav.push(MaterialPageRoute(builder: (_) => const FinanceHub()));
+      case NotificationPayload.overdue:
+      case NotificationPayload.habit:
+      case NotificationPayload.routine:
+        // Actionable hub for money / attention items
+        nav.push(MaterialPageRoute(builder: (_) => const NeedsAttentionScreen()));
         break;
       case NotificationPayload.document:
       case NotificationPayload.practical:
         nav.push(MaterialPageRoute(builder: (_) => const PracticalLifeScreen()));
-        break;
-      case NotificationPayload.habit:
-      case NotificationPayload.routine:
-      case NotificationPayload.overdue:
-        nav.push(MaterialPageRoute(builder: (_) => const NeedsAttentionScreen()));
         break;
       case NotificationPayload.event:
       case NotificationPayload.reminder:
