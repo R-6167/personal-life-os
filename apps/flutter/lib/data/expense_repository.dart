@@ -21,6 +21,7 @@ class ExpenseRepository {
     required double amountMajor,
     String? merchant,
     String? accountId,
+    String? categoryId,
   }) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
@@ -39,6 +40,7 @@ class ExpenseRepository {
       final map = expense.toInsertMap();
       if (accountId != null) map['account_id'] = accountId;
       if (merchant != null) map['merchant'] = merchant;
+      if (categoryId != null) map['category_id'] = categoryId;
       await txn.insert('expenses', map);
       if (accountId != null) {
         final rows = await txn.query('financial_accounts', where: 'id = ?', whereArgs: [accountId], limit: 1);
@@ -61,7 +63,8 @@ class ExpenseRepository {
         'occurred_at': now,
         'recorded_at': now,
         'source': EventSource.user,
-        'metadata': '{"amount":$minor,"currency":"${Defaults.currency}"${accountId != null ? ',"accountId":"$accountId"' : ''}}',
+        'metadata':
+            '{"amount":$minor,"currency":"${Defaults.currency}"${accountId != null ? ',"accountId":"$accountId"' : ''}${categoryId != null ? ',"categoryId":"$categoryId"' : ''}}',
       });
     });
     return expense;
@@ -74,6 +77,17 @@ class ExpenseRepository {
     final result = await db.rawQuery(
       'SELECT COALESCE(SUM(amount_minor), 0) AS total FROM expenses WHERE occurred_at >= ?',
       [start],
+    );
+    return (result.first['total'] as int?) ?? 0;
+  }
+
+  Future<int> totalMinorThisMonthForCategory(String categoryId) async {
+    final now = DateTime.now();
+    final start = DateTime(now.year, now.month, 1).millisecondsSinceEpoch;
+    final db = await _db.database;
+    final result = await db.rawQuery(
+      'SELECT COALESCE(SUM(amount_minor), 0) AS total FROM expenses WHERE occurred_at >= ? AND category_id = ?',
+      [start, categoryId],
     );
     return (result.first['total'] as int?) ?? 0;
   }
