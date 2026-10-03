@@ -1,4 +1,5 @@
 import '../domain/enums.dart';
+import '../services/smart_reminder_service.dart';
 import 'database.dart';
 
 /// People, calendar, debt, savings, practical, shopping, search.
@@ -289,7 +290,7 @@ class ExtendedRepository {
     }
   }
 
-  Future<void> addPractical(
+  Future<String> addPractical(
     String title, {
     String type = 'OTHER',
     DateTime? dueAt,
@@ -297,8 +298,9 @@ class ExtendedRepository {
   }) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
+    final id = AppDatabase.newId();
     await (await _db.database).insert('practical_items', {
-      'id': AppDatabase.newId(),
+      'id': id,
       'owner_id': ownerId,
       'title': title,
       'kind': type,
@@ -308,6 +310,17 @@ class ExtendedRepository {
       'created_at': now,
       'updated_at': now,
     });
+    if (dueAt != null) {
+      try {
+        await SmartReminderService(_db).scheduleForPractical(
+          id: id,
+          title: title,
+          kind: type,
+          dueAt: dueAt,
+        );
+      } catch (_) {}
+    }
+    return id;
   }
 
   Future<void> addVehicleService({
@@ -326,13 +339,19 @@ class ExtendedRepository {
       where: 'id = ?',
       whereArgs: [id],
     );
+    try {
+      await SmartReminderService(_db).cancelFor(
+        sourceType: SmartReminderService.sourcePractical,
+        sourceId: id,
+      );
+    } catch (_) {}
   }
 
   Future<List<Map<String, Object?>>> listDocuments() async {
     return (await _db.database).query('documents', orderBy: 'expires_at ASC');
   }
 
-  Future<void> addDocument(
+  Future<String> addDocument(
     String title, {
     String type = 'OTHER',
     DateTime? expiresAt,
@@ -341,11 +360,12 @@ class ExtendedRepository {
   }) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
+    final id = AppDatabase.newId();
     final noteParts = <String>[];
     if (documentNumber != null) noteParts.add('No: $documentNumber');
     if (issuer != null) noteParts.add('Issuer: $issuer');
     await (await _db.database).insert('documents', {
-      'id': AppDatabase.newId(),
+      'id': id,
       'owner_id': ownerId,
       'title': title,
       'kind': type,
@@ -354,6 +374,16 @@ class ExtendedRepository {
       'created_at': now,
       'updated_at': now,
     });
+    if (expiresAt != null) {
+      try {
+        await SmartReminderService(_db).scheduleForDocument(
+          id: id,
+          title: title,
+          expiresAt: expiresAt,
+        );
+      } catch (_) {}
+    }
+    return id;
   }
 
   Future<List<Map<String, Object?>>> listShoppingLists() async {
@@ -410,7 +440,12 @@ class ExtendedRepository {
     final out = <Map<String, Object?>>[];
     for (final table in ['tasks', 'projects', 'goals', 'notes', 'bills']) {
       try {
-        final rows = await db.query(table, where: 'title LIKE ? OR name LIKE ?', whereArgs: [q, q], limit: 10);
+        final rows = await db.query(
+          table,
+          where: 'title LIKE ? OR name LIKE ?',
+          whereArgs: [q, q],
+          limit: 10,
+        );
         for (final r in rows) {
           out.add({...r, '_table': table});
         }
