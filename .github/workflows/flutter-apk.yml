@@ -44,8 +44,8 @@ jobs:
         run: |
           set +e
           flutter create . \
-            --project-name personal_life_os \
-            --org com.personallifeos \
+            --project-name ordin \
+            --org com.aetherion \
             --platforms=android
           CREATE_CODE=$?
           set -e
@@ -55,9 +55,27 @@ jobs:
             exit 1
           fi
           chmod +x android/gradlew
+
+          # Re-assert product identity (flutter create may reset some files)
+          GRADLE=android/app/build.gradle
+          if [ -f "$GRADLE" ]; then
+            sed -i 's|namespace *= *"[^"]*"|namespace = "com.aetherion.ordin"|g' "$GRADLE"
+            sed -i 's|applicationId *= *"[^"]*"|applicationId = "com.aetherion.ordin"|g' "$GRADLE"
+          fi
           MANIFEST=android/app/src/main/AndroidManifest.xml
-          if [ -f "$MANIFEST" ] && ! grep -q POST_NOTIFICATIONS "$MANIFEST"; then
-            sed -i 's|<application|<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>\n    <uses-permission android:name="android.permission.VIBRATE"/>\n    <application|' "$MANIFEST"
+          if [ -f "$MANIFEST" ]; then
+            sed -i 's|android:label="[^"]*"|android:label="Ordin"|g' "$MANIFEST"
+            if ! grep -q POST_NOTIFICATIONS "$MANIFEST"; then
+              sed -i 's|<application|<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>\n    <uses-permission android:name="android.permission.VIBRATE"/>\n    <application|' "$MANIFEST"
+            fi
+            # Prefer custom Ordin icon if present
+            if [ -f android/app/src/main/res/drawable/ic_launcher_ordin.xml ]; then
+              sed -i 's|android:icon="@mipmap/ic_launcher"|android:icon="@drawable/ic_launcher_ordin"|g' "$MANIFEST"
+              sed -i 's|android:icon="@android:drawable/[^"]*"|android:icon="@drawable/ic_launcher_ordin"|g' "$MANIFEST"
+              if grep -q 'android:roundIcon' "$MANIFEST"; then
+                sed -i 's|android:roundIcon="[^"]*"|android:roundIcon="@drawable/ic_launcher_ordin"|g' "$MANIFEST"
+              fi
+            fi
           fi
 
       - name: Get dependencies
@@ -65,10 +83,8 @@ jobs:
 
       - name: Sanitize Dart sources
         run: |
-          # CR + missing-r on required (historical corruption)
           find lib -name '*.dart' -exec perl -pi -e 's/\r//g' {} +
           find lib -name '*.dart' -exec perl -pi -e 's/(?<![A-Za-z])equired /required /g' {} +
-          # Slider API on Flutter 3.27 still uses activeColor
           find lib -name '*.dart' -exec perl -pi -e 's/activeTrackColor:/activeColor:/g' {} +
           echo "Sanitized. Remaining equired (should be empty):"
           grep -Rn --include='*.dart' -P '(?<![A-Za-z])equired ' lib || true
@@ -91,7 +107,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: personal-life-os-flutter-apk
+          name: ordin-flutter-apk
           path: apps/flutter/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
           retention-days: 14

@@ -1,9 +1,12 @@
 import '../services/error_log_service.dart';
 
 /// Run [fn] without failing the parent; log and return [fallback].
-Future<T> softFuture<T>(
-  Future<T> Function() fn,
-  T fallback, {
+///
+/// Uses a nullable return so call sites can pass `null` for void-style work
+/// without fighting `Future<void>` vs `Future<Null>`.
+Future<T?> softFuture<T>(
+  Future<T> Function() fn, {
+  T? fallback,
   String label = 'softFuture',
 }) async {
   try {
@@ -18,9 +21,18 @@ Future<T> softFuture<T>(
   }
 }
 
-/// Like Future.wait but each future is isolated — one failure does not drop others.
-Future<List<T>> softWaitAll<T>(List<Future<T> Function()> factories, T fallback) {
-  return Future.wait(
-    factories.map((f) => softFuture(f, fallback)),
-  );
+/// Fire-and-forget style: swallow errors, log them.
+Future<void> softRun(
+  Future<void> Function() fn, {
+  String label = 'softRun',
+}) async {
+  try {
+    await fn();
+  } catch (e, st) {
+    await ErrorLogService.instance.log(
+      message: '$label: $e',
+      stack: st.toString(),
+      level: 'SOFT',
+    );
+  }
 }
