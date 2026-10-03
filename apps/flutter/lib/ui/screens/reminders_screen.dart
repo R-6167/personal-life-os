@@ -89,7 +89,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
     final when = hours == 0
         ? DateTime.now().add(const Duration(minutes: 15))
         : DateTime.now().add(Duration(hours: hours));
-    await _ext.addReminderAt(title: title.text.trim(), triggerAt: when.millisecondsSinceEpoch);
+    await _ext.addReminderAt(title: title.text.trim(), triggerAt: when);
     await _resyncNotifs();
     await _load();
     if (mounted) {
