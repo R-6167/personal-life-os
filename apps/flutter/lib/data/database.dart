@@ -13,7 +13,7 @@ class AppDatabase {
   Database? _db;
   static const _uuid = Uuid();
 
-  static const schemaVersion = 16;
+  static const schemaVersion = 17;
 
   Future<Database> get database async {
     if (_db != null) return _db!;
@@ -59,6 +59,7 @@ class AppDatabase {
         await _migrateToV14(db);
         await _migrateToV15(db);
         await _migrateToV16(db);
+        await _migrateToV17(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 6) await _migrateToV6(db);
@@ -72,6 +73,7 @@ class AppDatabase {
         if (oldVersion < 14) await _migrateToV14(db);
         if (oldVersion < 15) await _migrateToV15(db);
         if (oldVersion < 16) await _migrateToV16(db);
+        if (oldVersion < 17) await _migrateToV17(db);
       },
     );
   }
@@ -182,6 +184,15 @@ class AppDatabase {
     await _tryAlter(db, 'ALTER TABLE subscriptions ADD COLUMN next_renewal_at INTEGER');
     await _tryAlter(db, 'ALTER TABLE subscriptions ADD COLUMN default_account_id TEXT');
     await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_subs_renewal ON subscriptions(next_renewal_at)');
+  }
+
+  Future<void> _migrateToV17(Database db) async {
+    await _applySchema(db);
+    await _tryAlter(db, 'ALTER TABLE practical_items ADD COLUMN due_at INTEGER');
+    await _tryAlter(db, 'ALTER TABLE practical_items ADD COLUMN priority INTEGER');
+    await _tryAlter(db, 'ALTER TABLE documents ADD COLUMN kind TEXT');
+    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_practical_due ON practical_items(due_at)');
+    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_documents_expires ON documents(expires_at)');
   }
 
   Future<void> _tryAlter(Database db, String sql) async {
