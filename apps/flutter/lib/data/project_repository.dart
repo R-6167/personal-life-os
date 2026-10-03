@@ -8,21 +8,10 @@ class ProjectRepository {
 
   Future<List<Project>> listActive() async {
     final db = await _db.database;
-    // Schema has no priority column — order by recency only.
     final rows = await db.query(
       'projects',
       where: "(status = ? OR status IS NULL OR status = '') AND (archived_at IS NULL)",
       whereArgs: [EntityStatus.active],
-      orderBy: 'created_at DESC',
-    );
-    return rows.map(Project.fromMap).toList();
-  }
-
-  Future<List<Project>> listAll() async {
-    final db = await _db.database;
-    final rows = await db.query(
-      'projects',
-      where: 'archived_at IS NULL',
       orderBy: 'created_at DESC',
     );
     return rows.map(Project.fromMap).toList();
@@ -98,9 +87,44 @@ class ProjectRepository {
       "SELECT COUNT(*) AS c FROM tasks WHERE project_id = ? AND status = 'COMPLETED'",
       [projectId],
     );
+    final mt = await db.rawQuery(
+      'SELECT COUNT(*) AS c FROM milestones WHERE project_id = ?',
+      [projectId],
+    );
+    final md = await db.rawQuery(
+      "SELECT COUNT(*) AS c FROM milestones WHERE project_id = ? AND status = 'COMPLETED'",
+      [projectId],
+    );
     return {
       'total': (total.first['c'] as int?) ?? 0,
       'done': (done.first['c'] as int?) ?? 0,
+      'tasksTotal': (total.first['c'] as int?) ?? 0,
+      'tasksDone': (done.first['c'] as int?) ?? 0,
+      'milestonesTotal': (mt.first['c'] as int?) ?? 0,
+      'milestonesDone': (md.first['c'] as int?) ?? 0,
     };
+  }
+
+  Future<void> complete(String id) async {
+    final ownerId = await _db.requireOwnerId();
+    final now = AppDatabase.nowMs();
+    await _db.txn((txn) async {
+      await txn.update(
+        'projects',
+        {'status': EntityStatus.completed, 'updated_at': now},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      await txn.insert('activity_events', {
+        'id': AppDatabase.newId(),
+        'owner_id': ownerId,
+        'event_type': 'PROJECT_COMPLETED',
+        'entity_type': 'PROJECT',
+        'entity_id': id,
+        'occurred_at': now,
+        'recorded_at': now,
+        'source': EventSource.user,
+      });
+    });
   }
 }

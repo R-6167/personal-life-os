@@ -4,11 +4,16 @@ import '../../data/database.dart';
 import '../../data/milestone_repository.dart';
 import '../../data/project_repository.dart';
 import '../../data/task_repository.dart';
-import '../../domain/models.dart';
+import '../../domain/db_map.dart';
+import '../../services/life_thread.dart';
 import '../theme.dart';
 import '../widgets/glass.dart';
+import '../widgets/life_chain.dart';
+import 'goal_detail_screen.dart';
 import 'task_detail_screen.dart';
 
+/// Project in the life thread:
+/// Goal → **Project** → Milestone → Tasks → Schedule → Activity
 class ProjectDetailScreen extends StatefulWidget {
   const ProjectDetailScreen({super.key, required this.projectId});
 
@@ -19,15 +24,13 @@ class ProjectDetailScreen extends StatefulWidget {
 }
 
 class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
-  Project? _project;
-  List<Milestone> _milestones = [];
-  List<Task> _tasks = [];
-  Map<String, int> _progress = {};
+  ProjectThread? _thread;
   bool _loading = true;
 
   final _projects = ProjectRepository(AppDatabase.instance);
   final _milestonesRepo = MilestoneRepository(AppDatabase.instance);
   final _tasksRepo = TaskRepository(AppDatabase.instance);
+  final _threadSvc = LifeThreadService();
 
   @override
   void initState() {
@@ -36,15 +39,10 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
   }
 
   Future<void> _load() async {
-    final p = await _projects.getById(widget.projectId);
-    final m = await _milestonesRepo.listForProject(widget.projectId);
-    final t = await _tasksRepo.listByProject(widget.projectId);
-    final prog = await _projects.progress(widget.projectId);
+    final t = await _threadSvc.forProject(widget.projectId);
+    if (!mounted) return;
     setState(() {
-      _project = p;
-      _milestones = m;
-      _tasks = t;
-      _progress = prog;
+      _thread = t;
       _loading = false;
     });
   }
@@ -55,7 +53,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.metal,
-        title: const Text('New task', style: TextStyle(color: AppTheme.silver)),
+        title: const Text('Task in this project', style: TextStyle(color: AppTheme.silver)),
         content: TextField(
           controller: titleCtrl,
           autofocus: true,
@@ -71,11 +69,12 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
         ],
       ),
     );
-    if (submitted == null || submitted.isEmpty || _project == null) return;
+    if (submitted == null || submitted.isEmpty) return;
+    final goalId = dbStrOrNull(_thread?.project['goal_id']);
     await _tasksRepo.create(
       title: submitted,
-      projectId: _project!.id,
-      goalId: _project!.goalId,
+      projectId: widget.projectId,
+      goalId: goalId,
     );
     await _load();
   }
@@ -95,10 +94,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, c.text.trim()),
-            child: const Text('Save'),
-          ),
+          FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('Save')),
         ],
       ),
     );
@@ -107,57 +103,89 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
     await _load();
   }
 
+  String _fmtWhen(int? ms) {
+    if (ms == null) return '';
+    final d = DateTime.fromMillisecondsSinceEpoch(ms);
+    return '${d.month}/${d.day} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator(color: AppTheme.amber)));
     }
-    final p = _project;
-    if (p == null) {
+    final t = _thread;
+    if (t == null) {
       return Scaffold(appBar: AppBar(), body: const Center(child: Text('Project not found')));
     }
-    final total = _progress['tasksTotal'] ?? 0;
-    final done = _progress['tasksDone'] ?? 0;
-    final ratio = total == 0 ? 0.0 : done / total;
+    final title = dbStr(t.project['title'], 'Project');
+    final goalTitle = t.goal != null ? dbStr(t.goal!['title']) : null;
+    final goalId = t.goal != null ? dbStr(t.goal!['id']) : null;
 
     return GlassBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(
-          title: Text(p.title),
+          title: Text(title),
           actions: [
             IconButton(
               icon: const Icon(Icons.check),
               tooltip: 'Complete project',
               onPressed: () async {
-                await _projects.complete(p.id);
+                await _projects.complete(widget.projectId);
                 if (mounted) Navigator.pop(context);
               },
             ),
           ],
         ),
-        floatingActionButton: FloatingActionButton(
+        floatingActionButton: FloatingActionButton.extended(
           onPressed: _addTask,
-          child: const Icon(Icons.add),
+          icon: const Icon(Icons.add),
+          label: const Text('Task'),
         ),
         body: ListView(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
           children: [
+            LifeChainBanner(
+              steps: const ['Goal', 'Project', 'Milestone', 'Task', 'Schedule', 'Done'],
+              subtitle:
+                  '${(t.progressRatio * 100).round()}% · ${t.milestonesDone}/${t.milestonesTotal} milestones · ${t.tasksDone}/${t.tasksTotal} tasks',
+            ),
+            if (goalTitle != null && goalId != null) ...[
+              const SizedBox(height: 8),
+              GlassCard(
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => GoalDetailScreen(goalId: goalId)),
+                  );
+                },
+                child: Row(
+                  children: [
+                    const Icon(Icons.flag_outlined, color: AppTheme.amber, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Part of goal: $goalTitle',
+                        style: const TextStyle(color: AppTheme.silver),
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right, color: AppTheme.silverMuted),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
             GlassCard(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(p.status, style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45), fontSize: 12)),
+                  Text(dbStr(t.project['status'], 'ACTIVE'),
+                      style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45), fontSize: 12)),
                   const SizedBox(height: 8),
                   LinearProgressIndicator(
-                    value: ratio,
+                    value: t.progressRatio,
                     backgroundColor: AppTheme.silver.withValues(alpha: 0.15),
                     color: AppTheme.amber,
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '$done / $total tasks · ${_progress['milestonesDone']}/${_progress['milestonesTotal']} milestones',
-                    style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.55), fontSize: 12),
                   ),
                 ],
               ),
@@ -170,54 +198,92 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                 TextButton(onPressed: _addMilestone, child: const Text('Add')),
               ],
             ),
-            if (_milestones.isEmpty)
-              Text('No milestones yet', style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.35)))
+            if (t.milestones.isEmpty)
+              Text('Milestones mark stages toward finishing the project.',
+                  style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.35)))
             else
-              ..._milestones.map((m) => GlassCard(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    child: ListTile(
-                      title: Text(m.title, style: const TextStyle(color: AppTheme.silver)),
-                      subtitle: Text(m.status, style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11)),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.flag, color: AppTheme.amber),
-                        onPressed: () async {
-                          await _milestonesRepo.complete(m.id);
-                          await _load();
-                        },
+              ...t.milestones.map((m) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: GlassCard(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      child: ListTile(
+                        title: Text(dbStr(m['title']), style: const TextStyle(color: AppTheme.silver)),
+                        subtitle: Text(dbStr(m['status']),
+                            style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11)),
+                        trailing: dbStr(m['status']) != 'COMPLETED'
+                            ? IconButton(
+                                icon: const Icon(Icons.flag, color: AppTheme.amber),
+                                onPressed: () async {
+                                  await _milestonesRepo.complete(dbStr(m['id']));
+                                  await _load();
+                                },
+                              )
+                            : const Icon(Icons.flag, color: AppTheme.amber),
                       ),
                     ),
                   )),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             const Text('Tasks', style: TextStyle(color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
             const SizedBox(height: 8),
-            if (_tasks.isEmpty)
-              Text('No tasks in this project', style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.35)))
+            if (t.tasks.isEmpty)
+              Text('Add tasks — they feed schedule, calendar, and goal progress.',
+                  style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.35)))
             else
-              ..._tasks.map((t) => Padding(
+              ...t.tasks.map((task) => Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: GlassCard(
                       onTap: () async {
                         await Navigator.of(context).push(
-                          MaterialPageRoute(builder: (_) => TaskDetailScreen(taskId: t.id)),
+                          MaterialPageRoute(builder: (_) => TaskDetailScreen(taskId: dbStr(task['id']))),
                         );
                         await _load();
                       },
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                       child: ListTile(
-                        title: Text(t.title, style: const TextStyle(color: AppTheme.silver)),
-                        subtitle: Text(t.status, style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11)),
-                        trailing: t.status == 'COMPLETED'
+                        title: Text(dbStr(task['title']), style: const TextStyle(color: AppTheme.silver)),
+                        subtitle: Text(
+                          [
+                            dbStr(task['status']),
+                            if (task['scheduled_start'] != null) 'sched ${_fmtWhen(task['scheduled_start'] as int?)}',
+                          ].join(' · '),
+                          style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11),
+                        ),
+                        trailing: dbStr(task['status']) == 'COMPLETED'
                             ? const Icon(Icons.check_circle, color: AppTheme.amber)
                             : IconButton(
                                 icon: const Icon(Icons.check_circle_outline, color: AppTheme.amber),
                                 onPressed: () async {
-                                  await _tasksRepo.complete(t.id);
+                                  await _tasksRepo.complete(dbStr(task['id']));
                                   await _load();
                                 },
                               ),
                       ),
                     ),
                   )),
+            if (t.scheduled.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              const Text('Scheduled (next 14 days)',
+                  style: TextStyle(color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              ...t.scheduled.map((task) => Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: GlassCard(
+                      child: Text(
+                        '${_fmtWhen(task['scheduled_start'] as int?)}  ·  ${dbStr(task['title'])}',
+                        style: const TextStyle(color: AppTheme.silver),
+                      ),
+                    ),
+                  )),
+            ],
+            const SizedBox(height: 16),
+            const Text('Activity history',
+                style: TextStyle(color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            ActivityTimeline(
+              items: t.activity
+                  .map((a) => (label: humanEvent(a.eventType), at: a.occurredAt))
+                  .toList(),
+            ),
           ],
         ),
       ),
