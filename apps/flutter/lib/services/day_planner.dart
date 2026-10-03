@@ -3,6 +3,7 @@ import '../data/database.dart';
 import '../data/habit_repository.dart';
 import '../data/planning_repository.dart';
 import '../data/task_repository.dart';
+import 'query_cache.dart';
 
 enum PlanItemKind { overdueTask, dueTodayTask, openTask, habit, bill, event }
 
@@ -31,15 +32,31 @@ class DayPlanner {
   final AppDatabase _db;
 
   Future<List<PlanItem>> buildPlan({int limit = 8}) async {
+    return QueryCache.instance.getOrLoad(
+      'day_plan_$limit',
+      () => _build(limit),
+      ttl: const Duration(seconds: 6),
+    );
+  }
+
+  Future<List<PlanItem>> _build(int limit) async {
     final tasks = TaskRepository(_db);
     final habits = HabitRepository(_db);
     final bills = BillRepository(_db);
 
-    final overdue = await tasks.listOverdue();
-    final dueToday = await tasks.listDueToday();
-    final open = await tasks.listOpen();
-    final activeHabits = await habits.listActive();
-    final billOcc = await bills.listOpenOccurrences();
+    final results = await Future.wait([
+      tasks.listOverdue(),
+      tasks.listDueToday(),
+      tasks.listOpen(),
+      habits.listActive(),
+      bills.listOpenOccurrences(),
+    ]);
+
+    final overdue = results[0] as dynamic;
+    final dueToday = results[1] as dynamic;
+    final open = results[2] as dynamic;
+    final activeHabits = results[3] as dynamic;
+    final billOcc = results[4] as dynamic;
 
     final items = <PlanItem>[];
     final hour = DateTime.now().hour;
