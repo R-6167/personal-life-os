@@ -239,7 +239,7 @@ class BackupIoResult {
   final bool ok;
   final String message;
   final String? path;
-  final int? inserted;
+  final Map<String, int>? inserted;
   final int? total;
   final bool needsPassphrase;
   final String? pendingRaw;
