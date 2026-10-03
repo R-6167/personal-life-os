@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../data/bill_repository.dart';
 import '../data/database.dart';
@@ -15,6 +16,7 @@ import '../data/task_repository.dart';
 import '../domain/enums.dart';
 import '../domain/models.dart';
 import '../services/day_planner.dart';
+import '../services/local_analytics.dart';
 import '../services/notification_service.dart';
 import 'assistant_screen.dart';
 import 'forms/create_forms.dart';
@@ -26,8 +28,10 @@ import 'screens/project_detail_screen.dart';
 import 'screens/task_detail_screen.dart';
 import 'settings_screen.dart';
 import 'theme.dart';
+import 'widgets/empty_state.dart';
 import 'widgets/glass.dart';
 import 'widgets/pay_bill_dialog.dart';
+import 'widgets/section_header.dart';
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
@@ -84,6 +88,7 @@ class _HomeShellState extends State<HomeShell> {
       } catch (_) {}
       await _reload();
       setState(() => _ready = true);
+      LocalAnalytics.instance.screenView('today');
     } catch (e) {
       setState(() {
         _error = e.toString();
@@ -120,6 +125,7 @@ class _HomeShellState extends State<HomeShell> {
     try {
       await NotificationService.instance.syncFromDatabase();
     } catch (_) {}
+    if (!mounted) return;
     setState(() {
       _taskList = t;
       _overdue = o;
@@ -148,7 +154,15 @@ class _HomeShellState extends State<HomeShell> {
 
   Future<void> _add() async {
     final ok = await showUniversalAdd(context);
-    if (ok) await _reload();
+    if (ok) {
+      HapticFeedback.lightImpact();
+      await _reload();
+    }
+  }
+
+  void _onTab(int i) {
+    setState(() => _tab = i);
+    LocalAnalytics.instance.screenView(_titles[i].toLowerCase());
   }
 
   String get _greeting {
@@ -207,19 +221,28 @@ class _HomeShellState extends State<HomeShell> {
                     child: Padding(
                       padding: const EdgeInsets.all(24),
                       child: GlassCard(
-                        child: Text(_error!, style: const TextStyle(color: Colors.redAccent)),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.error_outline, color: Colors.redAccent, size: 36),
+                            const SizedBox(height: 12),
+                            Text(_error!, style: const TextStyle(color: Colors.redAccent)),
+                            const SizedBox(height: 12),
+                            FilledButton(onPressed: _boot, child: const Text('Retry')),
+                          ],
+                        ),
                       ),
                     ),
                   )
                 : _body(),
         bottomNavigationBar: NavigationBar(
           selectedIndex: _tab,
-          onDestinationSelected: (i) => setState(() => _tab = i),
+          onDestinationSelected: _onTab,
           destinations: const [
-            NavigationDestination(icon: Icon(Icons.today_outlined), label: 'Today'),
-            NavigationDestination(icon: Icon(Icons.check_box_outlined), label: 'Tasks'),
-            NavigationDestination(icon: Icon(Icons.favorite_outline), label: 'Life'),
-            NavigationDestination(icon: Icon(Icons.account_balance_wallet_outlined), label: 'Finance'),
+            NavigationDestination(icon: Icon(Icons.today_outlined), selectedIcon: Icon(Icons.today), label: 'Today'),
+            NavigationDestination(icon: Icon(Icons.check_box_outlined), selectedIcon: Icon(Icons.check_box), label: 'Tasks'),
+            NavigationDestination(icon: Icon(Icons.favorite_outline), selectedIcon: Icon(Icons.favorite), label: 'Life'),
+            NavigationDestination(icon: Icon(Icons.account_balance_wallet_outlined), selectedIcon: Icon(Icons.account_balance_wallet), label: 'Finance'),
             NavigationDestination(icon: Icon(Icons.more_horiz), label: 'More'),
           ],
         ),
@@ -263,33 +286,33 @@ class _HomeShellState extends State<HomeShell> {
 
   Widget _today() {
     final spend = (_monthSpendMinor / 100).toStringAsFixed(2);
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-      children: [
-        GlassCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(_greeting, style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.55), fontSize: 13)),
-              const SizedBox(height: 4),
-              const Text('What needs attention',
-                  style: TextStyle(color: AppTheme.silver, fontSize: 20, fontWeight: FontWeight.w700)),
-              const SizedBox(height: 4),
-              Text(
-                'Tap tasks · ~${_freeMinutes ~/ 60}h free · ${Defaults.currency} $spend spent',
-                style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11),
-              ),
-            ],
+    return RefreshIndicator(
+      color: AppTheme.amber,
+      onRefresh: _reload,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
+          GlassCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(_greeting, style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.55), fontSize: 13)),
+                const SizedBox(height: 4),
+                const Text('What needs attention',
+                    style: TextStyle(color: AppTheme.silver, fontSize: 20, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 4),
+                Text(
+                  'Pull to refresh · ~${_freeMinutes ~/ 60}h free · ${Defaults.currency} $spend spent',
+                  style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11),
+                ),
+              ],
+            ),
           ),
-        ),
-        if (_scheduledToday.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              const Text('On the clock',
-                  style: TextStyle(color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
-              const Spacer(),
-              TextButton(
+          if (_scheduledToday.isNotEmpty) ...[
+            SectionHeader(
+              'On the clock',
+              trailing: TextButton(
                 onPressed: () {
                   Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const PlanningScreen()),
@@ -297,179 +320,181 @@ class _HomeShellState extends State<HomeShell> {
                 },
                 child: const Text('Plan'),
               ),
-            ],
-          ),
-          ..._scheduledToday.map((t) => Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: GlassCard(
-                  onTap: () => _openTask(t),
-                  child: ListTile(
-                    dense: true,
-                    title: Text(t.title, style: const TextStyle(color: AppTheme.silver)),
-                    subtitle: Text(
-                      t.scheduledStart != null
-                          ? TimeOfDay.fromDateTime(
-                                  DateTime.fromMillisecondsSinceEpoch(t.scheduledStart!))
-                              .format(context)
-                          : 'Scheduled',
-                      style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11),
+            ),
+            ..._scheduledToday.map((t) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: GlassCard(
+                    onTap: () => _openTask(t),
+                    child: ListTile(
+                      dense: true,
+                      title: Text(t.title, style: const TextStyle(color: AppTheme.silver)),
+                      subtitle: Text(
+                        t.scheduledStart != null
+                            ? TimeOfDay.fromDateTime(
+                                    DateTime.fromMillisecondsSinceEpoch(t.scheduledStart!))
+                                .format(context)
+                            : 'Scheduled',
+                        style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11),
+                      ),
                     ),
                   ),
-                ),
-              )),
-        ],
-        if (_plan.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          const Text('Focus now',
-              style: TextStyle(color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 8),
-          ..._plan.map((p) => Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: GlassCard(
-                  child: InkWell(
-                    onTap: p.kind == PlanItemKind.overdueTask ||
-                            p.kind == PlanItemKind.dueTodayTask ||
-                            p.kind == PlanItemKind.openTask
-                        ? () async {
-                            final match =
-                                [..._overdue, ..._taskList].where((x) => x.id == p.id);
-                            if (match.isNotEmpty) await _openTask(match.first);
+                )),
+          ],
+          if (_plan.isNotEmpty) ...[
+            const SectionHeader('Focus now'),
+            ..._plan.map((p) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: GlassCard(
+                    child: InkWell(
+                      onTap: p.kind == PlanItemKind.overdueTask ||
+                              p.kind == PlanItemKind.dueTodayTask ||
+                              p.kind == PlanItemKind.openTask
+                          ? () async {
+                              final match =
+                                  [..._overdue, ..._taskList].where((x) => x.id == p.id);
+                              if (match.isNotEmpty) await _openTask(match.first);
+                            }
+                          : null,
+                      child: Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 14,
+                            backgroundColor: AppTheme.amber.withValues(alpha: 0.2),
+                            child: Text(
+                              '${_plan.indexOf(p) + 1}',
+                              style: const TextStyle(
+                                  color: AppTheme.amber, fontSize: 12, fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(p.title,
+                                    style: const TextStyle(
+                                        color: AppTheme.silver, fontWeight: FontWeight.w600)),
+                                Text(p.reason,
+                                    style: TextStyle(
+                                        color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11)),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                )),
+          ],
+          if (_overdue.isNotEmpty) ...[
+            const SectionHeader('Overdue'),
+            ..._overdue.map((t) => _taskTile(t)),
+          ],
+          const SectionHeader('Tasks'),
+          if (_taskList.isEmpty)
+            _hint('Nothing open — use Add when something appears.')
+          else
+            ..._taskList.take(8).map(_taskTile),
+          const SectionHeader('Habits'),
+          if (_habitList.isEmpty)
+            _hint('No habits yet.')
+          else
+            ..._habitList.map((h) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: GlassCard(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    child: ListTile(
+                      title: Text(h.title, style: const TextStyle(color: AppTheme.silver)),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.done_all, color: AppTheme.amber),
+                        onPressed: () async {
+                          await _habits.markDoneToday(h.id);
+                          HapticFeedback.selectionClick();
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Logged ${h.title}')),
+                            );
                           }
-                        : null,
-                    child: Row(
-                      children: [
-                        CircleAvatar(
-                          radius: 14,
-                          backgroundColor: AppTheme.amber.withValues(alpha: 0.2),
-                          child: Text(
-                            '${_plan.indexOf(p) + 1}',
-                            style: const TextStyle(
-                                color: AppTheme.amber, fontSize: 12, fontWeight: FontWeight.w700),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(p.title,
-                                  style: const TextStyle(
-                                      color: AppTheme.silver, fontWeight: FontWeight.w600)),
-                              Text(p.reason,
-                                  style: TextStyle(
-                                      color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11)),
-                            ],
-                          ),
-                        ),
-                      ],
+                          await _reload();
+                        },
+                      ),
                     ),
                   ),
-                ),
-              )),
-        ],
-        if (_overdue.isNotEmpty) ...[
-          _section('Overdue'),
-          ..._overdue.map((t) => _taskTile(t)),
-        ],
-        _section('Tasks'),
-        if (_taskList.isEmpty)
-          _hint('Nothing open — use Add when something appears.')
-        else
-          ..._taskList.take(8).map(_taskTile),
-        _section('Habits'),
-        if (_habitList.isEmpty)
-          _hint('No habits yet.')
-        else
-          ..._habitList.map((h) => Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: GlassCard(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  child: ListTile(
-                    title: Text(h.title, style: const TextStyle(color: AppTheme.silver)),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.done_all, color: AppTheme.amber),
-                      onPressed: () async {
-                        await _habits.markDoneToday(h.id);
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Logged ${h.title}')),
-                          );
-                        }
-                        await _reload();
-                      },
+                )),
+          const SectionHeader('Bills'),
+          if (_billOcc.isEmpty)
+            _hint('No open bills.')
+          else
+            ..._billOcc.map((o) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: GlassCard(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    child: ListTile(
+                      title: Text(o.billName ?? 'Bill', style: const TextStyle(color: AppTheme.silver)),
+                      trailing: FilledButton(
+                        onPressed: () async {
+                          final paid = await promptAndPayBill(context, o);
+                          if (paid) {
+                            HapticFeedback.mediumImpact();
+                            await _reload();
+                          }
+                        },
+                        child: const Text('Pay'),
+                      ),
                     ),
                   ),
-                ),
-              )),
-        _section('Bills'),
-        if (_billOcc.isEmpty)
-          _hint('No open bills.')
-        else
-          ..._billOcc.map((o) => Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: GlassCard(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  child: ListTile(
-                    title: Text(o.billName ?? 'Bill', style: const TextStyle(color: AppTheme.silver)),
-                    trailing: FilledButton(
-                      onPressed: () async {
-                        final paid = await promptAndPayBill(context, o);
-                        if (paid) await _reload();
-                      },
-                      child: const Text('Pay'),
+                )),
+          if (_eventsToday.isNotEmpty) ...[
+            const SectionHeader('Events'),
+            ..._eventsToday.map((e) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: GlassCard(
+                    child: Text('${e['title']}', style: const TextStyle(color: AppTheme.silver)),
+                  ),
+                )),
+          ],
+          if (_routineList.isNotEmpty) ...[
+            const SectionHeader('Routines'),
+            ..._routineList.map((r) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: GlassCard(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    child: ListTile(
+                      title: Text(r.name, style: const TextStyle(color: AppTheme.silver)),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.play_circle_outline, color: AppTheme.amber),
+                        onPressed: () async {
+                          await _routines.completeToday(r.id);
+                          HapticFeedback.selectionClick();
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Completed ${r.name}')),
+                            );
+                          }
+                          await _reload();
+                        },
+                      ),
                     ),
                   ),
-                ),
-              )),
-        if (_eventsToday.isNotEmpty) ...[
-          _section('Events'),
-          ..._eventsToday.map((e) => Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: GlassCard(
-                  child: Text('${e['title']}', style: const TextStyle(color: AppTheme.silver)),
-                ),
-              )),
-        ],
-        if (_routineList.isNotEmpty) ...[
-          _section('Routines'),
-          ..._routineList.map((r) => Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: GlassCard(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  child: ListTile(
-                    title: Text(r.name, style: const TextStyle(color: AppTheme.silver)),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.play_circle_outline, color: AppTheme.amber),
-                      onPressed: () async {
-                        await _routines.completeToday(r.id);
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Completed ${r.name}')),
-                          );
-                        }
-                        await _reload();
-                      },
-                    ),
+                )),
+          ],
+          if (_projectList.isNotEmpty) ...[
+            const SectionHeader('Active projects'),
+            ..._projectList.take(4).map((p) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: GlassCard(
+                    onTap: () {
+                      Navigator.of(context)
+                          .push(MaterialPageRoute(
+                              builder: (_) => ProjectDetailScreen(projectId: p.id)))
+                          .then((_) => _reload());
+                    },
+                    child: Text(p.title, style: const TextStyle(color: AppTheme.silver)),
                   ),
-                ),
-              )),
+                )),
+          ],
         ],
-        if (_projectList.isNotEmpty) ...[
-          _section('Active projects'),
-          ..._projectList.take(4).map((p) => Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: GlassCard(
-                  onTap: () {
-                    Navigator.of(context)
-                        .push(MaterialPageRoute(
-                            builder: (_) => ProjectDetailScreen(projectId: p.id)))
-                        .then((_) => _reload());
-                  },
-                  child: Text(p.title, style: const TextStyle(color: AppTheme.silver)),
-                ),
-              )),
-        ],
-      ],
+      ),
     );
   }
 
@@ -497,24 +522,28 @@ class _HomeShellState extends State<HomeShell> {
         ),
         Expanded(
           child: _taskList.isEmpty
-              ? Center(child: _hint('No open tasks'))
-              : ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-                  children: _taskList.map(_taskTile).toList(),
+              ? EmptyState(
+                  icon: Icons.check_circle_outline,
+                  title: 'All clear',
+                  subtitle: 'No open tasks. Add one when something needs doing.',
+                  actionLabel: 'New task',
+                  onAction: () async {
+                    final ok = await showCreateForm(context, AddKind.task);
+                    if (ok) await _reload();
+                  },
+                )
+              : RefreshIndicator(
+                  color: AppTheme.amber,
+                  onRefresh: _reload,
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+                    children: _taskList.map(_taskTile).toList(),
+                  ),
                 ),
         ),
       ],
     );
   }
-
-  Widget _section(String title) => Padding(
-        padding: const EdgeInsets.only(top: 16, bottom: 8),
-        child: Text(
-          title,
-          style: const TextStyle(
-              color: AppTheme.woodLight, fontWeight: FontWeight.w600, letterSpacing: 0.3),
-        ),
-      );
 
   Widget _hint(String m) =>
       Text(m, style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.35)));
@@ -529,14 +558,21 @@ class _HomeShellState extends State<HomeShell> {
             subtitle: Text(
               t.isOverdue ? 'OVERDUE' : (t.isDueToday ? 'Due today' : t.status),
               style: TextStyle(
-                color: t.isOverdue ? Colors.redAccent : AppTheme.silver.withValues(alpha: 0.4),
-                fontSize: 11,
+                color: t.isOverdue ? Colors.redAccent : AppTheme.silver.withValues(alpha: 0.45),
+                fontSize: 12,
               ),
             ),
             trailing: IconButton(
               icon: const Icon(Icons.check_circle_outline, color: AppTheme.amber),
+              tooltip: 'Complete',
               onPressed: () async {
                 await _tasks.complete(t.id);
+                HapticFeedback.mediumImpact();
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Completed ${t.title}')),
+                  );
+                }
                 await _reload();
               },
             ),
