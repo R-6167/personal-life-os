@@ -1,5 +1,6 @@
 import '../domain/enums.dart';
 import '../domain/models.dart';
+import '../services/domain_recurrence.dart';
 import 'database.dart';
 
 class RoutineRepository {
@@ -36,7 +37,6 @@ class RoutineRepository {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
     final id = AppDatabase.newId();
-    // routines table: id, owner_id, name, status, timestamps only
     await (await _db.database).insert('routines', {
       'id': id,
       'owner_id': ownerId,
@@ -79,6 +79,16 @@ class RoutineRepository {
     });
   }
 
+  Future<Map<String, Object?>?> scheduleOf(String routineId) async {
+    final rows = await (await _db.database).query(
+      'routine_schedules',
+      where: 'routine_id = ?',
+      whereArgs: [routineId],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.first;
+  }
+
   Future<String?> ensureTodayOccurrence(String routineId) async {
     final day = dayKey();
     final db = await _db.database;
@@ -89,6 +99,18 @@ class RoutineRepository {
       limit: 1,
     );
     if (existing.isNotEmpty) return existing.first['id'] as String;
+
+    final sch = await scheduleOf(routineId);
+    if (sch != null) {
+      final rule = DomainRecurrence.ruleFromScheduleMap(
+        sch,
+        fallbackStart: DateTime.fromMillisecondsSinceEpoch(day),
+      );
+      if (!DomainRecurrence.occursOn(rule, DateTime.fromMillisecondsSinceEpoch(day))) {
+        return null;
+      }
+    }
+
     final now = AppDatabase.nowMs();
     final id = AppDatabase.newId();
     try {
