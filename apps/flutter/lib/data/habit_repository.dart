@@ -1,6 +1,7 @@
 import '../domain/enums.dart';
 import '../domain/models.dart';
 import 'database.dart';
+import '../services/domain_recurrence.dart';
 import '../services/recurrence_engine.dart';
 
 class HabitRepository {
@@ -100,13 +101,11 @@ class HabitRepository {
       final start = habit != null
           ? DateTime.fromMillisecondsSinceEpoch(habit.createdAt)
           : DateTime.fromMillisecondsSinceEpoch(day);
-      final rule = RecurrenceRule.fromLegacy(
-        frequency: '${sch['frequency'] ?? 'DAILY'}',
-        interval: 1,
-        dtStart: start,
-        daysOfWeekCsv: sch['days_of_week'] as String?,
+      final rule = DomainRecurrence.ruleFromScheduleMap(
+        sch,
+        fallbackStart: start,
       );
-      if (!rule.generator().occursOn(DateTime.fromMillisecondsSinceEpoch(day))) {
+      if (!DomainRecurrence.occursOn(rule, DateTime.fromMillisecondsSinceEpoch(day))) {
         return null;
       }
     }
