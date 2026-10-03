@@ -47,4 +47,12 @@ class AccountRepository {
       whereArgs: [accountId],
     );
   }
+
+  Future<int> totalBalanceMinor() async {
+    final db = await _db.database;
+    final rows = await db.rawQuery(
+      'SELECT COALESCE(SUM(current_balance_minor), 0) AS t FROM financial_accounts',
+    );
+    return (rows.first['t'] as int?) ?? 0;
+  }
 }
