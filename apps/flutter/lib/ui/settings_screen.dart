@@ -1,15 +1,10 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '../data/database.dart';
-import '../data/export_service.dart';
 import '../domain/enums.dart';
+import '../services/backup_io.dart';
 import '../services/data_management.dart';
 import '../services/notification_service.dart';
-import '../services/secure_backup.dart';
 import '../services/security_service.dart';
 import 'app_meta.dart';
 import 'theme.dart';
@@ -30,6 +25,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _lockEnabled = false;
   bool _hideBalances = false;
   int _autoLock = 5;
+  bool _busy = false;
 
   @override
   void initState() {
@@ -94,7 +90,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.metal,
-        title: const Text('Set PIN', style: TextStyle(color: AppTheme.silver)),
+        title: const Text('Set PIN'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -143,14 +139,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _export({bool encrypted = false}) async {
-    var json = await ExportService(AppDatabase.instance).buildBackupJson();
+    if (_busy) return;
+    setState(() => _busy = true);
+    String? passphrase;
     if (encrypted) {
       final pass = TextEditingController();
       final ok = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
           backgroundColor: AppTheme.metal,
-          title: const Text('Encrypt backup', style: TextStyle(color: AppTheme.silver)),
+          title: const Text('Encrypt backup'),
           content: TextField(
             controller: pass,
             obscureText: true,
@@ -166,38 +164,89 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
         ),
       );
-      if (ok != true) return;
-      try {
-        json = SecureBackup.encrypt(json, pass.text);
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
-        }
+      if (ok != true) {
+        setState(() => _busy = false);
         return;
       }
+      passphrase = pass.text;
     }
-    final dir = await getTemporaryDirectory();
-    final name = encrypted ? 'personal-life-os-backup.enc.json' : 'personal-life-os-backup.json';
-    final file = File('${dir.path}/$name');
-    await file.writeAsString(json);
-    await Share.shareXFiles([XFile(file.path)], text: 'Personal Life OS backup');
+    final result = await BackupIo(AppDatabase.instance).exportToFile(
+      encrypted: encrypted,
+      passphrase: passphrase,
+    );
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result.message)));
+  }
+
+  Future<void> _import() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    final io = BackupIo(AppDatabase.instance);
+    var result = await io.importFromFile();
+    if (result.needsPassphrase && result.pendingRaw != null) {
+      final pass = TextEditingController();
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppTheme.metal,
+          title: const Text('Encrypted backup'),
+          content: TextField(
+            controller: pass,
+            obscureText: true,
+            style: const TextStyle(color: AppTheme.silver),
+            decoration: const InputDecoration(labelText: 'Passphrase'),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Decrypt')),
+          ],
+        ),
+      );
+      if (ok == true) {
+        result = await io.importEncryptedRaw(result.pendingRaw!, pass.text);
+      } else {
+        result = BackupIoResult(ok: false, message: 'Import cancelled');
+      }
+    }
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result.message)));
   }
 
   Future<void> _wipe() async {
+    final typed = TextEditingController();
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.metal,
         title: const Text('Wipe all local data?', style: TextStyle(color: Colors.redAccent)),
-        content: const Text(
-          'This permanently deletes your offline database and PIN on this device. Export a backup first if you need it.',
-          style: TextStyle(color: AppTheme.silver),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'This permanently deletes your offline database and PIN on this device. Export a backup first.',
+              style: TextStyle(color: AppTheme.silver),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: typed,
+              style: const TextStyle(color: AppTheme.silver),
+              decoration: const InputDecoration(
+                labelText: 'Type WIPE to confirm',
+              ),
+            ),
+          ],
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
-            onPressed: () => Navigator.pop(ctx, true),
+            onPressed: () {
+              if (typed.text.trim().toUpperCase() != 'WIPE') return;
+              Navigator.pop(ctx, true);
+            },
             child: const Text('Wipe'),
           ),
         ],
@@ -222,6 +271,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             : ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
+                  if (_busy) const LinearProgressIndicator(color: AppTheme.amber),
                   SwitchListTile(
                     title: const Text('Local notifications', style: TextStyle(color: AppTheme.silver)),
                     subtitle: Text(
@@ -338,16 +388,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         Text('Privacy', style: Theme.of(context).textTheme.titleMedium),
                         const SizedBox(height: 8),
                         Text(
-                          'Everything stays on this device. No accounts, no cloud sync, no analytics in this client.',
+                          'Everything stays on this device. No accounts, no cloud sync.',
                           style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.55), fontSize: 13),
                         ),
                         SwitchListTile(
                           contentPadding: EdgeInsets.zero,
                           title: const Text('Hide balances in UI', style: TextStyle(color: AppTheme.silver)),
-                          subtitle: Text(
-                            'Mask amounts until you turn this off',
-                            style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45), fontSize: 12),
-                          ),
                           value: _hideBalances,
                           activeTrackColor: AppTheme.amber,
                           onChanged: (v) async {
@@ -364,12 +410,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('Profile', style: Theme.of(context).textTheme.titleMedium),
-                        const SizedBox(height: 12),
                         ListTile(
                           contentPadding: EdgeInsets.zero,
-                          title: const Text('Display name', style: TextStyle(color: Colors.white70)),
-                          subtitle: Text(_name, style: const TextStyle(color: Colors.white)),
-                          trailing: const Icon(Icons.edit, color: Colors.white54, size: 18),
+                          title: const Text('Display name'),
+                          subtitle: Text(_name),
+                          trailing: const Icon(Icons.edit, size: 18),
                           onTap: () async {
                             final c = TextEditingController(text: _name);
                             final ok = await showDialog<String>(
@@ -398,11 +443,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('Preferences', style: Theme.of(context).textTheme.titleMedium),
-                        const SizedBox(height: 8),
                         ListTile(
                           contentPadding: EdgeInsets.zero,
-                          title: const Text('Currency', style: TextStyle(color: Colors.white70)),
-                          subtitle: Text(_currency, style: const TextStyle(color: Colors.white)),
+                          title: const Text('Currency'),
+                          subtitle: Text(_currency),
                           onTap: () async {
                             final next = await showDialog<String>(
                               context: context,
@@ -422,11 +466,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                         ListTile(
                           contentPadding: EdgeInsets.zero,
-                          title: const Text('Week starts', style: TextStyle(color: Colors.white70)),
-                          subtitle: Text(
-                            _weekStart == 0 ? 'Sunday' : 'Monday',
-                            style: const TextStyle(color: Colors.white),
-                          ),
+                          title: const Text('Week starts'),
+                          subtitle: Text(_weekStart == 0 ? 'Sunday' : 'Monday'),
                           onTap: () async {
                             final next = await showDialog<int>(
                               context: context,
@@ -458,30 +499,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         Text('Data management', style: Theme.of(context).textTheme.titleMedium),
                         ListTile(
                           contentPadding: EdgeInsets.zero,
-                          leading: const Icon(Icons.ios_share, color: AppTheme.seed),
-                          title: const Text('Export backup JSON'),
-                          subtitle: const Text('Plain offline share', style: TextStyle(fontSize: 12, color: Colors.white54)),
-                          onTap: () => _export(encrypted: false),
+                          leading: const Icon(Icons.folder_open, color: AppTheme.seed),
+                          title: const Text('Export backup to file'),
+                          subtitle: const Text('File picker · plain JSON',
+                              style: TextStyle(fontSize: 12, color: Colors.white54)),
+                          onTap: _busy ? null : () => _export(encrypted: false),
                         ),
                         ListTile(
                           contentPadding: EdgeInsets.zero,
                           leading: const Icon(Icons.lock, color: AppTheme.amber),
                           title: const Text('Export encrypted backup'),
-                          subtitle: const Text('AES + passphrase', style: TextStyle(fontSize: 12, color: Colors.white54)),
-                          onTap: () => _export(encrypted: true),
+                          subtitle: const Text('AES + passphrase → file',
+                              style: TextStyle(fontSize: 12, color: Colors.white54)),
+                          onTap: _busy ? null : () => _export(encrypted: true),
+                        ),
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(Icons.file_download_outlined, color: AppTheme.silver),
+                          title: const Text('Import backup from file'),
+                          subtitle: const Text('Pick .json · verified merge',
+                              style: TextStyle(fontSize: 12, color: Colors.white54)),
+                          onTap: _busy ? null : _import,
                         ),
                         ListTile(
                           contentPadding: EdgeInsets.zero,
                           leading: const Icon(Icons.delete_forever, color: Colors.redAccent),
-                          title: const Text('Wipe all local data', style: TextStyle(color: Colors.redAccent)),
-                          subtitle: const Text('Deletes DB + PIN on this device', style: TextStyle(fontSize: 12, color: Colors.white54)),
+                          title: const Text('Wipe all local data',
+                              style: TextStyle(color: Colors.redAccent)),
+                          subtitle: const Text('Type WIPE to confirm',
+                              style: TextStyle(fontSize: 12, color: Colors.white54)),
                           onTap: _wipe,
-                        ),
-                        const ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: Icon(Icons.storage_outlined, color: Colors.white54),
-                          title: Text('Storage'),
-                          subtitle: Text('On-device SQLite only', style: TextStyle(fontSize: 12, color: Colors.white54)),
                         ),
                       ],
                     ),
@@ -496,7 +543,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           contentPadding: EdgeInsets.zero,
                           title: const Text('Personal Life OS'),
                           subtitle: Text(
-                            '${AppMeta.tagline}\nSchema-backed SQLite · optional PIN lock',
+                            '${AppMeta.tagline}\nHardened offline SQLite · file backup',
                             style: const TextStyle(fontSize: 12, color: Colors.white54),
                           ),
                         ),
