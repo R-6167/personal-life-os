@@ -1,5 +1,6 @@
 import '../domain/enums.dart';
 import '../domain/models.dart';
+import '../services/recurrence_engine.dart';
 import 'database.dart';
 
 class BillRepository {
@@ -99,7 +100,6 @@ class BillRepository {
         'recorded_at': now,
         'source': EventSource.user,
       });
-      // Payment reminder 1 day before due
       await txn.insert('reminders', {
         'id': AppDatabase.newId(),
         'owner_id': ownerId,
@@ -128,19 +128,7 @@ class BillRepository {
   }
 
   int _nextDueMs(int fromMs, String frequency) {
-    final from = DateTime.fromMillisecondsSinceEpoch(fromMs);
-    switch (frequency.toUpperCase()) {
-      case 'WEEKLY':
-        return from.add(const Duration(days: 7)).millisecondsSinceEpoch;
-      case 'YEARLY':
-        return DateTime(from.year + 1, from.month, from.day).millisecondsSinceEpoch;
-      case 'MONTHLY':
-      default:
-        final m = from.month == 12 ? 1 : from.month + 1;
-        final y = from.month == 12 ? from.year + 1 : from.year;
-        final day = from.day.clamp(1, 28);
-        return DateTime(y, m, day).millisecondsSinceEpoch;
-    }
+    return RecurrenceEngine.nextAfter(fromMs, frequency: frequency);
   }
 
   /// Bill → expense → optional account debit → next occurrence → history events.
@@ -213,7 +201,6 @@ class BillRepository {
         whereArgs: [occ.id],
       );
 
-      // Spawn next recurring occurrence
       final nextOccId = AppDatabase.newId();
       await txn.insert('bill_occurrences', {
         'id': nextOccId,
