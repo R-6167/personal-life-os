@@ -137,8 +137,8 @@ class PlanningRepository {
     final existingStart = taskRows.first['scheduled_start'] as int?;
     final existingEnd = taskRows.first['scheduled_end'] as int?;
     var minutes = durationMinutes;
-    if (minutes == null && existingStart != null && existingEnd != null) {
-      minutes = ((existingEnd - existingStart) / 60000).round().clamp(15, 180);
+    if (minutes == null && existingStart != null && existingEnd != null && existingEnd > existingStart) {
+      minutes = ((existingEnd - existingStart) / 60000).round();
     }
     minutes ??= (taskRows.first['estimated_minutes'] as int?) ?? 30;
 
@@ -231,20 +231,15 @@ class PlanningRepository {
   Future<void> moveBlock({
     required String blockId,
     required DateTime start,
-    int? durationMinutes,
+    required DateTime end,
   }) async {
+    final now = AppDatabase.nowMs();
+    final startMs = start.millisecondsSinceEpoch;
+    final endMs = end.millisecondsSinceEpoch;
     final db = await _db.database;
     final rows = await db.query('time_blocks', where: 'id = ?', whereArgs: [blockId], limit: 1);
     if (rows.isEmpty) return;
-    final b = rows.first;
-    final oldStart = b['start_at'] as int;
-    final oldEnd = b['end_at'] as int;
-    final mins = durationMinutes ?? ((oldEnd - oldStart) / 60000).round().clamp(10, 240);
-    final taskId = b['task_id'] as String?;
-    final startMs = start.millisecondsSinceEpoch;
-    final endMs = start.add(Duration(minutes: mins)).millisecondsSinceEpoch;
-    final now = AppDatabase.nowMs();
-    final ownerId = await _db.requireOwnerId();
+    final taskId = rows.first['task_id'] as String?;
 
     await _db.txn((txn) async {
       await txn.update(
@@ -253,7 +248,7 @@ class PlanningRepository {
         where: 'id = ?',
         whereArgs: [blockId],
       );
-      if (taskId != null && taskId.isNotEmpty) {
+      if (taskId != null) {
         await txn.update(
           'tasks',
           {
@@ -265,27 +260,15 @@ class PlanningRepository {
           whereArgs: [taskId],
         );
       }
-      await txn.insert('activity_events', {
-        'id': AppDatabase.newId(),
-        'owner_id': ownerId,
-        'event_type': 'TIME_BLOCK_MOVED',
-        'entity_type': 'TIME_BLOCK',
-        'entity_id': blockId,
-        'occurred_at': now,
-        'recorded_at': now,
-        'source': EventSource.user,
-        'metadata': '{"start":$startMs,"end":$endMs}',
-      });
     });
   }
 
   Future<void> cancelBlock(String blockId) async {
-    final rows =
-        await (await _db.database).query('time_blocks', where: 'id = ?', whereArgs: [blockId], limit: 1);
+    final now = AppDatabase.nowMs();
+    final db = await _db.database;
+    final rows = await db.query('time_blocks', where: 'id = ?', whereArgs: [blockId], limit: 1);
     if (rows.isEmpty) return;
     final taskId = rows.first['task_id'] as String?;
-    final now = AppDatabase.nowMs();
-    final ownerId = await _db.requireOwnerId();
 
     await _db.txn((txn) async {
       await txn.update(
@@ -294,7 +277,7 @@ class PlanningRepository {
         where: 'id = ?',
         whereArgs: [blockId],
       );
-      if (taskId != null && taskId.isNotEmpty) {
+      if (taskId != null) {
         await txn.update(
           'tasks',
           {
@@ -306,22 +289,12 @@ class PlanningRepository {
           whereArgs: [taskId],
         );
       }
-      await txn.insert('activity_events', {
-        'id': AppDatabase.newId(),
-        'owner_id': ownerId,
-        'event_type': 'TIME_BLOCK_CANCELLED',
-        'entity_type': 'TIME_BLOCK',
-        'entity_id': blockId,
-        'occurred_at': now,
-        'recorded_at': now,
-        'source': EventSource.user,
-      });
     });
   }
 
   Future<String> addFocusBlock({
     required DateTime start,
-    int durationMinutes = 45,
+    int durationMinutes = 30,
     String title = 'Focus',
   }) async {
     final ownerId = await _db.requireOwnerId();
@@ -343,8 +316,9 @@ class PlanningRepository {
     return id;
   }
 
-  /// Free minutes in the work window after merging overlapping busy intervals.
-  Future<int> availableMinutes({
+  /// Collect all busy intervals for a work window: time blocks, calendar events,
+  /// and tasks with scheduled_start/end (even without a time_block row).
+  Future<List<BusyInterval>> collectDayBusy({
     required DateTime day,
     int dayStartHour = 8,
     int dayEndHour = 22,
@@ -353,18 +327,17 @@ class PlanningRepository {
     final dayEnd = DateTime(day.year, day.month, day.day, dayEndHour);
     final windowStart = dayStart.millisecondsSinceEpoch;
     final windowEnd = dayEnd.millisecondsSinceEpoch;
-    final total = dayEnd.difference(dayStart).inMinutes;
-
     final busy = <BusyInterval>[];
 
-    final blocks = await listBlocksOnDay(day);
-    for (final b in blocks) {
-      final s = b['start_at'] as int?;
-      final e = b['end_at'] as int?;
-      if (s == null || e == null) continue;
+    void addClamped(int? s, int? e) {
+      if (s == null || e == null) return;
       final cs = s < windowStart ? windowStart : s;
       final ce = e > windowEnd ? windowEnd : e;
       if (ce > cs) busy.add(BusyInterval(cs, ce));
+    }
+
+    for (final b in await listBlocksOnDay(day)) {
+      addClamped(b['start_at'] as int?, b['end_at'] as int?);
     }
 
     final db = await _db.database;
@@ -375,18 +348,54 @@ class PlanningRepository {
         whereArgs: [windowEnd, windowStart],
       );
       for (final ev in events) {
-        final status = '${ev['status'] ?? ''}';
-        if (status == 'CANCELLED') continue;
-        final s = ev['start_at'] as int?;
-        final e = ev['end_at'] as int?;
-        if (s == null || e == null) continue;
-        final cs = s < windowStart ? windowStart : s;
-        final ce = e > windowEnd ? windowEnd : e;
-        if (ce > cs) busy.add(BusyInterval(cs, ce));
+        if ('${ev['status'] ?? ''}' == 'CANCELLED') continue;
+        addClamped(ev['start_at'] as int?, ev['end_at'] as int?);
       }
     } catch (_) {}
 
-    final merged = mergeBusyIntervals(busy);
+    try {
+      final tasks = await db.query(
+        'tasks',
+        where:
+            'scheduled_start IS NOT NULL AND scheduled_start < ? AND '
+            '(scheduled_end IS NULL OR scheduled_end > ?) AND '
+            'status NOT IN (?, ?) AND archived_at IS NULL',
+        whereArgs: [
+          windowEnd,
+          windowStart,
+          EntityStatus.completed,
+          EntityStatus.cancelled,
+        ],
+      );
+      for (final row in tasks) {
+        final s = row['scheduled_start'] as int?;
+        var e = row['scheduled_end'] as int?;
+        if (s == null) continue;
+        if (e == null) {
+          final est = (row['estimated_minutes'] as int?) ?? 30;
+          e = s + est * 60 * 1000;
+        }
+        addClamped(s, e);
+      }
+    } catch (_) {}
+
+    return mergeBusyIntervals(busy);
+  }
+
+  /// Free minutes after merging overlapping busy intervals (blocks + calendar + scheduled tasks).
+  Future<int> availableMinutes({
+    required DateTime day,
+    int dayStartHour = 8,
+    int dayEndHour = 22,
+  }) async {
+    final dayStart = DateTime(day.year, day.month, day.day, dayStartHour);
+    final dayEnd = DateTime(day.year, day.month, day.day, dayEndHour);
+    final total = dayEnd.difference(dayStart).inMinutes;
+    final merged = await collectDayBusy(
+      day: day,
+      dayStartHour: dayStartHour,
+      dayEndHour: dayEndHour,
+    );
     var busyMinutes = 0;
     for (final m in merged) {
       busyMinutes += (m.durationMs / 60000).floor();
@@ -395,53 +404,36 @@ class PlanningRepository {
     return free < 0 ? 0 : free;
   }
 
+  /// Suggest start times that fit [durationMinutes] into free gaps for the day.
   Future<List<DateTime>> suggestSlots({
     required DateTime day,
     int durationMinutes = 30,
     int dayStartHour = 8,
     int dayEndHour = 22,
+    int limit = 8,
   }) async {
     final slots = <DateTime>[];
     final dayStart = DateTime(day.year, day.month, day.day, dayStartHour);
     final dayEnd = DateTime(day.year, day.month, day.day, dayEndHour);
-    final windowStart = dayStart.millisecondsSinceEpoch;
-    final windowEnd = dayEnd.millisecondsSinceEpoch;
+    final need = Duration(minutes: durationMinutes.clamp(5, 8 * 60));
 
-    final busy = <BusyInterval>[];
-    for (final b in await listBlocksOnDay(day)) {
-      final s = b['start_at'] as int?;
-      final e = b['end_at'] as int?;
-      if (s == null || e == null) continue;
-      busy.add(BusyInterval(
-        s < windowStart ? windowStart : s,
-        e > windowEnd ? windowEnd : e,
-      ));
-    }
-    try {
-      final events = await (await _db.database).query(
-        'calendar_events',
-        where: 'start_at < ? AND end_at > ?',
-        whereArgs: [windowEnd, windowStart],
-      );
-      for (final ev in events) {
-        if ('${ev['status'] ?? ''}' == 'CANCELLED') continue;
-        final s = ev['start_at'] as int?;
-        final e = ev['end_at'] as int?;
-        if (s == null || e == null) continue;
-        busy.add(BusyInterval(
-          s < windowStart ? windowStart : s,
-          e > windowEnd ? windowEnd : e,
-        ));
-      }
-    } catch (_) {}
+    final merged = await collectDayBusy(
+      day: day,
+      dayStartHour: dayStartHour,
+      dayEndHour: dayEndHour,
+    );
 
-    final merged = mergeBusyIntervals(busy.where((b) => b.endMs > b.startMs).toList());
-    final need = Duration(minutes: durationMinutes);
     var cursor = dayStart;
     final now = DateTime.now();
     if (day.year == now.year && day.month == now.month && day.day == now.day) {
       if (cursor.isBefore(now)) {
-        final rounded = DateTime(now.year, now.month, now.day, now.hour, (now.minute ~/ 15) * 15);
+        final rounded = DateTime(
+          now.year,
+          now.month,
+          now.day,
+          now.hour,
+          (now.minute ~/ 15) * 15,
+        );
         cursor = rounded.add(const Duration(minutes: 15));
       }
     }
@@ -450,7 +442,7 @@ class PlanningRepository {
       final gapEnd = DateTime.fromMillisecondsSinceEpoch(m.startMs);
       if (gapEnd.isAfter(cursor) && gapEnd.difference(cursor) >= need) {
         slots.add(cursor);
-        if (slots.length >= 6) return slots;
+        if (slots.length >= limit) return slots;
       }
       final after = DateTime.fromMillisecondsSinceEpoch(m.endMs);
       if (after.isAfter(cursor)) cursor = after;
