@@ -1,30 +1,29 @@
-# Personal Life OS — Flutter (phone app)
+# Ordin — Flutter (phone app)
 
-**No Expo.** Offline client implementing [`contract/CONTRACT.md`](../../contract/CONTRACT.md).
+**Offline-first personal life OS.** No Expo. Local SQLite + Material 3 glass UI.
+
+## Identity
+
+| | |
+|--|--|
+| **Name** | Ordin |
+| **Application ID** | `com.aetherion.ordin` |
+| **Version** | see `pubspec.yaml` |
 
 ## Build APK on GitHub
 
-1. Ensure `android/` is present (you already added it; CI uses the updated Gradle/manifest).
-2. **Actions → Flutter APK Build → Run workflow**
-3. Download artifact **`personal-life-os-flutter-apk`**
-4. Uninstall any old Expo build, install this APK
+1. **Actions → Flutter APK Build → Run workflow**
+2. Download artifact **ordin-flutter-apk**
+3. Uninstall any older package ID build if needed, then install the APK
 
-Package ID: `com.personallifeos.personal_life_os`  
-Label: **Personal Life OS**
+Package ID changed from `com.personallifeos.personal_life_os` — Android treats Ordin as a **new app**.
 
 ## Local (optional)
 
 ```bash
 cd apps/flutter
-cp ../../src/db/schema.sql assets/schema.sql
 flutter pub get
 flutter run
 # or
 flutter build apk --release --no-shrink
 ```
-
-`android/local.properties` is gitignored — Flutter/CI set `flutter.sdk` automatically on the runner.
-
-## Tabs
-
-Today · Tasks · Habits · Goals · Notes — all on-device SQLite.
