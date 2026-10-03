@@ -1,7 +1,7 @@
 # Personal Life OS — Remaining work
 
-**Current:** Flutter offline client `0.17.x` · schema v11  
-**Last updated:** Phase 11 + hardening + file picker + reminder lifecycle slice
+**Current:** Flutter offline client `0.18.x` · schema v11  
+**Last updated:** Reminder lifecycle + hide balances + file picker hardening
 
 Keep this list ordered by **impact**. Check items off when merged to `main`.
 
@@ -9,8 +9,8 @@ Keep this list ordered by **impact**. Check items off when merged to `main`.
 
 ## Highest impact (active)
 
-- [x] Reminder lifecycle UI (create → notify → snooze → complete)
-- [ ] Hide balances applied on **all** Finance amounts
+- [x] Reminder lifecycle UI (create → notify → snooze → complete) — **More → Reminders**
+- [x] Hide balances applied on Finance amounts (Settings toggle → masks via `formatMoneyMinor`)
 - [ ] Green APK every time (`flutter analyze` clean + release build)
 - [ ] Milestone + task dependency UX polish (create/complete already partial)
 - [ ] Real branded app icon (replace system drawable)
