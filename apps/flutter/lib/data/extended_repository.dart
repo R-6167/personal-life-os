@@ -15,386 +15,124 @@ class ExtendedRepository {
     return db.query('people', where: 'archived_at IS NULL', orderBy: 'name ASC');
   }
 
-  Future<void> addPerson(String name, {String? phone}) async {
+  Future<String> addPerson(String name, {String? relationship, String? notes}) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
+    final id = AppDatabase.newId();
     await (await _db.database).insert('people', {
-      'id': AppDatabase.newId(),
+      'id': id,
       'owner_id': ownerId,
       'name': name,
-      'phone': phone,
+      'relationship': relationship,
+      'notes': notes,
       'created_at': now,
       'updated_at': now,
     });
-  }
-
-  Future<List<Map<String, Object?>>> listEventsToday() async {
-    final db = await _db.database;
-    final start = AppDatabase.startOfTodayMs();
-    final end = AppDatabase.endOfTodayMs();
-    return db.query(
-      'calendar_events',
-      where: 'start_at <= ? AND end_at >= ? AND status != ?',
-      whereArgs: [end, start, 'CANCELLED'],
-      orderBy: 'start_at ASC',
-    );
+    return id;
   }
 
   Future<List<Map<String, Object?>>> listUpcomingAppointments({int days = 7}) async {
+    final db = await _db.database;
     final now = AppDatabase.nowMs();
     final end = now + Duration(days: days).inMilliseconds;
-    return (await _db.database).query(
+    return db.query(
       'calendar_events',
-      where: 'start_at >= ? AND start_at <= ? AND status != ?',
-      whereArgs: [now, end, 'CANCELLED'],
+      where: 'start_at >= ? AND start_at <= ? AND archived_at IS NULL',
+      whereArgs: [now, end],
       orderBy: 'start_at ASC',
     );
   }
 
-  Future<void> addEvent({required String title, int? hoursFromNow}) async {
-    final ownerId = await _db.requireOwnerId();
-    final now = AppDatabase.nowMs();
-    final start = now + Duration(hours: hoursFromNow ?? 1).inMilliseconds;
-    final end = start + const Duration(hours: 1).inMilliseconds;
-    await _db.txn((txn) async {
-      final id = AppDatabase.newId();
-      await txn.insert('calendar_events', {
-        'id': id,
-        'owner_id': ownerId,
-        'title': title,
-        'start_at': start,
-        'end_at': end,
-        'status': 'SCHEDULED',
-        'created_at': now,
-        'updated_at': now,
-      });
-      await txn.insert('activity_events', {
-        'id': AppDatabase.newId(),
-        'owner_id': ownerId,
-        'event_type': 'EVENT_CREATED',
-        'entity_type': 'CALENDAR_EVENT',
-        'entity_id': id,
-        'occurred_at': now,
-        'recorded_at': now,
-        'source': EventSource.user,
-      });
-    });
-  }
-
-  Future<void> addAppointment({
+  Future<String> addCalendarEvent({
     required String title,
-    required DateTime start,
-    int durationMinutes = 60,
+    required int startAt,
+    int? endAt,
     String? location,
-    String? description,
   }) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
-    final end = start.add(Duration(minutes: durationMinutes));
-    await _db.txn((txn) async {
-      final id = AppDatabase.newId();
-      await txn.insert('calendar_events', {
-        'id': id,
-        'owner_id': ownerId,
-        'title': title,
-        'description': description,
-        'start_at': start.millisecondsSinceEpoch,
-        'end_at': end.millisecondsSinceEpoch,
-        'location': location,
-        'status': 'SCHEDULED',
-        'created_at': now,
-        'updated_at': now,
-      });
-      await txn.insert('activity_events', {
-        'id': AppDatabase.newId(),
-        'owner_id': ownerId,
-        'event_type': 'APPOINTMENT_CREATED',
-        'entity_type': 'CALENDAR_EVENT',
-        'entity_id': id,
-        'occurred_at': now,
-        'recorded_at': now,
-        'source': EventSource.user,
-      });
-    });
-  }
-
-  Future<List<Map<String, Object?>>> listPendingReminders() async {
-    final db = await _db.database;
-    return db.query(
-      'reminders',
-      where: 'status = ?',
-      whereArgs: ['PENDING'],
-      orderBy: 'trigger_at ASC',
-    );
-  }
-
-  Future<void> addReminder(String title, {int daysAhead = 1}) async {
-    final ownerId = await _db.requireOwnerId();
-    final now = AppDatabase.nowMs();
-    final trigger = now + Duration(days: daysAhead).inMilliseconds;
-    await (await _db.database).insert('reminders', {
-      'id': AppDatabase.newId(),
+    final id = AppDatabase.newId();
+    await (await _db.database).insert('calendar_events', {
+      'id': id,
       'owner_id': ownerId,
       'title': title,
-      'trigger_at': trigger,
-      'status': 'PENDING',
+      'start_at': startAt,
+      'end_at': endAt,
+      'location': location,
       'created_at': now,
       'updated_at': now,
     });
-  }
-
-  Future<void> snoozeReminder(String id, {int minutes = 15}) async {
-    final now = AppDatabase.nowMs();
-    final rows = await (await _db.database).query('reminders', where: 'id = ?', whereArgs: [id], limit: 1);
-    if (rows.isEmpty) return;
-    final trigger = (rows.first['trigger_at'] as int? ?? now) + Duration(minutes: minutes).inMilliseconds;
-    final next = now + Duration(minutes: minutes).inMilliseconds;
-    final when = trigger > next ? trigger : next;
-    await (await _db.database).update(
-      'reminders',
-      {'trigger_at': when, 'status': 'PENDING', 'updated_at': now},
-      where: 'id = ?',
-      whereArgs: [id],
-    );
-  }
-
-  Future<void> completeReminder(String id) async {
-    final now = AppDatabase.nowMs();
-    await (await _db.database).update(
-      'reminders',
-      {'status': 'DISMISSED', 'updated_at': now},
-      where: 'id = ?',
-      whereArgs: [id],
-    );
-  }
-
-  Future<void> dismissReminder(String id) async {
-    await completeReminder(id);
-  }
-
-  Future<void> fireReminder(String id) async {
-    final now = AppDatabase.nowMs();
-    await (await _db.database).update(
-      'reminders',
-      {'status': 'FIRED', 'updated_at': now},
-      where: 'id = ?',
-      whereArgs: [id],
-    );
-  }
-
-  Future<void> addReminderAt({
-    required String title,
-    required DateTime triggerAt,
-    String? sourceType,
-    String? sourceId,
-    String? message,
-  }) async {
-    final ownerId = await _db.requireOwnerId();
-    final now = AppDatabase.nowMs();
-    await (await _db.database).insert('reminders', {
-      'id': AppDatabase.newId(),
-      'owner_id': ownerId,
-      'title': title,
-      'message': message,
-      'trigger_at': triggerAt.millisecondsSinceEpoch,
-      'source_type': sourceType,
-      'source_id': sourceId,
-      'status': 'PENDING',
-      'created_at': now,
-      'updated_at': now,
-    });
-  }
-
-  Future<void> addDependency({required String taskId, required String dependsOnTaskId}) async {
-    final now = AppDatabase.nowMs();
-    await (await _db.database).insert('task_dependencies', {
-      'id': AppDatabase.newId(),
-      'task_id': taskId,
-      'depends_on_task_id': dependsOnTaskId,
-      'type': 'BLOCKED_BY',
-      'created_at': now,
-    });
-  }
-
-  Future<List<Map<String, Object?>>> listSubscriptions() async {
-    final db = await _db.database;
-    return db.query('subscriptions', where: 'status = ?', whereArgs: ['ACTIVE'], orderBy: 'next_renewal_at ASC');
-  }
-
-  Future<void> addSubscription(String name, double amountMajor, {int daysToRenewal = 30}) async {
-    final ownerId = await _db.requireOwnerId();
-    final now = AppDatabase.nowMs();
-    await _db.txn((txn) async {
-      final id = AppDatabase.newId();
-      await txn.insert('subscriptions', {
-        'id': id,
-        'owner_id': ownerId,
-        'service_name': name,
-        'amount_minor': (amountMajor * 100).round(),
-        'currency': Defaults.currency,
-        'billing_frequency': 'MONTHLY',
-        'next_renewal_at': now + Duration(days: daysToRenewal).inMilliseconds,
-        'status': 'ACTIVE',
-        'created_at': now,
-        'updated_at': now,
-      });
-      await txn.insert('activity_events', {
-        'id': AppDatabase.newId(),
-        'owner_id': ownerId,
-        'event_type': 'SUBSCRIPTION_CREATED',
-        'entity_type': 'SUBSCRIPTION',
-        'entity_id': id,
-        'occurred_at': now,
-        'recorded_at': now,
-        'source': EventSource.user,
-      });
-    });
+    return id;
   }
 
   Future<List<Map<String, Object?>>> listDebts() async {
     final db = await _db.database;
-    return db.query('debts', where: 'status != ?', whereArgs: ['PAID'], orderBy: 'due_at ASC');
+    return db.query('debts', where: "status = 'OPEN'", orderBy: 'updated_at DESC');
   }
 
-  Future<void> addDebt({required String title, required double amountMajor, required String direction}) async {
+  Future<String> addDebt({
+    required String counterparty,
+    required String direction,
+    required double amountMajor,
+    String? notes,
+  }) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
+    final id = AppDatabase.newId();
     final minor = (amountMajor * 100).round();
-    await _db.txn((txn) async {
-      final id = AppDatabase.newId();
-      await txn.insert('debts', {
-        'id': id,
-        'owner_id': ownerId,
-        'direction': direction,
-        'title': title,
-        'original_amount_minor': minor,
-        'remaining_amount_minor': minor,
-        'currency': Defaults.currency,
-        'status': 'ACTIVE',
-        'created_at': now,
-        'updated_at': now,
-      });
-      await txn.insert('activity_events', {
-        'id': AppDatabase.newId(),
-        'owner_id': ownerId,
-        'event_type': 'DEBT_CREATED',
-        'entity_type': 'DEBT',
-        'entity_id': id,
-        'occurred_at': now,
-        'recorded_at': now,
-        'source': EventSource.user,
-      });
+    await (await _db.database).insert('debts', {
+      'id': id,
+      'owner_id': ownerId,
+      'counterparty': counterparty,
+      'direction': direction,
+      'original_amount_minor': minor,
+      'remaining_amount_minor': minor,
+      'status': 'OPEN',
+      'notes': notes,
+      'created_at': now,
+      'updated_at': now,
     });
+    return id;
   }
 
-  Future<void> payDebt(String debtId, double amountMajor) async {
+  Future<List<Map<String, Object?>>> listSavingsGoals() async {
+    final db = await _db.database;
+    return db.query('savings_goals', where: "status = 'ACTIVE'", orderBy: 'name ASC');
+  }
+
+  Future<String> addSavingsGoal({
+    required String name,
+    required double targetMajor,
+  }) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
-    final minor = (amountMajor * 100).round();
-    final db = await _db.database;
-    final rows = await db.query('debts', where: 'id = ?', whereArgs: [debtId], limit: 1);
-    if (rows.isEmpty) return;
-    final remaining = (rows.first['remaining_amount_minor'] as int) - minor;
-    await _db.txn((txn) async {
-      await txn.insert('debt_payments', {
-        'id': AppDatabase.newId(),
-        'debt_id': debtId,
-        'amount_minor': minor,
-        'currency': Defaults.currency,
-        'paid_at': now,
-        'created_at': now,
-      });
-      await txn.update(
-        'debts',
-        {
-          'remaining_amount_minor': remaining < 0 ? 0 : remaining,
-          'status': remaining <= 0 ? 'PAID' : 'ACTIVE',
-          'updated_at': now,
-        },
-        where: 'id = ?',
-        whereArgs: [debtId],
-      );
-      await txn.insert('activity_events', {
-        'id': AppDatabase.newId(),
-        'owner_id': ownerId,
-        'event_type': 'DEBT_PAYMENT_RECORDED',
-        'entity_type': 'DEBT',
-        'entity_id': debtId,
-        'occurred_at': now,
-        'recorded_at': now,
-        'source': EventSource.user,
-        'metadata': '{"amount":$minor}',
-      });
-    });
-  }
-
-  Future<List<Map<String, Object?>>> listSavings() async {
-    final db = await _db.database;
-    return db.query('savings_goals', where: 'status = ?', whereArgs: ['ACTIVE']);
-  }
-
-  Future<void> addSavingsGoal(String name, double targetMajor) async {
-    final ownerId = await _db.requireOwnerId();
-    final now = AppDatabase.nowMs();
+    final id = AppDatabase.newId();
     await (await _db.database).insert('savings_goals', {
-      'id': AppDatabase.newId(),
+      'id': id,
       'owner_id': ownerId,
       'name': name,
       'target_amount_minor': (targetMajor * 100).round(),
-      'currency': Defaults.currency,
       'current_amount_minor': 0,
       'status': 'ACTIVE',
       'created_at': now,
       'updated_at': now,
     });
-  }
-
-  Future<void> contributeSavings(String goalId, double amountMajor) async {
-    final ownerId = await _db.requireOwnerId();
-    final now = AppDatabase.nowMs();
-    final minor = (amountMajor * 100).round();
-    final db = await _db.database;
-    final rows = await db.query('savings_goals', where: 'id = ?', whereArgs: [goalId], limit: 1);
-    if (rows.isEmpty) return;
-    final current = (rows.first['current_amount_minor'] as int) + minor;
-    await _db.txn((txn) async {
-      await txn.insert('savings_contributions', {
-        'id': AppDatabase.newId(),
-        'savings_goal_id': goalId,
-        'amount_minor': minor,
-        'currency': Defaults.currency,
-        'occurred_at': now,
-        'created_at': now,
-      });
-      await txn.update(
-        'savings_goals',
-        {'current_amount_minor': current, 'updated_at': now},
-        where: 'id = ?',
-        whereArgs: [goalId],
-      );
-      await txn.insert('activity_events', {
-        'id': AppDatabase.newId(),
-        'owner_id': ownerId,
-        'event_type': 'SAVINGS_CONTRIBUTION_RECORDED',
-        'entity_type': 'SAVINGS_GOAL',
-        'entity_id': goalId,
-        'occurred_at': now,
-        'recorded_at': now,
-        'source': EventSource.user,
-      });
-    });
+    return id;
   }
 
   Future<List<Map<String, Object?>>> listPractical() async {
     final db = await _db.database;
-    return db.query('practical_items', where: 'archived_at IS NULL', orderBy: 'due_at ASC');
+    return db.query(
+      'practical_items',
+      where: "status != 'DONE' AND status != 'CANCELLED'",
+      orderBy: 'due_at ASC NULLS LAST',
+    );
   }
 
   Future<void> addPractical(
     String title, {
     String type = 'OTHER',
     DateTime? dueAt,
-    DateTime? expiresAt,
     String? notes,
   }) async {
     final ownerId = await _db.requireOwnerId();
@@ -402,18 +140,21 @@ class ExtendedRepository {
     await (await _db.database).insert('practical_items', {
       'id': AppDatabase.newId(),
       'owner_id': ownerId,
-      'type': type,
       'title': title,
-      'status': 'ACTIVE',
+      'type': type,
       'due_at': dueAt?.millisecondsSinceEpoch,
-      'expires_at': expiresAt?.millisecondsSinceEpoch,
+      'status': 'OPEN',
       'notes': notes,
       'created_at': now,
       'updated_at': now,
     });
   }
 
-  Future<void> addVehicleService({equired String title, DateTime? dueAt, String? notes}) async {
+  Future<void> addVehicleService({
+    required String title,
+    DateTime? dueAt,
+    String? notes,
+  }) async {
     await addPractical(title, type: 'VEHICLE', dueAt: dueAt, notes: notes);
   }
 
@@ -429,7 +170,7 @@ class ExtendedRepository {
 
   Future<List<Map<String, Object?>>> listDocuments() async {
     final db = await _db.database;
-    return db.query('documents', orderBy: 'expires_at ASC');
+    return db.query('documents', orderBy: 'expires_at ASC NULLS LAST');
   }
 
   Future<void> addDocument(
@@ -441,35 +182,22 @@ class ExtendedRepository {
   }) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
-    await _db.txn((txn) async {
-      final id = AppDatabase.newId();
-      await txn.insert('documents', {
-        'id': id,
-        'owner_id': ownerId,
-        'title': title,
-        'document_type': type,
-        'document_number': documentNumber,
-        'issuer': issuer,
-        'expires_at': expiresAt?.millisecondsSinceEpoch,
-        'created_at': now,
-        'updated_at': now,
-      });
-      await txn.insert('activity_events', {
-        'id': AppDatabase.newId(),
-        'owner_id': ownerId,
-        'event_type': 'DOCUMENT_CREATED',
-        'entity_type': 'DOCUMENT',
-        'entity_id': id,
-        'occurred_at': now,
-        'recorded_at': now,
-        'source': EventSource.user,
-      });
+    await (await _db.database).insert('documents', {
+      'id': AppDatabase.newId(),
+      'owner_id': ownerId,
+      'title': title,
+      'type': type,
+      'expires_at': expiresAt?.millisecondsSinceEpoch,
+      'document_number': documentNumber,
+      'issuer': issuer,
+      'created_at': now,
+      'updated_at': now,
     });
   }
 
   Future<List<Map<String, Object?>>> listShoppingLists() async {
     final db = await _db.database;
-    return db.query('shopping_lists', where: 'status != ?', whereArgs: ['COMPLETED']);
+    return db.query('shopping_lists', where: 'archived_at IS NULL', orderBy: 'name ASC');
   }
 
   Future<String> addShoppingList(String name) async {
@@ -480,112 +208,88 @@ class ExtendedRepository {
       'id': id,
       'owner_id': ownerId,
       'name': name,
-      'status': 'ACTIVE',
       'created_at': now,
+      'updated_at': now,
     });
     return id;
   }
 
   Future<void> addShoppingItem(String listId, String name) async {
+    final now = AppDatabase.nowMs();
     await (await _db.database).insert('shopping_items', {
       'id': AppDatabase.newId(),
-      'shopping_list_id': listId,
+      'list_id': listId,
       'name': name,
-      'purchased': 0,
+      'is_done': 0,
+      'created_at': now,
+      'updated_at': now,
     });
   }
 
   Future<List<Map<String, Object?>>> listShoppingItems(String listId) async {
     return (await _db.database).query(
       'shopping_items',
-      where: 'shopping_list_id = ?',
+      where: 'list_id = ?',
       whereArgs: [listId],
-      orderBy: 'purchased ASC, name ASC',
+      orderBy: 'is_done ASC, name ASC',
     );
   }
 
-  Future<void> toggleShoppingItem(String itemId, bool purchased) async {
-    await (await _db.database).update(
-      'shopping_items',
-      {
-        'purchased': purchased ? 1 : 0,
-        'purchased_at': purchased ? AppDatabase.nowMs() : null,
-      },
-      where: 'id = ?',
-      whereArgs: [itemId],
+  Future<List<Map<String, Object?>>> listPendingReminders() async {
+    final db = await _db.database;
+    return db.query(
+      'reminders',
+      where: "status = 'PENDING'",
+      orderBy: 'trigger_at ASC',
     );
   }
 
-  Future<void> completeShoppingList(String listId) async {
+  Future<void> completeReminder(String id) async {
     final now = AppDatabase.nowMs();
     await (await _db.database).update(
-      'shopping_lists',
-      {'status': 'COMPLETED', 'completed_at': now},
+      'reminders',
+      {'status': 'COMPLETED', 'updated_at': now},
       where: 'id = ?',
-      whereArgs: [listId],
+      whereArgs: [id],
     );
   }
 
-  Future<List<Map<String, String>>> search(String query) async {
-    if (query.trim().isEmpty) return [];
-    final q = '%${query.trim()}%';
-    final db = await _db.database;
-    final results = <Map<String, String>>[];
-
-    Future<void> scan(String table, String titleCol, String type) async {
-      try {
-        final rows = await db.query(table, where: '$titleCol LIKE ?', whereArgs: [q], limit: 10);
-        for (final r in rows) {
-          results.add({'type': type, 'title': '${r[titleCol]}', 'id': '${r['id']}'});
-        }
-      } catch (_) {}
-    }
-
-    await scan('tasks', 'title', 'TASK');
-    await scan('projects', 'title', 'PROJECT');
-    await scan('goals', 'title', 'GOAL');
-    await scan('notes', 'content', 'NOTE');
-    await scan('bills', 'name', 'BILL');
-    await scan('people', 'name', 'PERSON');
-    await scan('expenses', 'description', 'EXPENSE');
-    await scan('habits', 'title', 'HABIT');
-    await scan('routines', 'name', 'ROUTINE');
-    await scan('documents', 'title', 'DOCUMENT');
-    await scan('practical_items', 'title', 'PRACTICAL');
-    return results;
+  Future<void> snoozeReminder(String id, {int minutes = 30}) async {
+    final now = AppDatabase.nowMs();
+    final rows = await (await _db.database).query('reminders', where: 'id = ?', whereArgs: [id], limit: 1);
+    if (rows.isEmpty) return;
+    final trigger = (rows.first['trigger_at'] as int?) ?? now;
+    final next = (trigger < now ? now : trigger) + minutes * 60 * 1000;
+    await (await _db.database).update(
+      'reminders',
+      {'trigger_at': next, 'status': 'PENDING', 'updated_at': now},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
-  Future<int> importBackupJson(String jsonStr) async {
-    final decoded = jsonDecode(jsonStr);
-    if (decoded is! Map) return 0;
-    final map = Map<String, dynamic>.from(decoded);
-    var count = 0;
-    final tables = [
-      'goals', 'projects', 'tasks', 'habits', 'notes', 'bills', 'expenses', 'income',
-      'people', 'routines', 'subscriptions', 'debts', 'savings_goals', 'practical_items',
-    ];
-    await _db.txn((txn) async {
-      for (final table in tables) {
-        final rows = map[table];
-        if (rows is! List) continue;
-        for (final row in rows) {
-          if (row is! Map) continue;
-          final snake = <String, Object?>{};
-          row.forEach((k, v) {
-            snake[_toSnake('$k')] = v;
-          });
-          if (snake['id'] == null) continue;
-          try {
-            await txn.insert(table, snake, conflictAlgorithm: ConflictAlgorithm.ignore);
-            count++;
-          } catch (_) {}
-        }
-      }
+  Future<String> addReminder({
+    required String title,
+    required int triggerAt,
+    String? message,
+    String? sourceType,
+    String? sourceId,
+  }) async {
+    final ownerId = await _db.requireOwnerId();
+    final now = AppDatabase.nowMs();
+    final id = AppDatabase.newId();
+    await (await _db.database).insert('reminders', {
+      'id': id,
+      'owner_id': ownerId,
+      'title': title,
+      'message': message,
+      'trigger_at': triggerAt,
+      'source_type': sourceType,
+      'source_id': sourceId,
+      'status': 'PENDING',
+      'created_at': now,
+      'updated_at': now,
     });
-    return count;
-  }
-
-  String _toSnake(String camel) {
-    return camel.replaceAllMapped(RegExp(r'[A-Z]'), (m) => '_${m.group(0)!.toLowerCase()}');
+    return id;
   }
 }
