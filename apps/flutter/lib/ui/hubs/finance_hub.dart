@@ -8,6 +8,7 @@ import '../../data/extended_repository.dart';
 import '../../domain/enums.dart';
 import '../../domain/models.dart';
 import '../../services/finance_service.dart';
+import '../../utils/soft_future.dart';
 import '../forms/create_forms.dart';
 import '../screens/budgets_screen.dart';
 import '../theme.dart';
@@ -53,14 +54,46 @@ class _FinanceHubState extends State<FinanceHub> {
   }
 
   Future<void> _loadExtra() async {
-    await BillRepository(AppDatabase.instance).refreshOccurrenceStatuses();
-    final accounts = await AccountRepository(AppDatabase.instance).list();
-    final debts = await ExtendedRepository(AppDatabase.instance).listDebts();
-    final subs = await ExtendedRepository(AppDatabase.instance).listSubscriptions();
-    final savings = await ExtendedRepository(AppDatabase.instance).listSavings();
-    final cash = await _finance.cashFlowThisMonth();
-    final ledger = await _finance.ledger(limit: 20);
-    final budgetAlerts = await BudgetRepository(AppDatabase.instance).alerts();
+    await softFuture(
+      () => BillRepository(AppDatabase.instance).refreshOccurrenceStatuses(),
+      null,
+      label: 'finance.bills.refresh',
+    );
+    final accounts = await softFuture(
+      () => AccountRepository(AppDatabase.instance).list(),
+      <Map<String, Object?>>[],
+      label: 'finance.accounts',
+    );
+    final debts = await softFuture(
+      () => ExtendedRepository(AppDatabase.instance).listDebts(),
+      <Map<String, Object?>>[],
+      label: 'finance.debts',
+    );
+    final subs = await softFuture(
+      () => ExtendedRepository(AppDatabase.instance).listSubscriptions(),
+      <Map<String, Object?>>[],
+      label: 'finance.subs',
+    );
+    final savings = await softFuture(
+      () => ExtendedRepository(AppDatabase.instance).listSavings(),
+      <Map<String, Object?>>[],
+      label: 'finance.savings',
+    );
+    final cash = await softFuture(
+      () => _finance.cashFlowThisMonth(),
+      <String, Object?>{},
+      label: 'finance.cash',
+    );
+    final ledger = await softFuture(
+      () => _finance.ledger(limit: 20),
+      <Map<String, Object?>>[],
+      label: 'finance.ledger',
+    );
+    final budgetAlerts = await softFuture(
+      () => BudgetRepository(AppDatabase.instance).alerts(),
+      <BudgetStatus>[],
+      label: 'finance.budgets',
+    );
     if (!mounted) return;
     setState(() {
       _accounts = accounts;
@@ -458,14 +491,13 @@ class _FinanceHubState extends State<FinanceHub> {
                 child: GlassCard(
                   child: ListTile(
                     title: Text(o.billName ?? 'Bill', style: const TextStyle(color: AppTheme.silver)),
-                    subtitle: Text(
-                      o.expectedAmountMinor == null
-                          ? o.status
-                          : '${_money(o.expectedAmountMinor)} · ${o.status}',
-                      style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45), fontSize: 12),
-                    ),
                     trailing: FilledButton(
-                      onPressed: widget.onPayBill == null ? null : () => widget.onPayBill!(o),
+                      onPressed: () async {
+                        if (widget.onPayBill != null) {
+                          await widget.onPayBill!(o);
+                        }
+                        await _refresh();
+                      },
                       child: const Text('Pay'),
                     ),
                   ),
@@ -473,17 +505,15 @@ class _FinanceHubState extends State<FinanceHub> {
               )),
         _hdr('Debts', _addDebt),
         if (_debts.isEmpty)
-          Text('None', style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.35)))
+          Text('No open debts', style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.35)))
         else
           ..._debts.map((d) => Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: GlassCard(
                   child: ListTile(
                     title: Text('${d['title']}', style: const TextStyle(color: AppTheme.silver)),
-                    subtitle: Text('${d['direction']}',
-                        style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11)),
-                    trailing: Text(_money(d['remaining_amount_minor']),
-                        style: const TextStyle(color: AppTheme.amber)),
+                    subtitle: Text('${d['direction']}', style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11)),
+                    trailing: Text(_money(d['remaining_amount_minor']), style: const TextStyle(color: AppTheme.amber)),
                   ),
                 ),
               )),
@@ -495,7 +525,7 @@ class _FinanceHubState extends State<FinanceHub> {
                 padding: const EdgeInsets.only(bottom: 8),
                 child: GlassCard(
                   child: ListTile(
-                    title: Text('${s['service_name']}', style: const TextStyle(color: AppTheme.silver)),
+                    title: Text('${s['service_name'] ?? s['name']}', style: const TextStyle(color: AppTheme.silver)),
                     trailing: Text(_money(s['amount_minor']), style: const TextStyle(color: AppTheme.amber)),
                   ),
                 ),
@@ -511,54 +541,24 @@ class _FinanceHubState extends State<FinanceHub> {
                     title: Text('${s['name']}', style: const TextStyle(color: AppTheme.silver)),
                     subtitle: Text(
                       '${_money(s['current_amount_minor'])} / ${_money(s['target_amount_minor'])}',
-                      style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45), fontSize: 12),
+                      style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11),
                     ),
                   ),
                 ),
               )),
-        const Padding(
-          padding: EdgeInsets.only(top: 16, bottom: 8),
-          child: Text('Recent ledger', style: TextStyle(color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
-        ),
+        const SizedBox(height: 16),
+        const Text('Recent', style: TextStyle(color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
         if (_ledger.isEmpty)
           Text('No movements yet', style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.35)))
         else
           ..._ledger.map((row) => Padding(
                 padding: const EdgeInsets.only(bottom: 6),
                 child: GlassCard(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text('${row['label'] ?? row['kind']}',
-                            style: const TextStyle(color: AppTheme.silver, fontSize: 13)),
-                      ),
-                      Text(_money(row['amount_minor']),
-                          style: const TextStyle(color: AppTheme.amber, fontSize: 13)),
-                    ],
-                  ),
-                ),
-              )),
-        const Padding(
-          padding: EdgeInsets.only(top: 16, bottom: 8),
-          child: Text('Recent expenses', style: TextStyle(color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
-        ),
-        if (widget.expenses.isEmpty)
-          Text('None', style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.35)))
-        else
-          ...widget.expenses.take(12).map((e) => Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: GlassCard(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(e.description,
-                            style: const TextStyle(color: AppTheme.silver, fontSize: 13)),
-                      ),
-                      Text(_money(e.amountMinor),
-                          style: const TextStyle(color: AppTheme.amber, fontSize: 13)),
-                    ],
+                  child: ListTile(
+                    dense: true,
+                    title: Text('${row['title']}', style: const TextStyle(color: AppTheme.silver)),
+                    subtitle: Text('${row['kind']}', style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11)),
+                    trailing: Text(_money(row['amount_minor']), style: const TextStyle(color: AppTheme.amber)),
                   ),
                 ),
               )),
