@@ -1,7 +1,7 @@
 # Personal Life OS — Remaining work
 
-**Current:** Flutter offline client `0.18.1` · schema v11  
-**Last updated:** User-defined currency (UserPrefs) + reminder lifecycle
+**Current:** Flutter offline client `0.19.0` · schema v19  
+**Last updated:** Phase 2 Planning Engine
 
 Keep this list ordered by **impact**. Check items off when merged to `main`.
 
@@ -12,6 +12,7 @@ Keep this list ordered by **impact**. Check items off when merged to `main`.
 - [x] Reminder lifecycle UI (create → notify → snooze → complete) — **More → Reminders**
 - [x] Hide balances applied on Finance amounts
 - [x] **User currency** — Settings currency drives all new amounts / UI (not hardcoded KES)
+- [x] Phase 2 planning engine (busy merge, deps, duration, Build My Day apply)
 - [ ] Green APK every time (`flutter analyze` clean + release build)
 - [ ] Milestone + task dependency UX polish (create/complete already partial)
 - [ ] Real branded app icon (replace system drawable)
@@ -44,4 +45,15 @@ Keep this list ordered by **impact**. Check items off when merged to `main`.
 
 ---
 
-When picking “next,” take the first unchecked item under **Highest impact**.
+## Phase 2 — Planning Engine (2026-10-03)
+
+- [x] Busy intervals merged (blocks + calendar + scheduled tasks)
+- [x] `collectDayBusy` shared by availableMinutes + suggestSlots
+- [x] Slot suggestions respect duration against free gaps
+- [x] Dependencies block scheduling (`listBlockedTaskIds`)
+- [x] Task duration (estimate) drives fit (15–180 min)
+- [x] Atomic schedule/reschedule (task + block + history)
+- [x] Build My Day apply skips blocked tasks; sorts by score
+- [x] `listDueToday` / `listScheduledOnDay` restored on TaskRepository
+
+Still open: notification deep-link, adaptive routines, cash-flow UI.
