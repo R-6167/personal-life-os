@@ -15,7 +15,7 @@ import '../widgets/glass.dart';
 import 'project_detail_screen.dart';
 import 'task_detail_screen.dart';
 
-/// Memory layer: note body + links to life entities + extract tasks.
+/// Memory layer: note body + links to life entities + extract tasks + AI mentions.
 class NoteDetailScreen extends StatefulWidget {
   const NoteDetailScreen({super.key, required this.noteId});
 
@@ -28,8 +28,11 @@ class NoteDetailScreen extends StatefulWidget {
 class _NoteDetailScreenState extends State<NoteDetailScreen> {
   Note? _note;
   final List<_ResolvedLink> _links = [];
+  List<LinkSuggestion> _suggestions = [];
+  final Set<String> _pickedSuggestions = {};
   bool _loading = true;
   bool _editing = false;
+  bool _scanning = false;
   late TextEditingController _content;
   late TextEditingController _title;
 
@@ -79,6 +82,43 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
       }
       _loading = false;
     });
+    if (n != null) {
+      await _scanMentions(content: n.content, title: n.title);
+    }
+  }
+
+  Future<void> _scanMentions({required String content, String? title}) async {
+    setState(() => _scanning = true);
+    final suggestions = await NoteIntelligence().suggestLinks(
+      noteId: widget.noteId,
+      content: content,
+      title: title,
+    );
+    if (!mounted) return;
+    setState(() {
+      _suggestions = suggestions;
+      _pickedSuggestions
+        ..clear()
+        ..addAll(suggestions.where((s) => s.score >= 0.85).map((s) => '${s.entityType}:${s.entityId}'));
+      _scanning = false;
+    });
+  }
+
+  Future<void> _applyPickedSuggestions() async {
+    final chosen = _suggestions
+        .where((s) => _pickedSuggestions.contains('${s.entityType}:${s.entityId}'))
+        .toList();
+    if (chosen.isEmpty) return;
+    final n = await NoteIntelligence().applyLinkSuggestions(
+      noteId: widget.noteId,
+      suggestions: chosen,
+    );
+    await _load();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Linked $n mention${n == 1 ? '' : 's'}')),
+      );
+    }
   }
 
   Future<void> _save() async {
@@ -89,6 +129,13 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
       content: _content.text.trim(),
     );
     setState(() => _editing = false);
+    try {
+      await NoteIntelligence().autoLinkStrongMentions(
+        noteId: widget.noteId,
+        content: _content.text.trim(),
+        title: _title.text.trim().isEmpty ? null : _title.text.trim(),
+      );
+    } catch (_) {}
     await _load();
   }
 
@@ -193,39 +240,27 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
     final db = AppDatabase.instance;
     switch (type) {
       case 'TASK':
-        return [
-          for (final t in await TaskRepository(db).listOpen())
-            {'id': t.id, 'label': t.title},
-        ];
+        return [for (final t in await TaskRepository(db).listOpen()) {'id': t.id, 'label': t.title}];
       case 'PROJECT':
-        return [
-          for (final p in await ProjectRepository(db).listActive())
-            {'id': p.id, 'label': p.title},
-        ];
+        return [for (final p in await ProjectRepository(db).listActive()) {'id': p.id, 'label': p.title}];
       case 'GOAL':
-        return [
-          for (final g in await GoalRepository(db).listActive())
-            {'id': g.id, 'label': g.title},
-        ];
+        return [for (final g in await GoalRepository(db).listActive()) {'id': g.id, 'label': g.title}];
       case 'PERSON':
         return [
           for (final p in await ExtendedRepository(db).listPeople())
-            {'id': '${p['id']}', 'label': '${p['name']}'},
+            {'id': '${p['id']}', 'label': '${p['name']}'}
         ];
       case 'EVENT':
         return [
           for (final e in await ExtendedRepository(db).listUpcomingAppointments(days: 60))
-            {'id': '${e['id']}', 'label': '${e['title']}'},
+            {'id': '${e['id']}', 'label': '${e['title']}'}
         ];
       case 'BILL':
-        return [
-          for (final b in await BillRepository(db).listActive())
-            {'id': b.id, 'label': b.name},
-        ];
+        return [for (final b in await BillRepository(db).listActive()) {'id': b.id, 'label': b.name}];
       case 'PRACTICAL':
         return [
           for (final p in await ExtendedRepository(db).listPractical())
-            {'id': '${p['id']}', 'label': '${p['title']}'},
+            {'id': '${p['id']}', 'label': '${p['title']}'}
         ];
       case 'HABIT':
         final rows = await (await db.database).query(
@@ -233,9 +268,7 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
           where: "status = 'ACTIVE'",
           orderBy: 'title ASC',
         );
-        return [
-          for (final h in rows) {'id': '${h['id']}', 'label': '${h['title']}'},
-        ];
+        return [for (final h in rows) {'id': '${h['id']}', 'label': '${h['title']}'}];
       default:
         return [];
     }
@@ -304,7 +337,6 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
     );
     if (ok != true || selected.isEmpty) return;
 
-    // Prefer project already linked to this note
     String? projectId;
     String? goalId;
     for (final l in _links) {
@@ -383,6 +415,15 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
               IconButton(icon: const Icon(Icons.check), onPressed: _save)
             else ...[
               IconButton(
+                tooltip: 'Suggest links from text',
+                icon: const Icon(Icons.auto_awesome),
+                onPressed: () async {
+                  final note = _note;
+                  if (note == null) return;
+                  await _scanMentions(content: note.content, title: note.title);
+                },
+              ),
+              IconButton(
                 tooltip: 'Turn into tasks',
                 icon: const Icon(Icons.playlist_add_check),
                 onPressed: _extractTasks,
@@ -413,7 +454,7 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
                 decoration: const InputDecoration(
                   labelText: 'Note',
                   alignLabelWithHint: true,
-                  hintText: 'Meeting notes, ideas…\n- action item\nTODO: follow up',
+                  hintText: 'Mention Project Alpha, @Amina, electricity bill…',
                 ),
               ),
             ] else ...[
@@ -425,6 +466,62 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
               ),
             ],
             const SizedBox(height: 20),
+            if (_scanning)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 12),
+                child: LinearProgressIndicator(color: AppTheme.amber, minHeight: 2),
+              ),
+            if (_suggestions.isNotEmpty) ...[
+              Row(
+                children: [
+                  const Icon(Icons.auto_awesome, color: AppTheme.amber, size: 18),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Suggested links',
+                      style: TextStyle(color: AppTheme.woodLight, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _applyPickedSuggestions,
+                    child: const Text('Link selected'),
+                  ),
+                ],
+              ),
+              Text(
+                'Ordin found names in this note that match your life data.',
+                style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _suggestions.map((s) {
+                  final key = '${s.entityType}:${s.entityId}';
+                  final selected = _pickedSuggestions.contains(key);
+                  return FilterChip(
+                    selected: selected,
+                    label: Text('${s.entityType}: ${s.label}'),
+                    selectedColor: AppTheme.amber.withValues(alpha: 0.25),
+                    checkmarkColor: AppTheme.amber,
+                    labelStyle: TextStyle(
+                      color: selected ? AppTheme.silver : AppTheme.silver.withValues(alpha: 0.7),
+                      fontSize: 12,
+                    ),
+                    onSelected: (v) {
+                      setState(() {
+                        if (v) {
+                          _pickedSuggestions.add(key);
+                        } else {
+                          _pickedSuggestions.remove(key);
+                        }
+                      });
+                    },
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 16),
+            ],
             Row(
               children: [
                 const Expanded(
@@ -447,7 +544,7 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
             const SizedBox(height: 8),
             if (_links.isEmpty)
               Text(
-                'Not linked yet — connect this note so it becomes memory around real work.',
+                'Not linked yet — write entity names in the note, or link manually.',
                 style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.35)),
               )
             else
@@ -466,8 +563,8 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
                             color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11),
                       ),
                       trailing: IconButton(
-                        icon: Icon(Icons.close, size: 18,
-                            color: AppTheme.silver.withValues(alpha: 0.35)),
+                        icon: Icon(Icons.close,
+                            size: 18, color: AppTheme.silver.withValues(alpha: 0.35)),
                         onPressed: () async {
                           await LinkRepository(AppDatabase.instance).unlink(l.linkId);
                           await _load();
