@@ -1,5 +1,6 @@
 import '../domain/enums.dart';
 import '../domain/models.dart';
+import '../services/domain_recurrence.dart';
 import '../services/recurrence_engine.dart';
 import 'database.dart';
 
@@ -8,8 +9,7 @@ class BillRepository {
   final AppDatabase _db;
 
   static bool isRecurring(String frequency) {
-    final f = frequency.toUpperCase();
-    return f != 'ONCE' && f != 'ONE_TIME' && f != 'NONE' && f.isNotEmpty;
+    return DomainRecurrence.isRecurringFrequency(frequency);
   }
 
   Future<List<Bill>> listActive() async {
@@ -152,12 +152,18 @@ class BillRepository {
       whereArgs: [occ.billId],
       limit: 1,
     );
-    final frequency =
-        billRows.isEmpty ? 'MONTHLY' : (billRows.first['frequency'] as String? ?? 'MONTHLY');
-    final defaultAccount = accountId ??
-        (billRows.isEmpty ? null : billRows.first['default_account_id'] as String?);
-    final recurring = isRecurring(frequency);
-    final nextDue = recurring ? RecurrenceEngine.nextAfter(occ.dueAt, frequency: frequency) : null;
+    final billRow = billRows.isEmpty ? <String, Object?>{} : billRows.first;
+    final frequency = billRow['frequency'] as String? ?? 'MONTHLY';
+    final defaultAccount = accountId ?? (billRow['default_account_id'] as String?);
+    final recurring = DomainRecurrence.isRecurringFrequency(frequency);
+    int? nextDue;
+    if (recurring) {
+      final rule = DomainRecurrence.ruleFromScheduleMap(
+        billRow,
+        fallbackStart: DateTime.fromMillisecondsSinceEpoch(occ.dueAt),
+      );
+      nextDue = DomainRecurrence.nextAfterMs(rule, occ.dueAt);
+    }
 
     await _db.txn((txn) async {
       await txn.insert('expenses', {
@@ -233,7 +239,6 @@ class BillRepository {
           'updated_at': now,
         });
       } else {
-        // One-off: clear next_due so it leaves open lists after pay
         await txn.update(
           'bills',
           {'next_due_at': null, 'updated_at': now},
