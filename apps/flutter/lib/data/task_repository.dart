@@ -1,5 +1,6 @@
 import '../domain/enums.dart';
 import '../domain/models.dart';
+import '../services/domain_recurrence.dart';
 import '../services/recurrence_engine.dart';
 import 'database.dart';
 
@@ -326,23 +327,7 @@ class TaskRepository {
   Future<RecurrenceRule?> getRecurrenceRule(String taskId) async {
     final row = await getRecurrence(taskId);
     if (row == null) return null;
-    final interval = (row['interval'] as int?) ?? (row['interval_n'] as int?) ?? 1;
-    final untilMs = row['until_at'] as int? ?? row['end_at'] as int?;
-    final startMs = row['start_date'] as int?;
-    final monthCsv = row['by_month_days'] as String?;
-    int? monthDay;
-    if (monthCsv != null && monthCsv.trim().isNotEmpty) {
-      monthDay = int.tryParse(monthCsv.split(',').first.trim());
-    }
-    return RecurrenceRule.fromLegacy(
-      frequency: '${row['frequency'] ?? 'DAILY'}',
-      interval: interval,
-      dtStart: startMs == null ? DateTime.now() : DateTime.fromMillisecondsSinceEpoch(startMs),
-      until: untilMs == null ? null : DateTime.fromMillisecondsSinceEpoch(untilMs),
-      count: row['count'] as int?,
-      daysOfWeekCsv: row['days_of_week'] as String?,
-      monthDay: monthDay,
-    );
+    return DomainRecurrence.ruleFromScheduleMap(row);
   }
 
   Future<Task?> spawnNextOccurrence(String completedTaskId) async {
