@@ -30,6 +30,58 @@ class TaskRepository {
     return rows.map(Task.fromMap).toList();
   }
 
+  Future<List<Task>> listDueToday() async {
+    final start = AppDatabase.startOfTodayMs();
+    final end = AppDatabase.endOfTodayMs();
+    final db = await _db.database;
+    final rows = await db.query(
+      'tasks',
+      where:
+          'due_at IS NOT NULL AND due_at >= ? AND due_at <= ? AND status NOT IN (?, ?) AND archived_at IS NULL',
+      whereArgs: [start, end, EntityStatus.completed, EntityStatus.cancelled],
+      orderBy: 'priority DESC, due_at ASC',
+    );
+    return rows.map(Task.fromMap).toList();
+  }
+
+  Future<List<Task>> listScheduledOnDay(DateTime day) async {
+    final start = DateTime(day.year, day.month, day.day).millisecondsSinceEpoch;
+    final end = start + const Duration(days: 1).inMilliseconds - 1;
+    final db = await _db.database;
+    final rows = await db.query(
+      'tasks',
+      where:
+          'scheduled_start IS NOT NULL AND scheduled_start <= ? AND '
+          '(scheduled_end IS NULL OR scheduled_end >= ?) AND '
+          'status NOT IN (?, ?) AND archived_at IS NULL',
+      whereArgs: [end, start, EntityStatus.completed, EntityStatus.cancelled],
+      orderBy: 'scheduled_start ASC',
+    );
+    return rows.map(Task.fromMap).toList();
+  }
+
+  /// Tasks that still depend on incomplete work — not schedulable yet.
+  Future<Set<String>> listBlockedTaskIds() async {
+    final db = await _db.database;
+    try {
+      final rows = await db.rawQuery(
+        'SELECT DISTINCT d.task_id AS id '
+        'FROM task_dependencies d '
+        'INNER JOIN tasks dep ON dep.id = d.depends_on_task_id '
+        'WHERE dep.status NOT IN (?, ?) AND dep.archived_at IS NULL',
+        [EntityStatus.completed, EntityStatus.cancelled],
+      );
+      return rows.map((r) => r['id'] as String).toSet();
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<bool> isBlocked(String taskId) async {
+    final blocked = await listBlockedTaskIds();
+    return blocked.contains(taskId);
+  }
+
   Future<List<Task>> listByProject(String projectId) async {
     final rows = await (await _db.database).query(
       'tasks',
