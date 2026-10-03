@@ -2,27 +2,61 @@ import 'dart:convert';
 
 import 'package:sqflite/sqflite.dart';
 
-import 'database.dart';
+import '../services/error_log_service.dart';
 import '../services/integrity_service.dart';
+import 'database.dart';
 
 class ExportService {
   ExportService(this._db);
   final AppDatabase _db;
 
+  /// Parent-first order so FK children insert after parents exist.
   static const tables = [
-    'users', 'categories', 'people', 'goals', 'projects', 'milestones', 'tasks',
-    'task_dependencies', 'task_recurrences', 'habits', 'habit_schedules', 'habit_occurrences',
-    'routines', 'routine_steps', 'routine_schedules', 'routine_occurrences',
-    'calendar_events', 'time_blocks', 'reminders', 'notes', 'entity_links',
-    'financial_accounts', 'income', 'expenses', 'bills', 'bill_occurrences',
-    'subscriptions', 'debts', 'debt_payments', 'savings_goals', 'savings_contributions',
-    'practical_items', 'documents', 'shopping_lists', 'shopping_items',
-    'wellness_checkins', 'health_metrics', 'goal_reflections', 'budgets',
-    'app_usage_events', 'error_logs', 'feedback_items',
+    'users',
+    'categories',
+    'people',
+    'goals',
+    'projects',
+    'milestones',
+    'tasks',
+    'task_dependencies',
+    'task_recurrences',
+    'habits',
+    'habit_schedules',
+    'habit_occurrences',
+    'routines',
+    'routine_steps',
+    'routine_schedules',
+    'routine_occurrences',
+    'calendar_events',
+    'time_blocks',
+    'reminders',
+    'notes',
+    'entity_links',
+    'financial_accounts',
+    'income',
+    'expenses',
+    'bills',
+    'bill_occurrences',
+    'subscriptions',
+    'debts',
+    'debt_payments',
+    'savings_goals',
+    'savings_contributions',
+    'practical_items',
+    'documents',
+    'shopping_lists',
+    'shopping_items',
+    'wellness_checkins',
+    'health_metrics',
+    'goal_reflections',
+    'budgets',
+    'app_usage_events',
+    'error_logs',
+    'feedback_items',
     'activity_events',
   ];
 
-  /// Hard limit on decoded backup text size (chars).
   static const maxRawChars = 30 * 1024 * 1024;
 
   Future<String> buildBackupJson() async {
@@ -37,7 +71,12 @@ class ExportService {
       try {
         final rows = await db.query(t);
         data[t] = rows.map(_camel).toList();
-      } catch (_) {
+      } catch (e, st) {
+        await ErrorLogService.instance.log(
+          message: 'export table $t: $e',
+          stack: st.toString(),
+          level: 'EXPORT',
+        );
         data[t] = [];
       }
     }
@@ -68,20 +107,18 @@ class ExportService {
     }
     final map = Map<String, dynamic>.from(decoded);
 
-    // Reject non-PLOS payloads that happen to be JSON objects.
     final app = map['app']?.toString();
     if (app != null && app != 'personal-life-os') {
-      return ImportResult(
-        ok: false,
-        message: 'Unrecognized backup app tag: $app',
-      );
+      return ImportResult(ok: false, message: 'Unrecognized backup app tag: $app');
     }
 
     final inserted = <String, int>{};
     var total = 0;
     var skipped = 0;
+    var fkSkipped = 0;
 
-    await _db.txn((txn) async {
+    // Two passes: parents first (tables list order), then retry children once.
+    Future<void> pass(Transaction txn, {required bool retry}) async {
       for (final table in tables) {
         if (table == 'users' && !replaceUsers) continue;
         final rows = map[table] ?? map[_toCamel(table)];
@@ -89,7 +126,7 @@ class ExportService {
         var n = 0;
         for (final row in rows) {
           if (row is! Map) {
-            skipped++;
+            if (!retry) skipped++;
             continue;
           }
           final snake = <String, Object?>{};
@@ -100,44 +137,53 @@ class ExportService {
               snake[key] = sanitized;
             }
           });
-          if (snake['id'] == null) {
-            skipped++;
-            continue;
-          }
-          // id must be a short non-empty string
           final id = snake['id'];
           if (id is! String || id.isEmpty || id.length > 80) {
-            skipped++;
+            if (!retry) skipped++;
             continue;
           }
           try {
-            await txn.insert(table, snake, conflictAlgorithm: ConflictAlgorithm.ignore);
-            n++;
-          } catch (_) {
-            skipped++;
+            final c = await txn.insert(table, snake, conflictAlgorithm: ConflictAlgorithm.ignore);
+            if (c > 0) n++;
+          } catch (e) {
+            if (retry) {
+              fkSkipped++;
+              await ErrorLogService.instance.log(
+                message: 'import $table/$id: $e',
+                level: 'IMPORT',
+              );
+            }
           }
         }
         if (n > 0) {
-          inserted[table] = n;
+          inserted[table] = (inserted[table] ?? 0) + n;
           total += n;
         }
       }
+    }
+
+    await _db.txn((txn) async {
+      await pass(txn, retry: false);
+      await pass(txn, retry: true);
     });
 
     final report = await IntegrityService(db: _db).run(repair: true);
 
-    final skipNote = skipped > 0 ? ' Skipped $skipped invalid rows.' : '';
+    final notes = <String>[];
+    if (skipped > 0) notes.add('Skipped $skipped invalid rows');
+    if (fkSkipped > 0) notes.add('FK-skipped $fkSkipped');
+    final note = notes.isEmpty ? '' : ' ${notes.join('; ')}.';
+
     return ImportResult(
       ok: true,
       message: total == 0
-          ? 'No new rows imported (may already exist). Integrity: ${report.checks.length} checks.$skipNote'
-          : 'Imported $total rows across ${inserted.length} tables. Integrity fixed ${report.fixed}.$skipNote',
+          ? 'No new rows imported (may already exist). Integrity checks: ${report.checks.length}.$note'
+          : 'Imported $total rows across ${inserted.length} tables. Integrity fixed ${report.fixed}.$note',
       inserted: inserted,
       total: total,
     );
   }
 
-  /// Only allow primitives SQLite can store safely.
   Object? _sanitizeValue(Object? v) {
     if (v == null) return null;
     if (v is bool) return v ? 1 : 0;
@@ -147,10 +193,8 @@ class ExportService {
       return v;
     }
     if (v is String) {
-      // Cap pathological strings
       return v.length > 50000 ? v.substring(0, 50000) : v;
     }
-    // Nested objects/arrays not supported in column cells
     return null;
   }
 

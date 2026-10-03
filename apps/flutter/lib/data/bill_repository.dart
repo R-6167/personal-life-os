@@ -7,6 +7,11 @@ class BillRepository {
   BillRepository(this._db);
   final AppDatabase _db;
 
+  static bool isRecurring(String frequency) {
+    final f = frequency.toUpperCase();
+    return f != 'ONCE' && f != 'ONE_TIME' && f != 'NONE' && f.isNotEmpty;
+  }
+
   Future<List<Bill>> listActive() async {
     final db = await _db.database;
     final rows = await db.query(
@@ -38,11 +43,11 @@ class BillRepository {
     final now = AppDatabase.nowMs();
     final db = await _db.database;
     await db.rawUpdate(
-      "UPDATE bill_occurrences SET status = ?, updated_at = ? WHERE status = ? AND due_at < ?",
+      'UPDATE bill_occurrences SET status = ?, updated_at = ? WHERE status = ? AND due_at < ?',
       [BillOccurrenceStatus.overdue, now, BillOccurrenceStatus.upcoming, now],
     );
     await db.rawUpdate(
-      "UPDATE bill_occurrences SET status = ?, updated_at = ? WHERE status = ? AND due_at <= ? AND due_at >= ?",
+      'UPDATE bill_occurrences SET status = ?, updated_at = ? WHERE status = ? AND due_at <= ? AND due_at >= ?',
       [
         BillOccurrenceStatus.due,
         now,
@@ -127,11 +132,7 @@ class BillRepository {
     );
   }
 
-  int _nextDueMs(int fromMs, String frequency) {
-    return RecurrenceEngine.nextAfter(fromMs, frequency: frequency);
-  }
-
-  /// Bill → expense → optional account debit → next occurrence → history events.
+  /// Bill → expense → optional account debit → next occurrence (if recurring) → events.
   Future<void> payOccurrence(
     BillOccurrence occ, {
     double? actualMajor,
@@ -151,10 +152,12 @@ class BillRepository {
       whereArgs: [occ.billId],
       limit: 1,
     );
-    final frequency = billRows.isEmpty ? 'MONTHLY' : (billRows.first['frequency'] as String? ?? 'MONTHLY');
+    final frequency =
+        billRows.isEmpty ? 'MONTHLY' : (billRows.first['frequency'] as String? ?? 'MONTHLY');
     final defaultAccount = accountId ??
         (billRows.isEmpty ? null : billRows.first['default_account_id'] as String?);
-    final nextDue = _nextDueMs(occ.dueAt, frequency);
+    final recurring = isRecurring(frequency);
+    final nextDue = recurring ? RecurrenceEngine.nextAfter(occ.dueAt, frequency: frequency) : null;
 
     await _db.txn((txn) async {
       await txn.insert('expenses', {
@@ -201,35 +204,43 @@ class BillRepository {
         whereArgs: [occ.id],
       );
 
-      final nextOccId = AppDatabase.newId();
-      await txn.insert('bill_occurrences', {
-        'id': nextOccId,
-        'bill_id': occ.billId,
-        'due_at': nextDue,
-        'expected_amount_minor': occ.expectedAmountMinor,
-        'status': BillOccurrenceStatus.upcoming,
-        'created_at': now,
-        'updated_at': now,
-      });
-
-      await txn.update(
-        'bills',
-        {'next_due_at': nextDue, 'updated_at': now},
-        where: 'id = ?',
-        whereArgs: [occ.billId],
-      );
-
-      await txn.insert('reminders', {
-        'id': AppDatabase.newId(),
-        'owner_id': ownerId,
-        'title': 'Bill due: ${occ.billName ?? 'Bill'}',
-        'trigger_at': nextDue - const Duration(days: 1).inMilliseconds,
-        'source_type': 'BILL',
-        'source_id': occ.billId,
-        'status': 'PENDING',
-        'created_at': now,
-        'updated_at': now,
-      });
+      if (recurring && nextDue != null) {
+        final nextOccId = AppDatabase.newId();
+        await txn.insert('bill_occurrences', {
+          'id': nextOccId,
+          'bill_id': occ.billId,
+          'due_at': nextDue,
+          'expected_amount_minor': occ.expectedAmountMinor,
+          'status': BillOccurrenceStatus.upcoming,
+          'created_at': now,
+          'updated_at': now,
+        });
+        await txn.update(
+          'bills',
+          {'next_due_at': nextDue, 'updated_at': now},
+          where: 'id = ?',
+          whereArgs: [occ.billId],
+        );
+        await txn.insert('reminders', {
+          'id': AppDatabase.newId(),
+          'owner_id': ownerId,
+          'title': 'Bill due: ${occ.billName ?? 'Bill'}',
+          'trigger_at': nextDue - const Duration(days: 1).inMilliseconds,
+          'source_type': 'BILL',
+          'source_id': occ.billId,
+          'status': 'PENDING',
+          'created_at': now,
+          'updated_at': now,
+        });
+      } else {
+        // One-off: clear next_due so it leaves open lists after pay
+        await txn.update(
+          'bills',
+          {'next_due_at': null, 'updated_at': now},
+          where: 'id = ?',
+          whereArgs: [occ.billId],
+        );
+      }
 
       await txn.insert('activity_events', {
         'id': AppDatabase.newId(),
@@ -241,7 +252,7 @@ class BillRepository {
         'recorded_at': now,
         'source': EventSource.user,
         'metadata':
-            '{"amount":$amount,"currency":"$currency","expenseId":"$expenseId","accountId":"${defaultAccount ?? ''}","nextDue":$nextDue}',
+            '{"amount":$amount,"currency":"$currency","expenseId":"$expenseId","accountId":"${defaultAccount ?? ''}","nextDue":${nextDue ?? 'null'}}',
       });
       await txn.insert('activity_events', {
         'id': AppDatabase.newId(),
