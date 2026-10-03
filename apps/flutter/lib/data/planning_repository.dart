@@ -1,5 +1,4 @@
 import '../domain/enums.dart';
-import '../domain/models.dart';
 import 'database.dart';
 import 'task_repository.dart';
 
@@ -194,7 +193,6 @@ class PlanningRepository {
       starts.add(DateTime.fromMillisecondsSinceEpoch(b['start_at'] as int));
       ends.add(DateTime.fromMillisecondsSinceEpoch(b['end_at'] as int));
     }
-    // sort by start
     final order = List<int>.generate(starts.length, (i) => i);
     order.sort((a, b) => starts[a].compareTo(starts[b]));
 
