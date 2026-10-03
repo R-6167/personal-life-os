@@ -28,8 +28,8 @@ class _PracticalLifeScreenState extends State<PracticalLifeScreen> {
 
   Future<void> _load() async {
     final docs = await _ext.listDocuments();
-    final practical = await _ext.listPracticalItems();
-    final appointments = await _ext.listUpcomingEvents(days: 30);
+    final practical = await _ext.listPractical();
+    final appointments = await _ext.listUpcomingAppointments(days: 30);
     final shopping = await _ext.listShoppingLists();
     if (!mounted) return;
     setState(() {
@@ -63,7 +63,7 @@ class _PracticalLifeScreenState extends State<PracticalLifeScreen> {
       ),
     );
     if (ok != true) return;
-    await _ext.addDocument(title.text.trim());
+    await _ext.addDocument(title: title.text.trim());
     await _load();
   }
 
@@ -89,7 +89,7 @@ class _PracticalLifeScreenState extends State<PracticalLifeScreen> {
       ),
     );
     if (ok != true) return;
-    await _ext.addPracticalItem(title.text.trim());
+    await _ext.addPractical(title.text.trim());
     await _load();
   }
 
