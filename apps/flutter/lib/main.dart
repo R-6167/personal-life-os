@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import 'services/error_log_service.dart';
 import 'services/local_analytics.dart';
+import 'services/notification_router.dart';
 import 'services/notification_service.dart';
 import 'services/offline_runtime.dart';
 import 'services/security_service.dart';
@@ -77,6 +78,7 @@ class _OrdinAppState extends State<OrdinApp> with WidgetsBindingObserver {
       title: 'Ordin',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.dark(),
+      navigatorKey: NotificationRouter.navigatorKey,
       home: _unlocked
           ? const HomeShell()
           : LockScreen(

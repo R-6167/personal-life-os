@@ -2,15 +2,17 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
-import '../data/bill_repository.dart';
 import '../data/budget_repository.dart';
 import '../data/database.dart';
 import '../data/extended_repository.dart';
-import '../data/task_repository.dart';
 import '../domain/enums.dart';
+import 'notification_payload.dart';
+import 'notification_router.dart';
+import 'reminder_generator_service.dart';
 import 'user_prefs.dart';
 
-/// Local notifications for reminders, bills, budgets, and overdue tasks (Android offline).
+/// Local notification lifecycle:
+/// Create → Schedule → Notify → Open → Snooze/Complete → Record result
 class NotificationService {
   NotificationService._();
   static final instance = NotificationService._();
@@ -19,34 +21,78 @@ class NotificationService {
   bool _ready = false;
   bool enabled = true;
 
+  static const _channelId = 'ordin_life';
+  static const _channelName = 'Ordin Life';
+  static const _channelDesc = 'Tasks, bills, habits, and life reminders';
+
   Future<void> init() async {
     if (_ready) return;
     tzdata.initializeTimeZones();
     try {
       tz.setLocalLocation(tz.local);
     } catch (_) {
-      tz.setLocalLocation(tz.getLocation('Africa/Nairobi'));
+      try {
+        tz.setLocalLocation(tz.getLocation('Africa/Nairobi'));
+      } catch (_) {}
     }
 
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const ios = DarwinInitializationSettings();
+    const ios = DarwinInitializationSettings(
+      requestAlertPermission: true,
+      requestBadgePermission: true,
+      requestSoundPermission: true,
+    );
+
     await _plugin.initialize(
       const InitializationSettings(android: android, iOS: ios),
+      onDidReceiveNotificationResponse: _onResponse,
+      onDidReceiveBackgroundNotificationResponse: notificationTapBackground,
     );
+
     final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin>();
     await androidPlugin?.requestNotificationsPermission();
+    await androidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        _channelId,
+        _channelName,
+        description: _channelDesc,
+        importance: Importance.high,
+      ),
+    );
+
+    // Cold start: user opened app from a notification
+    final launch = await _plugin.getNotificationAppLaunchDetails();
+    if (launch?.didNotificationLaunchApp == true) {
+      final p = launch!.notificationResponse?.payload;
+      if (p != null) {
+        // Defer until first frame / navigator ready
+        Future<void>.delayed(const Duration(milliseconds: 600), () {
+          NotificationRouter.handle(p);
+        });
+      }
+    }
+
     _ready = true;
+  }
+
+  void _onResponse(NotificationResponse response) {
+    NotificationRouter.handle(response.payload);
   }
 
   Future<void> cancelAll() => _plugin.cancelAll();
 
+  /// Full pipeline: generate entity reminders → schedule OS notifications.
   Future<int> syncFromDatabase() async {
     if (!_ready) await init();
     if (!enabled) {
       await cancelAll();
       return 0;
     }
+
+    try {
+      await ReminderGeneratorService().generateAll();
+    } catch (_) {}
 
     await cancelAll();
     var n = 0;
@@ -59,47 +105,32 @@ class NotificationService {
       final triggerMs = r['trigger_at'] as int?;
       if (triggerMs == null) continue;
       final when = DateTime.fromMillisecondsSinceEpoch(triggerMs);
-      if (when.isBefore(now) || when.isAfter(horizon)) continue;
-      await _schedule(
-        id: _stableId('rem', r['id'] as String),
-        title: '${r['title']}',
-        body: 'Reminder from Personal Life OS',
-        when: when,
-      );
-      n++;
-    }
-
-    final bills = await BillRepository(AppDatabase.instance).listOpenOccurrences();
-    for (final o in bills) {
-      final due = DateTime.fromMillisecondsSinceEpoch(o.dueAt);
-      var when = DateTime(due.year, due.month, due.day, 9);
-      if (when.isBefore(now)) {
-        when = now.add(const Duration(minutes: 2));
-      }
+      if (when.isBefore(now.subtract(const Duration(minutes: 1)))) continue;
       if (when.isAfter(horizon)) continue;
+
+      final sourceType = '${r['source_type'] ?? NotificationPayload.reminder}';
+      final sourceId = '${r['source_id'] ?? r['id']}';
+      final remId = '${r['id']}';
+      final payload = NotificationPayload(
+        type: sourceType.isEmpty ? NotificationPayload.reminder : sourceType,
+        id: sourceId,
+        reminderId: remId,
+      );
+
+      final body = '${r['message'] ?? 'Open Ordin to act'}'
+          .replaceFirst(RegExp(r'^\[[^\]]+\]\s*'), '');
+
       await _schedule(
-        id: _stableId('bill', o.id),
-        title: 'Bill: ${o.billName ?? 'Payment'}',
-        body: o.expectedAmountMinor != null
-            ? 'Due — ~${(o.expectedAmountMinor! / 100).toStringAsFixed(0)} ${UserPrefs.instance.currency}'
-            : 'Due soon',
+        id: _stableId('rem', remId),
+        title: '${r['title']}',
+        body: body,
         when: when,
+        payload: payload.encode(),
       );
       n++;
     }
 
-    final overdue = await TaskRepository(AppDatabase.instance).listOverdue();
-    if (overdue.isNotEmpty) {
-      await _schedule(
-        id: 900001,
-        title: '${overdue.length} overdue task${overdue.length == 1 ? '' : 's'}',
-        body: overdue.take(3).map((t) => t.title).join(' · '),
-        when: now.add(const Duration(minutes: 5)),
-      );
-      n++;
-    }
-
-    n += await notifyBudgetAlerts(delay: const Duration(seconds: 3));
+    n += await notifyBudgetAlerts(delay: const Duration(seconds: 2));
     return n;
   }
 
@@ -115,6 +146,10 @@ class NotificationService {
       final limit = (b.limitMinor / 100).toStringAsFixed(0);
       final cat = b.categoryName ?? b.scopeLabel;
       final exceeded = b.level == BudgetAlertLevel.exceeded;
+      final payload = NotificationPayload(
+        type: NotificationPayload.budget,
+        id: b.id,
+      );
       await _schedule(
         id: _stableId('bud', b.id),
         title: exceeded ? 'Budget exceeded: ${b.name}' : 'Budget warning: ${b.name}',
@@ -122,39 +157,11 @@ class NotificationService {
             '${exceeded ? ' — over limit' : ' — near limit'}',
         when: when,
         high: exceeded,
+        payload: payload.encode(),
       );
       n++;
     }
     return n;
-  }
-
-  Future<List<BudgetStatus>> checkCategoryAfterExpense(String? categoryId) async {
-    if (categoryId == null) {
-      final all = await BudgetRepository(AppDatabase.instance).alerts();
-      if (all.isNotEmpty) await notifyBudgetAlerts();
-      return all;
-    }
-    final statuses = await BudgetRepository(AppDatabase.instance).statuses();
-    final hit = statuses
-        .where((s) => s.categoryId == categoryId && s.level != BudgetAlertLevel.ok)
-        .toList();
-    if (hit.isEmpty) return hit;
-    if (!_ready) await init();
-    if (!enabled) return hit;
-    final when = DateTime.now().add(const Duration(seconds: 1));
-    for (final b in hit) {
-      final spent = (b.spentMinor / 100).toStringAsFixed(0);
-      final limit = (b.limitMinor / 100).toStringAsFixed(0);
-      final exceeded = b.level == BudgetAlertLevel.exceeded;
-      await _schedule(
-        id: _stableId('bud', b.id),
-        title: exceeded ? 'Category budget exceeded' : 'Category budget warning',
-        body: '${b.categoryName ?? b.name}: $spent / $limit ${UserPrefs.instance.currency}',
-        when: when,
-        high: exceeded,
-      );
-    }
-    return hit;
   }
 
   Future<void> _schedule({
@@ -163,30 +170,42 @@ class NotificationService {
     required String body,
     required DateTime when,
     bool high = false,
+    String? payload,
   }) async {
-    final details = AndroidNotificationDetails(
-      high ? 'plos_budget_alerts' : 'plos_ops',
-      high ? 'Budget alerts' : 'Personal Life OS',
-      channelDescription: high
-          ? 'Category budget warnings and overspend alerts'
-          : 'Reminders, bills, and task nudges',
-      importance: high ? Importance.high : Importance.defaultImportance,
-      priority: high ? Priority.high : Priority.defaultPriority,
-    );
     final tzWhen = tz.TZDateTime.from(when, tz.local);
     await _plugin.zonedSchedule(
       id,
       title,
       body,
       tzWhen,
-      NotificationDetails(android: details),
+      NotificationDetails(
+        android: AndroidNotificationDetails(
+          _channelId,
+          _channelName,
+          channelDescription: _channelDesc,
+          importance: high ? Importance.max : Importance.high,
+          priority: high ? Priority.max : Priority.high,
+          icon: '@mipmap/ic_launcher',
+        ),
+        iOS: const DarwinNotificationDetails(),
+      ),
       androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
+      payload: payload,
     );
   }
 
-  int _stableId(String prefix, String entityId) {
-    return (prefix + entityId).hashCode & 0x7fffffff;
+  int _stableId(String prefix, String key) {
+    // 31-bit positive int from string
+    var h = prefix.hashCode ^ key.hashCode;
+    h = h & 0x7fffffff;
+    if (h == 0) h = 1;
+    return h;
   }
+}
+
+@pragma('vm:entry-point')
+void notificationTapBackground(NotificationResponse response) {
+  // Background isolate — full navigation happens on next foreground via payload.
 }
