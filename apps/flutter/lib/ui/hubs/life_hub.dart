@@ -81,9 +81,6 @@ class _LifeHubState extends State<LifeHub> {
         items.add("${p['title']} needs attention");
       }
     }
-    if (items.isEmpty && _practical.isNotEmpty) {
-      items.add('${_practical.length} practical item(s) on file');
-    }
     return items.take(5).toList();
   }
 
@@ -120,20 +117,14 @@ class _LifeHubState extends State<LifeHub> {
   @override
   Widget build(BuildContext context) {
     final attention = _attention;
+    // No page-level "Life" title — AppBar already shows the tab name.
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
       children: [
-        const Text('Life', style: TextStyle(color: AppTheme.silver, fontSize: 22, fontWeight: FontWeight.w700)),
-        const SizedBox(height: 4),
-        Text(
-          'Goals · wellness · habits · routines · plans',
-          style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45), fontSize: 12),
-        ),
-        const SizedBox(height: 12),
         _navCard(
           icon: Icons.priority_high,
           title: 'Needs attention',
-          subtitle: 'Unified feed of recurring + practical duties',
+          subtitle: 'Recurring + practical duties',
           onTap: () {
             Navigator.of(context)
                 .push(MaterialPageRoute(builder: (_) => const NeedsAttentionScreen()))
@@ -143,14 +134,14 @@ class _LifeHubState extends State<LifeHub> {
         _navCard(
           icon: Icons.favorite_outline,
           title: 'Health & wellness',
-          subtitle: 'Check-in · sleep · mood · metrics',
+          subtitle: 'Check-in · sleep · mood',
           onTap: () {
             Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WellnessScreen()));
           },
         ),
         _navCard(
           icon: Icons.view_timeline_outlined,
-          title: 'Day plan & time',
+          title: 'Day plan',
           subtitle: 'Sessions · free time · book tasks',
           onTap: () {
             Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PlanningScreen()));
@@ -159,15 +150,15 @@ class _LifeHubState extends State<LifeHub> {
         _navCard(
           icon: Icons.calendar_month,
           title: 'Calendar',
-          subtitle: 'Events, reminders, month grid',
+          subtitle: 'Events & month grid',
           onTap: () {
             Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CalendarScreen()));
           },
         ),
         _navCard(
           icon: Icons.home_repair_service_outlined,
-          title: 'Practical life',
-          subtitle: 'Documents · appointments · vehicle · shopping',
+          title: 'Practical',
+          subtitle: 'Documents · vehicle · shopping',
           onTap: () {
             Navigator.of(context)
                 .push(MaterialPageRoute(builder: (_) => const PracticalLifeScreen()))
@@ -178,12 +169,11 @@ class _LifeHubState extends State<LifeHub> {
           },
         ),
         if (attention.isNotEmpty) ...[
-          const SizedBox(height: 4),
           GlassCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Quick heads-up', style: TextStyle(color: AppTheme.amber, fontWeight: FontWeight.w600)),
+                const Text('Heads-up', style: TextStyle(color: AppTheme.amber, fontWeight: FontWeight.w600)),
                 const SizedBox(height: 8),
                 ...attention.map((a) => Padding(
                       padding: const EdgeInsets.only(bottom: 4),
@@ -192,11 +182,11 @@ class _LifeHubState extends State<LifeHub> {
               ],
             ),
           ),
+          const SizedBox(height: 8),
         ],
-        const SizedBox(height: 16),
         _header(context, 'Goals', AddKind.goal),
         if (widget.goals.isEmpty)
-          _empty('No goals — define an outcome you care about.')
+          _empty('No goals yet.')
         else
           ...widget.goals.map((g) => Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -209,7 +199,6 @@ class _LifeHubState extends State<LifeHub> {
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   child: ListTile(
                     title: Text(g.title, style: const TextStyle(color: AppTheme.silver)),
-                    subtitle: Text(g.status, style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11)),
                     trailing: IconButton(
                       icon: const Icon(Icons.flag, color: AppTheme.amber),
                       onPressed: () async {
@@ -220,10 +209,10 @@ class _LifeHubState extends State<LifeHub> {
                   ),
                 ),
               )),
-        const SizedBox(height: 12),
+        const SizedBox(height: 8),
         _header(context, 'Projects', AddKind.project),
         if (widget.projects.isEmpty)
-          _empty('Projects turn goals into work.')
+          _empty('No projects yet.')
         else
           ...widget.projects.map((p) => Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -236,10 +225,10 @@ class _LifeHubState extends State<LifeHub> {
                   child: Text(p.title, style: const TextStyle(color: AppTheme.silver, fontWeight: FontWeight.w600)),
                 ),
               )),
-        const SizedBox(height: 12),
+        const SizedBox(height: 8),
         _header(context, 'Habits', AddKind.habit),
         if (widget.habits.isEmpty)
-          _empty('No habits — start a small daily practice.')
+          _empty('No habits yet.')
         else
           ...widget.habits.map((h) => Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -265,7 +254,7 @@ class _LifeHubState extends State<LifeHub> {
                   ),
                 ),
               )),
-        const SizedBox(height: 12),
+        const SizedBox(height: 8),
         Row(
           children: [
             const Text('Routines', style: TextStyle(color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
@@ -308,7 +297,7 @@ class _LifeHubState extends State<LifeHub> {
           ],
         ),
         if (widget.routines.isEmpty)
-          _empty('Morning / evening sequences with optional steps.')
+          _empty('No routines yet.')
         else
           ...widget.routines.map((r) => Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -335,7 +324,7 @@ class _LifeHubState extends State<LifeHub> {
                   ),
                 ),
               )),
-        const SizedBox(height: 12),
+        const SizedBox(height: 8),
         _header(context, 'Notes', AddKind.note),
         if (widget.notes.isEmpty)
           _empty('No notes yet.')

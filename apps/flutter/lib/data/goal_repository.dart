@@ -12,7 +12,7 @@ class GoalRepository {
       'goals',
       where: 'status = ? AND archived_at IS NULL',
       whereArgs: [EntityStatus.active],
-      orderBy: 'priority DESC, created_at DESC',
+      orderBy: 'created_at DESC',
     );
     return rows.map(Goal.fromMap).toList();
   }
@@ -35,7 +35,7 @@ class GoalRepository {
     final goal = Goal(
       id: AppDatabase.newId(),
       ownerId: ownerId,
-      title: title,
+      title: title.trim(),
       status: EntityStatus.active,
       priority: priority,
       createdAt: now,
@@ -62,22 +62,16 @@ class GoalRepository {
 
   Future<void> updateMeta({
     required String id,
-    int? priority,
     int? targetDate,
     bool clearTarget = false,
-    String? progressMode,
-    double? manualProgress,
     String? description,
   }) async {
     final now = AppDatabase.nowMs();
     await (await _db.database).update(
       'goals',
       {
-        if (priority != null) 'priority': priority,
         if (clearTarget) 'target_date': null,
         if (targetDate != null) 'target_date': targetDate,
-        if (progressMode != null) 'progress_mode': progressMode,
-        if (manualProgress != null) 'manual_progress': manualProgress,
         if (description != null) 'description': description,
         'updated_at': now,
       },
@@ -104,48 +98,24 @@ class GoalRepository {
       'SELECT COUNT(*) AS c FROM tasks WHERE goal_id = ? AND status = ?',
       [goalId, EntityStatus.completed],
     );
-    final habits = await db.rawQuery(
-      'SELECT COUNT(*) AS c FROM habits WHERE goal_id = ? AND archived_at IS NULL',
-      [goalId],
-    );
-    final day = AppDatabase.startOfTodayMs();
-    final habitsDoneToday = await db.rawQuery(
-      '''
-      SELECT COUNT(*) AS c FROM habits h
-      JOIN habit_occurrences o ON o.habit_id = h.id
-      WHERE h.goal_id = ? AND o.scheduled_date = ? AND o.status = ?
-      ''',
-      [goalId, day, HabitOccurrenceStatus.completed],
-    );
     return {
       'projectsTotal': (projects.first['c'] as int?) ?? 0,
       'projectsDone': (projectsDone.first['c'] as int?) ?? 0,
       'tasksTotal': (tasks.first['c'] as int?) ?? 0,
       'tasksDone': (tasksDone.first['c'] as int?) ?? 0,
-      'habitsTotal': (habits.first['c'] as int?) ?? 0,
-      'habitsDoneToday': (habitsDoneToday.first['c'] as int?) ?? 0,
+      'habitsTotal': 0,
+      'habitsDoneToday': 0,
     };
   }
 
   Future<double> progressRatio(String goalId) async {
-    final raw = await rawById(goalId);
-    if (raw == null) return 0;
-    final mode = (raw['progress_mode'] as String?) ?? ProgressMode.calculated;
-    if (mode == ProgressMode.manual) {
-      final m = raw['manual_progress'] as num?;
-      return ((m ?? 0).toDouble()).clamp(0.0, 1.0);
-    }
     final p = await progress(goalId);
     final pt = p['projectsTotal'] ?? 0;
     final pd = p['projectsDone'] ?? 0;
     final tt = p['tasksTotal'] ?? 0;
     final td = p['tasksDone'] ?? 0;
-    final ht = p['habitsTotal'] ?? 0;
-    final hd = p['habitsDoneToday'] ?? 0;
-    if (tt + pt + ht == 0) return 0;
-    final score = (tt == 0 ? 0.0 : td / tt) * 0.5 +
-        (pt == 0 ? 0.0 : pd / pt) * 0.3 +
-        (ht == 0 ? 0.0 : hd / ht) * 0.2;
+    if (tt + pt == 0) return 0;
+    final score = (tt == 0 ? 0.0 : td / tt) * 0.6 + (pt == 0 ? 0.0 : pd / pt) * 0.4;
     return score.clamp(0.0, 1.0);
   }
 
@@ -203,7 +173,6 @@ class GoalRepository {
         'goals',
         {
           'status': EntityStatus.completed,
-          'completed_at': now,
           'updated_at': now,
         },
         where: 'id = ?',
