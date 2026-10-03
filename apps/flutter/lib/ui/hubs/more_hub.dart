@@ -8,6 +8,7 @@ import '../screens/activity_screen.dart';
 import '../screens/diagnostics_screen.dart';
 import '../screens/feedback_screen.dart';
 import '../screens/offline_status_screen.dart';
+import '../screens/reminders_screen.dart';
 import '../screens/upcoming_screen.dart';
 import '../settings_screen.dart';
 import '../theme.dart';
@@ -181,7 +182,7 @@ class _MoreHubState extends State<MoreHub> {
         const Text('More', style: TextStyle(color: AppTheme.silver, fontSize: 22, fontWeight: FontWeight.w700)),
         const SizedBox(height: 4),
         Text(
-          'Search · offline · feedback · file backup · integrity',
+          'Search · reminders · offline · backup · integrity',
           style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45), fontSize: 12),
         ),
         if (_busy) ...[
@@ -232,6 +233,17 @@ class _MoreHubState extends State<MoreHub> {
                 ),
               ),
               ListTile(
+                leading: const Icon(Icons.alarm, color: AppTheme.amber),
+                title: const Text('Reminders', style: TextStyle(color: AppTheme.silver)),
+                subtitle: Text(
+                  'Create · snooze · complete',
+                  style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 12),
+                ),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const RemindersScreen()),
+                ),
+              ),
+              ListTile(
                 leading: const Icon(Icons.upcoming, color: AppTheme.amber),
                 title: const Text('Upcoming', style: TextStyle(color: AppTheme.silver)),
                 onTap: () => Navigator.of(context).push(
@@ -272,19 +284,11 @@ class _MoreHubState extends State<MoreHub> {
               ListTile(
                 leading: const Icon(Icons.lock, color: AppTheme.amber),
                 title: const Text('Export encrypted backup', style: TextStyle(color: AppTheme.silver)),
-                subtitle: Text(
-                  'AES + passphrase → file',
-                  style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 12),
-                ),
                 onTap: _busy ? null : () => _export(encrypted: true),
               ),
               ListTile(
                 leading: const Icon(Icons.file_download_outlined, color: AppTheme.silver),
                 title: const Text('Import backup from file', style: TextStyle(color: AppTheme.silver)),
-                subtitle: Text(
-                  'Pick .json · verified merge',
-                  style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 12),
-                ),
                 onTap: _busy ? null : _import,
               ),
               ListTile(
@@ -304,7 +308,7 @@ class _MoreHubState extends State<MoreHub> {
                 leading: const Icon(Icons.info_outline, color: AppTheme.silver),
                 title: const Text('About', style: TextStyle(color: AppTheme.silver)),
                 subtitle: Text(
-                  'Personal Life OS · offline · schema v${AppDatabase.schemaVersion} · 0.17',
+                  'Personal Life OS · offline · schema v${AppDatabase.schemaVersion} · 0.18',
                   style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 12),
                 ),
               ),
