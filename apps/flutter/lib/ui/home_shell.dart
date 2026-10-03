@@ -16,9 +16,11 @@ import '../data/task_repository.dart';
 import '../domain/enums.dart';
 import '../domain/models.dart';
 import '../services/day_planner.dart';
+import '../services/error_log_service.dart';
 import '../services/local_analytics.dart';
 import '../services/notification_service.dart';
 import '../services/query_cache.dart';
+import '../utils/soft_future.dart';
 import 'assistant_screen.dart';
 import 'forms/create_forms.dart';
 import 'hubs/finance_hub.dart';
@@ -92,7 +94,8 @@ class _HomeShellState extends State<HomeShell> {
       await _reload();
       setState(() => _ready = true);
       LocalAnalytics.instance.screenView('today');
-    } catch (e) {
+    } catch (e, st) {
+      await ErrorLogService.instance.log(message: 'boot: $e', stack: st.toString(), level: 'BOOT');
       setState(() {
         _error = e.toString();
         _ready = true;
@@ -103,59 +106,63 @@ class _HomeShellState extends State<HomeShell> {
   Future<void> _reload() async {
     QueryCache.instance.invalidate();
 
-    try {
+    await softFuture(() async {
       await Future.wait([
-        _habits.ensureAllTodayOccurrences(),
-        _routines.ensureAllTodayOccurrences(),
+        softFuture(() => _habits.ensureAllTodayOccurrences(), null, label: 'habit.ensure'),
+        softFuture(() => _routines.ensureAllTodayOccurrences(), null, label: 'routine.ensure'),
       ]);
       await Future.wait([
-        _habits.markMissedBeforeToday(),
-        _routines.markMissedBeforeToday(),
+        softFuture(() => _habits.markMissedBeforeToday(), 0, label: 'habit.missed'),
+        softFuture(() => _routines.markMissedBeforeToday(), 0, label: 'routine.missed'),
       ]);
-    } catch (_) {}
+    }, null, label: 'maintenance');
 
-    final results = await Future.wait([
-      _tasks.listOpen(),
-      _tasks.listOverdue(),
-      _habits.listActive(),
-      _goals.listActive(),
-      _notes.list(),
-      _projects.listActive(),
-      _expenses.listRecent(),
-      _expenses.totalMinorThisMonth(),
-      _bills.listOpenOccurrences(),
-      _routines.listActive(),
-      _income.listRecent(),
-      _ext.listEventsToday(),
-      DayPlanner().buildPlan(limit: 6),
-      _tasks.listScheduledOnDay(DateTime.now()),
-      PlanningRepository(AppDatabase.instance).availableMinutes(day: DateTime.now()).catchError((_) => 0),
-    ]);
+    final taskList = await softFuture(_tasks.listOpen, <Task>[], label: 'tasks.open');
+    final overdue = await softFuture(_tasks.listOverdue, <Task>[], label: 'tasks.overdue');
+    final habitList = await softFuture(_habits.listActive, <Habit>[], label: 'habits');
+    final goalList = await softFuture(_goals.listActive, <Goal>[], label: 'goals');
+    final noteList = await softFuture(_notes.list, <Note>[], label: 'notes');
+    final projectList = await softFuture(_projects.listActive, <Project>[], label: 'projects');
+    final expenseList = await softFuture(_expenses.listRecent, <Expense>[], label: 'expenses');
+    final monthSpend = await softFuture(_expenses.totalMinorThisMonth, 0, label: 'spend');
+    final billOcc = await softFuture(_bills.listOpenOccurrences, <BillOccurrence>[], label: 'bills');
+    final routineList = await softFuture(_routines.listActive, <Routine>[], label: 'routines');
+    final incomeList = await softFuture(_income.listRecent, <Income>[], label: 'income');
+    final eventsToday =
+        await softFuture(_ext.listEventsToday, <Map<String, Object?>>[], label: 'events');
+    final plan = await softFuture(() => DayPlanner().buildPlan(limit: 6), <PlanItem>[], label: 'plan');
+    final scheduled =
+        await softFuture(() => _tasks.listScheduledOnDay(DateTime.now()), <Task>[], label: 'scheduled');
+    final freeMin = await softFuture(
+      () => PlanningRepository(AppDatabase.instance).availableMinutes(day: DateTime.now()),
+      0,
+      label: 'freeMin',
+    );
 
     if (!_notifsSynced) {
-      try {
+      await softFuture(() async {
         await NotificationService.instance.syncFromDatabase();
         _notifsSynced = true;
-      } catch (_) {}
+      }, null, label: 'notifs.sync');
     }
 
     if (!mounted) return;
     setState(() {
-      _taskList = results[0] as List<Task>;
-      _overdue = results[1] as List<Task>;
-      _habitList = results[2] as List<Habit>;
-      _goalList = results[3] as List<Goal>;
-      _noteList = results[4] as List<Note>;
-      _projectList = results[5] as List<Project>;
-      _expenseList = results[6] as List<Expense>;
-      _monthSpendMinor = results[7] as int;
-      _billOcc = results[8] as List<BillOccurrence>;
-      _routineList = results[9] as List<Routine>;
-      _incomeList = results[10] as List<Income>;
-      _eventsToday = results[11] as List<Map<String, Object?>>;
-      _plan = results[12] as List<PlanItem>;
-      _scheduledToday = results[13] as List<Task>;
-      _freeMinutes = results[14] as int;
+      _taskList = taskList;
+      _overdue = overdue;
+      _habitList = habitList;
+      _goalList = goalList;
+      _noteList = noteList;
+      _projectList = projectList;
+      _expenseList = expenseList;
+      _monthSpendMinor = monthSpend;
+      _billOcc = billOcc;
+      _routineList = routineList;
+      _incomeList = incomeList;
+      _eventsToday = eventsToday;
+      _plan = plan;
+      _scheduledToday = scheduled;
+      _freeMinutes = freeMin;
     });
   }
 
@@ -260,7 +267,10 @@ class _HomeShellState extends State<HomeShell> {
             NavigationDestination(icon: Icon(Icons.today_outlined), selectedIcon: Icon(Icons.today), label: 'Today'),
             NavigationDestination(icon: Icon(Icons.check_box_outlined), selectedIcon: Icon(Icons.check_box), label: 'Tasks'),
             NavigationDestination(icon: Icon(Icons.favorite_outline), selectedIcon: Icon(Icons.favorite), label: 'Life'),
-            NavigationDestination(icon: Icon(Icons.account_balance_wallet_outlined), selectedIcon: Icon(Icons.account_balance_wallet), label: 'Finance'),
+            NavigationDestination(
+                icon: Icon(Icons.account_balance_wallet_outlined),
+                selectedIcon: Icon(Icons.account_balance_wallet),
+                label: 'Finance'),
             NavigationDestination(icon: Icon(Icons.more_horiz), label: 'More'),
           ],
         ),
@@ -540,32 +550,17 @@ class _HomeShellState extends State<HomeShell> {
         ),
         Expanded(
           child: _taskList.isEmpty
-              ? EmptyState(
-                  icon: Icons.check_circle_outline,
-                  title: 'All clear',
-                  subtitle: 'No open tasks. Add one when something needs doing.',
-                  actionLabel: 'New task',
-                  onAction: () async {
-                    final ok = await showCreateForm(context, AddKind.task);
-                    if (ok) await _reload();
-                  },
-                )
-              : RefreshIndicator(
-                  color: AppTheme.amber,
-                  onRefresh: _reload,
-                  child: ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-                    itemCount: _taskList.length,
-                    itemBuilder: (ctx, i) => _taskTile(_taskList[i]),
-                  ),
+              ? Center(child: _hint('No open tasks'))
+              : ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+                  children: _taskList.map(_taskTile).toList(),
                 ),
         ),
       ],
     );
   }
 
-  Widget _hint(String m) =>
-      Text(m, style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.35)));
+  Widget _hint(String m) => Text(m, style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.35)));
 
   Widget _taskTile(Task t) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
@@ -577,21 +572,14 @@ class _HomeShellState extends State<HomeShell> {
             subtitle: Text(
               t.isOverdue ? 'OVERDUE' : (t.isDueToday ? 'Due today' : t.status),
               style: TextStyle(
-                color: t.isOverdue ? Colors.redAccent : AppTheme.silver.withValues(alpha: 0.45),
-                fontSize: 12,
+                color: t.isOverdue ? Colors.redAccent : AppTheme.silver.withValues(alpha: 0.4),
+                fontSize: 11,
               ),
             ),
             trailing: IconButton(
               icon: const Icon(Icons.check_circle_outline, color: AppTheme.amber),
-              tooltip: 'Complete',
               onPressed: () async {
                 await _tasks.complete(t.id);
-                HapticFeedback.mediumImpact();
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Completed ${t.title}')),
-                  );
-                }
                 await _reload();
               },
             ),
