@@ -12,6 +12,7 @@ import '../../services/secure_backup.dart';
 import '../screens/activity_screen.dart';
 import '../screens/diagnostics_screen.dart';
 import '../screens/feedback_screen.dart';
+import '../screens/offline_status_screen.dart';
 import '../screens/upcoming_screen.dart';
 import '../settings_screen.dart';
 import '../theme.dart';
@@ -202,7 +203,7 @@ class _MoreHubState extends State<MoreHub> {
         const Text('More', style: TextStyle(color: AppTheme.silver, fontSize: 22, fontWeight: FontWeight.w700)),
         const SizedBox(height: 4),
         Text(
-          'Search · timeline · feedback · diagnostics · backup',
+          'Search · offline · feedback · backup · integrity',
           style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45), fontSize: 12),
         ),
         const SizedBox(height: 16),
@@ -280,6 +281,19 @@ class _MoreHubState extends State<MoreHub> {
                 },
               ),
               ListTile(
+                leading: const Icon(Icons.cloud_off_outlined, color: AppTheme.amber),
+                title: const Text('Offline status', style: TextStyle(color: AppTheme.silver)),
+                subtitle: Text(
+                  'Local health · no network required',
+                  style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 12),
+                ),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const OfflineStatusScreen()),
+                  );
+                },
+              ),
+              ListTile(
                 leading: const Icon(Icons.analytics_outlined, color: AppTheme.silver),
                 title: const Text('Diagnostics', style: TextStyle(color: AppTheme.silver)),
                 subtitle: Text(
@@ -334,7 +348,7 @@ class _MoreHubState extends State<MoreHub> {
                 leading: const Icon(Icons.info_outline, color: AppTheme.silver),
                 title: const Text('About', style: TextStyle(color: AppTheme.silver)),
                 subtitle: Text(
-                  'Personal Life OS · offline · schema v${AppDatabase.schemaVersion} · 0.13',
+                  'Personal Life OS · offline · schema v${AppDatabase.schemaVersion} · 0.16',
                   style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 12),
                 ),
               ),
