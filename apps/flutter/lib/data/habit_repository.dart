@@ -51,12 +51,12 @@ class HabitRepository {
         map['description'] = description;
       }
       await txn.insert('habits', map);
+      // Schema: id, habit_id, frequency, days_of_week, target_count, timestamps
       await txn.insert('habit_schedules', {
         'id': AppDatabase.newId(),
         'habit_id': habit.id,
         'frequency': frequency,
-        'enabled': 1,
-        'start_date': now,
+        'target_count': 1,
         'created_at': now,
         'updated_at': now,
       });
@@ -106,7 +106,6 @@ class HabitRepository {
         'updated_at': now,
       });
     } catch (_) {
-      // Unique index race: re-read
       final again = await db.query(
         'habit_occurrences',
         where: 'habit_id = ? AND scheduled_date = ?',
@@ -292,8 +291,7 @@ class HabitRepository {
         'habit_id': habitId,
         'frequency': frequency,
         'days_of_week': daysOfWeek,
-        'enabled': 1,
-        'start_date': now,
+        'target_count': 1,
         'created_at': now,
         'updated_at': now,
       });
