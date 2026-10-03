@@ -1,9 +1,11 @@
 import '../data/bill_repository.dart';
+import '../data/budget_repository.dart';
 import '../data/database.dart';
 import '../data/extended_repository.dart';
 import '../data/habit_repository.dart';
 import '../data/routine_repository.dart';
 import '../data/task_repository.dart';
+import '../domain/enums.dart';
 
 enum AttentionKind {
   overdueTask,
@@ -17,6 +19,8 @@ enum AttentionKind {
   practicalDue,
   appointmentSoon,
   shoppingOpen,
+  budgetWarning,
+  budgetExceeded,
 }
 
 class AttentionItem {
@@ -117,6 +121,29 @@ class NeedsAttentionService {
         subtitle: overdue ? 'Bill overdue' : 'Bill due',
         urgency: overdue ? 95 : 80,
       ));
+    }
+
+    // Budget alerts
+    for (final b in await BudgetRepository(_db).alerts()) {
+      final spent = (b.spentMinor / 100).toStringAsFixed(0);
+      final limit = (b.limitMinor / 100).toStringAsFixed(0);
+      if (b.level == BudgetAlertLevel.exceeded) {
+        items.add(AttentionItem(
+          kind: AttentionKind.budgetExceeded,
+          id: b.id,
+          title: b.name,
+          subtitle: 'Budget exceeded ($spent / $limit ${Defaults.currency})',
+          urgency: 92,
+        ));
+      } else {
+        items.add(AttentionItem(
+          kind: AttentionKind.budgetWarning,
+          id: b.id,
+          title: b.name,
+          subtitle: 'Near budget limit ($spent / $limit ${Defaults.currency})',
+          urgency: 74,
+        ));
+      }
     }
 
     final ext = ExtendedRepository(_db);
