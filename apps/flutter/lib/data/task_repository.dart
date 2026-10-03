@@ -60,7 +60,6 @@ class TaskRepository {
     return rows.map(Task.fromMap).toList();
   }
 
-  /// Tasks that still depend on incomplete work — not schedulable yet.
   Future<Set<String>> listBlockedTaskIds() async {
     final db = await _db.database;
     try {
@@ -106,6 +105,24 @@ class TaskRepository {
     final rows = await (await _db.database).query('tasks', where: 'id = ?', whereArgs: [id], limit: 1);
     if (rows.isEmpty) return null;
     return Task.fromMap(rows.first);
+  }
+
+  Future<String?> descriptionOf(String taskId) async {
+    final rows = await (await _db.database).query(
+      'tasks',
+      columns: ['description'],
+      where: 'id = ?',
+      whereArgs: [taskId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    final d = rows.first['description'];
+    return d is String ? d : null;
+  }
+
+  Future<void> reschedule(String taskId, DateTime day) async {
+    final due = DateTime(day.year, day.month, day.day, 23, 59).millisecondsSinceEpoch;
+    await update(id: taskId, dueAt: due);
   }
 
   Future<Task> create({
