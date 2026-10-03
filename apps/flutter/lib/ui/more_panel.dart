@@ -44,7 +44,6 @@ class _MorePanelState extends State<MorePanel> {
   final _projects = ProjectRepository(AppDatabase.instance);
   final _routines = RoutineRepository(AppDatabase.instance);
   final _bills = BillRepository(AppDatabase.instance);
-  final _milestones = MilestoneRepository(AppDatabase.instance);
   final _notes = NoteRepository(AppDatabase.instance);
   final _expenses = ExpenseRepository(AppDatabase.instance);
   final _incomeRepo = IncomeRepository(AppDatabase.instance);
@@ -159,17 +158,17 @@ class _MorePanelState extends State<MorePanel> {
         _label('People (${_people.length})'),
         ..._people.take(6).map((p) => ListTile(
               dense: true,
-              title: Text('${p['name']}', style: const TextStyle(color: Colors.white)),
+              title: Text('${p['name'] ?? ''}', style: const TextStyle(color: Colors.white)),
             )),
         _label('Subscriptions (${_subs.length})'),
         ..._subs.take(6).map((s) => ListTile(
               dense: true,
-              title: Text('${s['name']}', style: const TextStyle(color: Colors.white)),
+              title: Text('${s['name'] ?? ''}', style: const TextStyle(color: Colors.white)),
             )),
         _label('Debts (${_debts.length})'),
         ..._debts.take(6).map((d) => ListTile(
               dense: true,
-              title: Text('${d['title'] ?? d['counterparty']}', style: const TextStyle(color: Colors.white)),
+              title: Text('${d['title'] ?? d['counterparty'] ?? ''}', style: const TextStyle(color: Colors.white)),
               subtitle: Text(
                 '${d['direction']} · ${UserPrefs.instance.currency} ${((d['remaining_amount_minor'] as int?) ?? 0) / 100}',
                 style: const TextStyle(color: Colors.white38, fontSize: 11),
@@ -178,12 +177,12 @@ class _MorePanelState extends State<MorePanel> {
         _label('Savings (${_savings.length})'),
         ..._savings.take(6).map((s) => ListTile(
               dense: true,
-              title: Text('${s['name']}', style: const TextStyle(color: Colors.white)),
+              title: Text('${s['name'] ?? ''}', style: const TextStyle(color: Colors.white)),
             )),
         _label('Notes (${widget.notes.length})'),
         ...widget.notes.take(6).map((n) => ListTile(
               dense: true,
-              title: Text(n.title, style: const TextStyle(color: Colors.white)),
+              title: Text(n.title ?? n.content, style: const TextStyle(color: Colors.white)),
             )),
         const SizedBox(height: 8),
         Wrap(
