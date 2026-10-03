@@ -14,7 +14,7 @@ class AppDatabase {
   static const _uuid = Uuid();
 
   /// Bump only when adding a non-destructive migration in onUpgrade.
-  static const schemaVersion = 10;
+  static const schemaVersion = 11;
 
   Future<Database> get database async {
     if (_db != null) return _db!;
@@ -39,7 +39,13 @@ class AppDatabase {
     return openDatabase(
       path,
       version: schemaVersion,
-      onConfigure: (db) async => db.execute('PRAGMA foreign_keys = ON'),
+      onConfigure: (db) async {
+        await db.execute('PRAGMA foreign_keys = ON');
+        // Performance pragmas (safe for local single-user app).
+        await db.execute('PRAGMA journal_mode = WAL');
+        await db.execute('PRAGMA synchronous = NORMAL');
+        await db.execute('PRAGMA temp_store = MEMORY');
+      },
       onCreate: (db, version) async {
         await _applySchema(db);
         await _seedDefaultUser(db);
@@ -51,6 +57,7 @@ class AppDatabase {
         if (oldVersion < 8) await _migrateToV8(db);
         if (oldVersion < 9) await _migrateToV9(db);
         if (oldVersion < 10) await _migrateToV10(db);
+        if (oldVersion < 11) await _migrateToV11(db);
       },
     );
   }
@@ -78,6 +85,10 @@ class AppDatabase {
 
   Future<void> _migrateToV10(Database db) async {
     await _applySchema(db);
+  }
+
+  Future<void> _migrateToV11(Database db) async {
+    await _applySchema(db); // creates new indexes via IF NOT EXISTS
   }
 
   Future<void> _applyV6Constraints(Database db) async {
