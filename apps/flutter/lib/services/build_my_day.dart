@@ -24,7 +24,7 @@ class DaySlot {
   final DaySlotKind kind;
   final String? entityId;
   final String reason;
-  final bool locked; // already on calendar / user block
+  final bool locked;
   final int priority;
 
   const DaySlot({
@@ -84,15 +84,11 @@ class BuiltDay {
     this.dayEndHour = 22,
   });
 
-  /// Only actionable / locked work (no pure free gaps).
   List<DaySlot> get timeline =>
       slots.where((s) => s.kind != DaySlotKind.free).toList();
 }
 
-/// Builds a concrete timed day — not a ranked list.
-///
-/// Uses deadlines, estimates, calendar events, time blocks, routines,
-/// habits, free gaps, priorities, and project-linked tasks.
+/// Builds a concrete timed day from calendar, blocks, tasks, habits, routines.
 class BuildMyDayEngine {
   BuildMyDayEngine({AppDatabase? db})
       : _db = db ?? AppDatabase.instance,
@@ -116,14 +112,12 @@ class BuildMyDayEngine {
   }) async {
     final d = day ?? DateTime.now();
     final dayStart = DateTime(d.year, d.month, d.day, dayStartHour);
-    var dayEnd = DateTime(d.year, d.month, d.day, dayEndHour);
+    final dayEnd = DateTime(d.year, d.month, d.day, dayEndHour);
     final now = DateTime.now();
     final isToday = d.year == now.year && d.month == now.month && d.day == now.day;
 
-    // Cursor for packing: never schedule in the past on today.
     var workStart = dayStart;
     if (isToday && now.isAfter(workStart)) {
-      // Round up to next 15 min
       final m = ((now.minute + 14) ~/ 15) * 15;
       workStart = DateTime(now.year, now.month, now.day, now.hour, 0)
           .add(Duration(minutes: m >= 60 ? 60 : m));
@@ -133,7 +127,6 @@ class BuildMyDayEngine {
     final locked = await _collectLocked(d, dayStart, dayEnd);
     final candidates = await _collectFlexible(d, locked, maxFlexible);
 
-    // Optional soft lunch if not overlapping a locked block
     if (includeLunchBreak) {
       final lunchStart = DateTime(d.year, d.month, d.day, 12, 30);
       final lunchEnd = lunchStart.add(const Duration(minutes: 45));
@@ -159,7 +152,6 @@ class BuildMyDayEngine {
     final unplaced = <FlexibleCandidate>[];
     final usedIds = locked.map((s) => s.entityId).whereType<String>().toSet();
 
-    // First-fit into gaps, candidates already sorted by score desc
     for (final c in candidates) {
       if (usedIds.contains(c.id)) continue;
       final fit = _placeInGaps(gaps, c.durationMin);
@@ -203,12 +195,15 @@ class BuildMyDayEngine {
     );
   }
 
-  /// Write flexible task/habit slots into time_blocks + task schedule.
+  /// Commit plan: each task schedule is atomic (task + block + history).
+  /// Skips dependency-blocked tasks.
   Future<int> apply(BuiltDay built) async {
+    final blocked = await _tasks.listBlockedTaskIds();
     var n = 0;
     for (final s in built.timeline) {
       if (s.locked) continue;
       if (s.kind == DaySlotKind.task && s.entityId != null) {
+        if (blocked.contains(s.entityId)) continue;
         await _plan.scheduleTaskSession(
           taskId: s.entityId!,
           start: s.start,
@@ -243,36 +238,31 @@ class BuildMyDayEngine {
     final out = <DaySlot>[];
     final db = await _db.database;
 
-    final events = await db.query(
-      'calendar_events',
-      where: 'start_at < ? AND (end_at IS NULL OR end_at > ?) AND (status IS NULL OR status != ?)',
-      whereArgs: [
-        dayEnd.millisecondsSinceEpoch,
-        dayStart.millisecondsSinceEpoch,
-        'CANCELLED',
-      ],
-      orderBy: 'start_at ASC',
-    );
-    for (final e in events) {
-      final s = DateTime.fromMillisecondsSinceEpoch(e['start_at'] as int);
-      final endMs = e['end_at'] as int?;
-      final en = endMs != null
-          ? DateTime.fromMillisecondsSinceEpoch(endMs)
-          : s.add(const Duration(hours: 1));
-      final cs = s.isBefore(dayStart) ? dayStart : s;
-      final ce = en.isAfter(dayEnd) ? dayEnd : en;
-      if (!ce.isAfter(cs)) continue;
-      out.add(DaySlot(
-        start: cs,
-        end: ce,
-        title: dbStr(e['title'], 'Event'),
-        kind: DaySlotKind.event,
-        entityId: dbStr(e['id']),
-        reason: 'Calendar',
-        locked: true,
-        priority: 200,
-      ));
-    }
+    try {
+      final events = await db.query(
+        'calendar_events',
+        where: 'start_at < ? AND end_at > ?',
+        whereArgs: [dayEnd.millisecondsSinceEpoch, dayStart.millisecondsSinceEpoch],
+      );
+      for (final e in events) {
+        if ('${e['status'] ?? ''}' == 'CANCELLED') continue;
+        final s = DateTime.fromMillisecondsSinceEpoch(e['start_at'] as int);
+        final en = DateTime.fromMillisecondsSinceEpoch(e['end_at'] as int);
+        final cs = s.isBefore(dayStart) ? dayStart : s;
+        final ce = en.isAfter(dayEnd) ? dayEnd : en;
+        if (!ce.isAfter(cs)) continue;
+        out.add(DaySlot(
+          start: cs,
+          end: ce,
+          title: dbStr(e['title'], 'Event'),
+          kind: DaySlotKind.event,
+          entityId: dbStr(e['id']),
+          reason: 'Calendar',
+          locked: true,
+          priority: 200,
+        ));
+      }
+    } catch (_) {}
 
     final blocks = await _plan.listBlocksOnDay(d);
     for (final b in blocks) {
@@ -293,7 +283,6 @@ class BuildMyDayEngine {
       ));
     }
 
-    // Tasks already scheduled today
     final scheduled = await _tasks.listScheduledOnDay(d);
     for (final t in scheduled) {
       if (t.scheduledStart == null) continue;
@@ -301,7 +290,6 @@ class BuildMyDayEngine {
       final en = t.scheduledEnd != null
           ? DateTime.fromMillisecondsSinceEpoch(t.scheduledEnd!)
           : s.add(Duration(minutes: t.estimatedMinutes ?? 30));
-      // Skip if already covered by a time block with same task
       if (out.any((x) => x.entityId == t.id)) continue;
       final cs = s.isBefore(dayStart) ? dayStart : s;
       final ce = en.isAfter(dayEnd) ? dayEnd : en;
@@ -327,6 +315,7 @@ class BuildMyDayEngine {
     int maxFlexible,
   ) async {
     final lockedIds = locked.map((s) => s.entityId).whereType<String>().toSet();
+    final blockedIds = await _tasks.listBlockedTaskIds();
     final candidates = <FlexibleCandidate>[];
 
     final overdue = await _tasks.listOverdue();
@@ -335,11 +324,12 @@ class BuildMyDayEngine {
 
     void addTask(Task t, int base, String reason) {
       if (lockedIds.contains(t.id)) return;
+      if (blockedIds.contains(t.id)) return;
       if (candidates.any((c) => c.id == t.id)) return;
-      if (t.scheduledStart != null) return; // already timed
-      final dur = (t.estimatedMinutes ?? _defaultTaskMinutes(t)).clamp(15, 120);
+      if (t.scheduledStart != null) return;
+      final dur = (t.estimatedMinutes ?? _defaultTaskMinutes(t)).clamp(15, 180);
       var score = base + t.priority * 6;
-      if (t.projectId != null) score += 8; // project work is important
+      if (t.projectId != null) score += 8;
       if (t.goalId != null) score += 5;
       candidates.add(FlexibleCandidate(
         id: t.id,
@@ -362,9 +352,9 @@ class BuildMyDayEngine {
       addTask(t, 40 + t.priority * 3, t.projectId != null ? 'Project work' : 'Open task');
     }
 
-    // Habits not completed today
     final habits = await _habits.listActive();
-    final dayKey = HabitRepository.dayKey(d);
+    final dayKey =
+        '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
     final db = await _db.database;
     for (final h in habits) {
       if (lockedIds.contains(h.id)) continue;
@@ -387,7 +377,6 @@ class BuildMyDayEngine {
       ));
     }
 
-    // Routines (preferred morning bias)
     final routines = await _routines.listActive();
     for (final r in routines) {
       if (lockedIds.contains(r.id)) continue;
@@ -399,23 +388,10 @@ class BuildMyDayEngine {
       if (mins <= 0) mins = r.estimatedMinutes ?? 25;
       mins = mins.clamp(15, 90);
 
-      String? preferred;
-      try {
-        final sch = await db.query(
-          'routine_schedules',
-          where: 'routine_id = ?',
-          whereArgs: [r.id],
-          limit: 1,
-        );
-        if (sch.isNotEmpty) preferred = dbStrOrNull(sch.first['preferred_time']);
-      } catch (_) {}
-
       var score = 60;
-      // Prefer morning-named routines slightly higher early
       final name = r.name.toLowerCase();
       if (name.contains('morning')) score = 75;
       if (name.contains('evening') || name.contains('night')) score = 35;
-      if (preferred != null) score += 10;
 
       candidates.add(FlexibleCandidate(
         id: r.id,
@@ -423,7 +399,7 @@ class BuildMyDayEngine {
         kind: DaySlotKind.routine,
         durationMin: mins,
         score: score,
-        reason: preferred != null ? 'Routine · preferred $preferred' : 'Routine',
+        reason: 'Routine',
       ));
     }
 
@@ -444,7 +420,6 @@ class BuildMyDayEngine {
     return false;
   }
 
-  /// Gaps as (start, end) pairs between locked intervals.
   List<(DateTime, DateTime)> _freeGaps(
     DateTime from,
     DateTime to,
@@ -474,7 +449,6 @@ class BuildMyDayEngine {
         return (start, end);
       }
     }
-    // Try partial: place remaining >= 15 in largest gap
     if (minutes > 15) {
       var bestI = -1;
       var bestAvail = 0;
@@ -498,7 +472,6 @@ class BuildMyDayEngine {
     for (var i = 0; i < gaps.length; i++) {
       final g = gaps[i];
       if (!start.isBefore(g.$2) || !end.isAfter(g.$1)) continue;
-      // Split / shrink
       final before = start.isAfter(g.$1) ? (g.$1, start) : null;
       final after = end.isBefore(g.$2) ? (end, g.$2) : null;
       gaps.removeAt(i);
