@@ -33,11 +33,9 @@ class IntegrityService {
     var fixed = 0;
     final db = await _db.database;
 
-    // 13. User presence
     final users = await db.query('users');
     checks.add(users.isEmpty ? 'FAIL: no user row' : 'OK: ${users.length} user(s)');
 
-    // 14. Habit occurrence dedupe
     try {
       final dups = await db.rawQuery('''
         SELECT habit_id, scheduled_date, COUNT(*) AS c
@@ -63,7 +61,6 @@ class IntegrityService {
       checks.add('SKIP: habit occurrence dedupe ($e)');
     }
 
-    // 15. Bill occurrence dedupe
     try {
       final dups = await db.rawQuery('''
         SELECT bill_id, due_at, COUNT(*) AS c
@@ -89,7 +86,6 @@ class IntegrityService {
       checks.add('SKIP: bill occurrence dedupe ($e)');
     }
 
-    // Task dependencies orphans
     try {
       final orphans = await db.rawQuery('''
         SELECT COUNT(*) AS c FROM task_dependencies d
@@ -115,7 +111,6 @@ class IntegrityService {
       checks.add('SKIP: dependency check ($e)');
     }
 
-    // 16. Debt status vocabulary OPEN | PAID (ACTIVE → OPEN)
     try {
       final bad = await db.rawQuery(
         "SELECT COUNT(*) AS c FROM debts WHERE status = 'ACTIVE'",
@@ -135,7 +130,6 @@ class IntegrityService {
       checks.add('SKIP: debt status ($e)');
     }
 
-    // Orphan bill occurrences (bill deleted)
     try {
       final orphans = await db.rawQuery('''
         SELECT COUNT(*) AS c FROM bill_occurrences o
@@ -160,7 +154,6 @@ class IntegrityService {
       checks.add('SKIP: bill orphan check ($e)');
     }
 
-    // Negative money amounts (data quality)
     try {
       final neg = await db.rawQuery('''
         SELECT
@@ -173,7 +166,6 @@ class IntegrityService {
       checks.add('SKIP: money sign check ($e)');
     }
 
-    // Empty required titles
     try {
       final empty = await db.rawQuery('''
         SELECT COUNT(*) AS c FROM tasks WHERE title IS NULL OR trim(title) = ''
@@ -199,7 +191,6 @@ class IntegrityService {
     return IntegrityReport(ok: ok, checks: checks, fixed: fixed);
   }
 
-  /// Validates actual ExportService payload shape (table keys at top level).
   Future<IntegrityReport> verifyBackupJson(String raw) async {
     final checks = <String>[];
     try {
@@ -217,10 +208,10 @@ class IntegrityService {
       final map = Map<String, dynamic>.from(decoded);
 
       final app = map['app']?.toString();
-      if (app != null && app != 'personal-life-os') {
+      if (app != null && !ExportService.legacyAppTags.contains(app)) {
         checks.add('FAIL: app tag is $app');
-      } else if (app == 'personal-life-os') {
-        checks.add('OK: app tag');
+      } else if (app != null) {
+        checks.add('OK: app tag ($app)');
       } else {
         checks.add('WARN: missing app tag (legacy backup?)');
       }
@@ -231,7 +222,6 @@ class IntegrityService {
         checks.add('WARN: no schema/contract version');
       }
 
-      // Export writes tables as top-level keys, not nested under "tables".
       var tableHits = 0;
       for (final t in ExportService.tables) {
         if (map.containsKey(t) || map.containsKey(_toCamel(t))) tableHits++;
@@ -245,7 +235,6 @@ class IntegrityService {
         checks.add('FAIL: no recognizable table data');
       }
 
-      // Require at least users or tasks/notes for a meaningful restore
       final hasUsers = map['users'] is List || map['Users'] is List;
       if (!hasUsers && tableHits < 2) {
         checks.add('WARN: thin backup (few tables)');
