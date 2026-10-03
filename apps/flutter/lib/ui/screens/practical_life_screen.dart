@@ -63,7 +63,7 @@ class _PracticalLifeScreenState extends State<PracticalLifeScreen> {
       ),
     );
     if (ok != true) return;
-    await _ext.addDocument(title: title.text.trim());
+    await _ext.addDocument(title.text.trim());
     await _load();
   }
 
