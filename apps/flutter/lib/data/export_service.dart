@@ -58,13 +58,15 @@ class ExportService {
   ];
 
   static const maxRawChars = 30 * 1024 * 1024;
+  static const appTag = 'ordin';
+  static const legacyAppTags = {'personal-life-os', 'ordin'};
 
   Future<String> buildBackupJson() async {
     final db = await _db.database;
     final data = <String, dynamic>{
       'contractVersion': 2,
       'exportedAt': AppDatabase.nowMs(),
-      'app': 'personal-life-os',
+      'app': appTag,
       'schemaVersion': AppDatabase.schemaVersion,
     };
     for (final t in tables) {
@@ -108,7 +110,7 @@ class ExportService {
     final map = Map<String, dynamic>.from(decoded);
 
     final app = map['app']?.toString();
-    if (app != null && app != 'personal-life-os') {
+    if (app != null && !legacyAppTags.contains(app)) {
       return ImportResult(ok: false, message: 'Unrecognized backup app tag: $app');
     }
 
@@ -117,7 +119,6 @@ class ExportService {
     var skipped = 0;
     var fkSkipped = 0;
 
-    // Two passes: parents first (tables list order), then retry children once.
     Future<void> pass(Transaction txn, {required bool retry}) async {
       for (final table in tables) {
         if (table == 'users' && !replaceUsers) continue;

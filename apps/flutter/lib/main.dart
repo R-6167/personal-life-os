@@ -25,21 +25,20 @@ Future<void> main() async {
   } catch (_) {}
   await SecurityService.instance.load();
   await UserPrefs.instance.load();
-  // Local-only maintenance — never waits on a network.
   try {
     await OfflineRuntime.instance.runMaintenance();
   } catch (_) {}
-  runApp(const PersonalLifeOsApp());
+  runApp(const OrdinApp());
 }
 
-class PersonalLifeOsApp extends StatefulWidget {
-  const PersonalLifeOsApp({super.key});
+class OrdinApp extends StatefulWidget {
+  const OrdinApp({super.key});
 
   @override
-  State<PersonalLifeOsApp> createState() => _PersonalLifeOsAppState();
+  State<OrdinApp> createState() => _OrdinAppState();
 }
 
-class _PersonalLifeOsAppState extends State<PersonalLifeOsApp> with WidgetsBindingObserver {
+class _OrdinAppState extends State<OrdinApp> with WidgetsBindingObserver {
   bool _unlocked = false;
 
   @override
@@ -75,7 +74,7 @@ class _PersonalLifeOsAppState extends State<PersonalLifeOsApp> with WidgetsBindi
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Personal Life OS',
+      title: 'Ordin',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.dark(),
       home: _unlocked
