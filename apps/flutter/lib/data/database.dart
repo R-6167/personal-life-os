@@ -13,7 +13,7 @@ class AppDatabase {
   Database? _db;
   static const _uuid = Uuid();
 
-  static const schemaVersion = 19;
+  static const schemaVersion = 20;
 
   Future<Database> get database async {
     if (_db != null) return _db!;
@@ -62,6 +62,7 @@ class AppDatabase {
         await _migrateToV17(db);
         await _migrateToV18(db);
         await _migrateToV19(db);
+        await _migrateToV20(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 6) await _migrateToV6(db);
@@ -78,6 +79,7 @@ class AppDatabase {
         if (oldVersion < 17) await _migrateToV17(db);
         if (oldVersion < 18) await _migrateToV18(db);
         if (oldVersion < 19) await _migrateToV19(db);
+        if (oldVersion < 20) await _migrateToV20(db);
       },
     );
   }
@@ -239,6 +241,29 @@ class AppDatabase {
         'UPDATE task_recurrences SET enabled = 1 WHERE enabled IS NULL',
       );
     } catch (_) {}
+  }
+
+  /// Idempotent occurrence uniqueness + schedule interval columns for habits/routines.
+  Future<void> _migrateToV20(Database db) async {
+    await _applySchema(db);
+    try {
+      await db.execute('''
+        DELETE FROM routine_occurrences WHERE id NOT IN (
+          SELECT MAX(id) FROM routine_occurrences GROUP BY routine_id, scheduled_date
+        )
+      ''');
+    } catch (_) {}
+    await _tryAlter(
+      db,
+      'CREATE UNIQUE INDEX IF NOT EXISTS uq_routine_occ_day ON routine_occurrences(routine_id, scheduled_date)',
+    );
+    await _tryAlter(
+      db,
+      'CREATE UNIQUE INDEX IF NOT EXISTS uq_habit_occ_day ON habit_occurrences(habit_id, scheduled_date)',
+    );
+    await _tryAlter(db, 'ALTER TABLE habit_schedules ADD COLUMN interval INTEGER');
+    await _tryAlter(db, 'ALTER TABLE routine_schedules ADD COLUMN interval INTEGER');
+    await _tryAlter(db, 'ALTER TABLE bills ADD COLUMN interval INTEGER');
   }
 
   Future<void> _tryAlter(Database db, String sql) async {
