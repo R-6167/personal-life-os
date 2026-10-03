@@ -2,7 +2,6 @@ import 'package:sqflite/sqflite.dart';
 
 import '../domain/enums.dart';
 import 'database.dart';
-import 'task_repository.dart';
 
 /// Inclusive busy interval in milliseconds [start, end).
 class BusyInterval {
@@ -316,8 +315,6 @@ class PlanningRepository {
     return id;
   }
 
-  /// Collect all busy intervals for a work window: time blocks, calendar events,
-  /// and tasks with scheduled_start/end (even without a time_block row).
   Future<List<BusyInterval>> collectDayBusy({
     required DateTime day,
     int dayStartHour = 8,
@@ -382,7 +379,6 @@ class PlanningRepository {
     return mergeBusyIntervals(busy);
   }
 
-  /// Free minutes after merging overlapping busy intervals (blocks + calendar + scheduled tasks).
   Future<int> availableMinutes({
     required DateTime day,
     int dayStartHour = 8,
@@ -404,7 +400,6 @@ class PlanningRepository {
     return free < 0 ? 0 : free;
   }
 
-  /// Suggest start times that fit [durationMinutes] into free gaps for the day.
   Future<List<DateTime>> suggestSlots({
     required DateTime day,
     int durationMinutes = 30,
