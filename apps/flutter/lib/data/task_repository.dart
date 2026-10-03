@@ -85,6 +85,7 @@ class TaskRepository {
     String? projectId,
     String? goalId,
     String? milestoneId,
+    String? parentTaskId,
   }) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
@@ -104,6 +105,7 @@ class TaskRepository {
       final map = task.toInsertMap();
       if (description != null && description.isNotEmpty) map['description'] = description;
       if (milestoneId != null) map['milestone_id'] = milestoneId;
+      if (parentTaskId != null) map['parent_task_id'] = parentTaskId;
       await txn.insert('tasks', map);
       await txn.insert('activity_events', {
         'id': AppDatabase.newId(),
