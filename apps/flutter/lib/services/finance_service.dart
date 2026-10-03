@@ -55,7 +55,6 @@ class FinanceService {
     };
   }
 
-  /// Unified recent financial history for reconciliation.
   Future<List<Map<String, Object?>>> ledger({int limit = 40}) async {
     final db = await _db.database;
     final rows = await db.rawQuery('''
@@ -88,8 +87,10 @@ class FinanceService {
     final title = rows.first['title'] as String? ?? 'Debt';
 
     await _db.txn((txn) async {
-      final expenseId = AppDatabase.newId();
+      final ledgerId = AppDatabase.newId();
+      String? expenseId;
       if (direction == 'OWED_BY_ME') {
+        expenseId = ledgerId;
         await txn.insert('expenses', {
           'id': expenseId,
           'owner_id': ownerId,
@@ -115,9 +116,8 @@ class FinanceService {
           }
         }
       } else {
-        // Money received
         await txn.insert('income', {
-          'id': expenseId,
+          'id': ledgerId,
           'owner_id': ownerId,
           'account_id': accountId,
           'source': 'Debt received: $title',
@@ -141,15 +141,14 @@ class FinanceService {
         }
       }
 
+      // Schema: id, debt_id, amount_minor, occurred_at, account_id, expense_id, created_at
       await txn.insert('debt_payments', {
         'id': AppDatabase.newId(),
         'debt_id': debtId,
         'amount_minor': minor,
-        'currency': Defaults.currency,
-        'paid_at': now,
+        'occurred_at': now,
         'account_id': accountId,
-        'expense_id': direction == 'OWED_BY_ME' ? expenseId : null,
-        'income_id': direction == 'OWED_BY_ME' ? null : expenseId,
+        'expense_id': expenseId,
         'created_at': now,
       });
 
@@ -157,7 +156,7 @@ class FinanceService {
         'debts',
         {
           'remaining_amount_minor': remaining < 0 ? 0 : remaining,
-          'status': remaining <= 0 ? 'PAID' : 'ACTIVE',
+          'status': remaining <= 0 ? 'PAID' : 'OPEN',
           'updated_at': now,
         },
         where: 'id = ?',
@@ -218,13 +217,14 @@ class FinanceService {
           );
         }
       }
+      // Schema: goal_id (not savings_goal_id)
       await txn.insert('savings_contributions', {
         'id': AppDatabase.newId(),
-        'savings_goal_id': goalId,
+        'goal_id': goalId,
         'amount_minor': minor,
-        'currency': Defaults.currency,
-        'account_id': accountId,
         'occurred_at': now,
+        'account_id': accountId,
+        'expense_id': expenseId,
         'created_at': now,
       });
       await txn.update(
