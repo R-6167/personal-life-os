@@ -8,6 +8,7 @@ import '../../domain/enums.dart';
 import '../../domain/models.dart';
 import '../../services/finance_service.dart';
 import '../forms/create_forms.dart';
+import '../screens/budgets_screen.dart';
 import '../theme.dart';
 import '../widgets/glass.dart';
 
@@ -302,9 +303,37 @@ class _FinanceHubState extends State<FinanceHub> {
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
       children: [
         const Text('Finance', style: TextStyle(color: AppTheme.silver, fontSize: 22, fontWeight: FontWeight.w700)),
-        Text('Connected accounts · bills · debts · savings · history',
+        Text('Accounts · budgets · bills · debts · savings · history',
             style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45), fontSize: 12)),
         const SizedBox(height: 12),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: GlassCard(
+            onTap: () {
+              Navigator.of(context)
+                  .push(MaterialPageRoute(builder: (_) => const BudgetsScreen()))
+                  .then((_) => _refresh());
+            },
+            child: Row(
+              children: [
+                const Icon(Icons.pie_chart_outline, color: AppTheme.amber),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Budgets & limits',
+                          style: TextStyle(color: AppTheme.silver, fontWeight: FontWeight.w600)),
+                      Text('Monthly caps · 80% warning · overspend alerts',
+                          style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45), fontSize: 12)),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right, color: AppTheme.silverMuted),
+              ],
+            ),
+          ),
+        ),
         GlassCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
