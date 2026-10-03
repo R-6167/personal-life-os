@@ -2,6 +2,10 @@ name: Flutter APK Build
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - 'apps/flutter/**'
+      - '.github/workflows/flutter-apk.yml'
 
 jobs:
   build:
@@ -36,24 +40,19 @@ jobs:
       - name: Flutter version
         run: flutter --version
 
-      - name: Generate complete Android platform
+      - name: Ensure Android platform present
         run: |
-          rm -rf android ios linux macos web windows
-          flutter create . \
-            --project-name personal_life_os \
-            --org com.personallifeos \
-            --platforms=android
-          cat > test/widget_test.dart <<'EOF'
-          import 'package:flutter_test/flutter_test.dart';
-          import 'package:personal_life_os/main.dart';
-
-          void main() {
-            testWidgets('app builds', (tester) async {
-              expect(PersonalLifeOsApp, isNotNull);
-            });
-          }
-          EOF
-          test -f android/gradlew
+          if [ ! -f android/app/build.gradle ] && [ ! -f android/app/build.gradle.kts ]; then
+            echo "Android folder incomplete — generating once"
+            flutter create . \
+              --project-name personal_life_os \
+              --org com.personallifeos \
+              --platforms=android
+          else
+            echo "Using committed Android platform"
+            ls -la android/app/
+          fi
+          # Local notifications permissions (idempotent)
           MANIFEST=android/app/src/main/AndroidManifest.xml
           if [ -f "$MANIFEST" ]; then
             if ! grep -q POST_NOTIFICATIONS "$MANIFEST"; then
