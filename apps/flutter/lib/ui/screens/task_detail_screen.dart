@@ -8,6 +8,7 @@ import '../../domain/enums.dart';
 import '../../domain/models.dart';
 import '../theme.dart';
 import '../widgets/glass.dart';
+import '../widgets/work_session_panel.dart';
 
 /// Full task workspace: view, edit, reschedule, complete, reopen, delete, dependencies.
 class TaskDetailScreen extends StatefulWidget {
@@ -107,15 +108,15 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
   }
 
   Future<void> _scheduleSession(Task t) async {
-    final now = DateTime.now();
-    var start = DateTime(now.year, now.month, now.day, now.hour + 1, 0);
+    DateTime start = DateTime.now().add(const Duration(minutes: 15));
     var minutes = t.estimatedMinutes ?? 30;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setLocal) => AlertDialog(
           backgroundColor: AppTheme.metal,
-          title: const Text('Schedule session', style: TextStyle(color: AppTheme.silver)),
+          title: Text('Schedule: ${t.title}',
+              style: const TextStyle(color: AppTheme.silver, fontSize: 16)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -129,21 +130,38 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
                 trailing: const Icon(Icons.edit_calendar, color: AppTheme.amber),
                 onTap: () async {
                   final d = await showDatePicker(
-                      context: ctx, initialDate: start, firstDate: DateTime(2020), lastDate: DateTime(2100));
+                    context: ctx,
+                    initialDate: start,
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime(2100),
+                  );
                   if (d == null) return;
-                  final tm = await showTimePicker(context: ctx, initialTime: TimeOfDay.fromDateTime(start));
+                  final tm = await showTimePicker(
+                    context: ctx,
+                    initialTime: TimeOfDay.fromDateTime(start),
+                  );
+                  if (tm == null) return;
                   setLocal(() {
-                    start = DateTime(d.year, d.month, d.day, tm?.hour ?? start.hour, tm?.minute ?? start.minute);
+                    start = DateTime(d.year, d.month, d.day, tm.hour, tm.minute);
                   });
                 },
               ),
-              DropdownButton<int>(
-                value: minutes,
-                dropdownColor: AppTheme.metal,
-                items: const [15, 25, 30, 45, 60, 90]
-                    .map((m) => DropdownMenuItem(value: m, child: Text('$m min')))
-                    .toList(),
-                onChanged: (v) => setLocal(() => minutes = v ?? 30),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text('$minutes minutes', style: const TextStyle(color: AppTheme.silver)),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      onPressed: () => setLocal(() => minutes = (minutes - 15).clamp(15, 180)),
+                      icon: const Icon(Icons.remove),
+                    ),
+                    IconButton(
+                      onPressed: () => setLocal(() => minutes = (minutes + 15).clamp(15, 180)),
+                      icon: const Icon(Icons.add),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -167,108 +185,16 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
     }
   }
 
-  Future<void> _makeRecurring(Task t) async {
-    var freq = 'DAILY';
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setLocal) => AlertDialog(
-          backgroundColor: AppTheme.metal,
-          title: const Text('Repeat', style: TextStyle(color: AppTheme.silver)),
-          content: DropdownButtonFormField<String>(
-            value: freq,
-            dropdownColor: AppTheme.metal,
-            items: const [
-              DropdownMenuItem(value: 'DAILY', child: Text('Daily')),
-              DropdownMenuItem(value: 'WEEKLY', child: Text('Weekly')),
-              DropdownMenuItem(value: 'MONTHLY', child: Text('Monthly')),
-            ],
-            onChanged: (v) => setLocal(() => freq = v ?? 'DAILY'),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save')),
-          ],
-        ),
-      ),
-    );
-    if (ok != true) return;
-    await _tasks.setRecurrence(taskId: t.id, frequency: freq);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Repeats $freq')));
-    }
+  String _priorityLabel(int p) {
+    if (p >= 2) return 'Urgent';
+    if (p == 1) return 'High';
+    return 'Normal';
   }
-
-  Future<void> _confirmDelete() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.metal,
-        title: const Text('Delete task?', style: TextStyle(color: AppTheme.silver)),
-        content: const Text(
-          'It will leave your open lists. Activity history is kept.',
-          style: TextStyle(color: AppTheme.silver),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    await _tasks.delete(widget.taskId);
-    if (mounted) Navigator.pop(context, true);
-  }
-
-  Future<void> _addBlocker() async {
-    final open = await _tasks.listOpen();
-    final others = open.where((t) => t.id != widget.taskId).toList();
-    if (!mounted) return;
-    if (others.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No other open tasks to depend on')),
-      );
-      return;
-    }
-    final picked = await showModalBottomSheet<Task>(
-      context: context,
-      backgroundColor: AppTheme.metal,
-      builder: (ctx) => SafeArea(
-        child: ListView(
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text('Blocked by…', style: TextStyle(color: AppTheme.silver, fontWeight: FontWeight.w700)),
-            ),
-            ...others.map(
-              (t) => ListTile(
-                title: Text(t.title, style: const TextStyle(color: AppTheme.silver)),
-                onTap: () => Navigator.pop(ctx, t),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (picked == null) return;
-    await _tasks.addDependency(taskId: widget.taskId, dependsOnTaskId: picked.id);
-    await _load();
-  }
-
-  String _priorityLabel(int p) => switch (p) {
-        2 => 'Urgent',
-        1 => 'High',
-        _ => 'Normal',
-      };
 
   String _dueLabel(Task t) {
     if (t.dueAt == null) return 'No due date';
     final d = DateTime.fromMillisecondsSinceEpoch(t.dueAt!);
-    final s =
-        '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-    if (t.isOverdue) return 'Overdue · $s';
-    if (t.isDueToday) return 'Due today · $s';
-    return 'Due $s';
+    return 'Due ${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
   }
 
   @override
@@ -278,10 +204,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
     }
     final t = _task;
     if (t == null) {
-      return Scaffold(
-        appBar: AppBar(),
-        body: const Center(child: Text('Task not found')),
-      );
+      return Scaffold(appBar: AppBar(), body: const Center(child: Text('Task not found')));
     }
     final done = t.status == EntityStatus.completed;
 
@@ -292,25 +215,13 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
           title: Text(_editing ? 'Edit task' : 'Task'),
           actions: [
             IconButton(
-              tooltip: 'Schedule',
               icon: const Icon(Icons.schedule),
               onPressed: () => _scheduleSession(t),
             ),
             IconButton(
-              tooltip: 'Repeat',
-              icon: const Icon(Icons.repeat),
-              onPressed: () => _makeRecurring(t),
+              icon: Icon(_editing ? Icons.close : Icons.edit),
+              onPressed: () => setState(() => _editing = !_editing),
             ),
-            if (!_editing)
-              IconButton(
-                icon: const Icon(Icons.edit_outlined),
-                onPressed: () => setState(() => _editing = true),
-              ),
-            if (_editing)
-              IconButton(
-                icon: const Icon(Icons.check),
-                onPressed: _save,
-              ),
             PopupMenuButton<String>(
               onSelected: (v) async {
                 if (v == 'reschedule') {
@@ -322,7 +233,8 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
                   await _tasks.reopen(t.id);
                   await _load();
                 } else if (v == 'delete') {
-                  await _confirmDelete();
+                  await _tasks.delete(t.id);
+                  if (mounted) Navigator.pop(context);
                 }
               },
               itemBuilder: (_) => [
@@ -340,7 +252,8 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
             if (_editing) ...[
               TextField(
                 controller: _title,
-                style: const TextStyle(color: AppTheme.silver, fontSize: 18, fontWeight: FontWeight.w600),
+                style: const TextStyle(
+                    color: AppTheme.silver, fontSize: 18, fontWeight: FontWeight.w600),
                 decoration: const InputDecoration(labelText: 'Title'),
               ),
               const SizedBox(height: 12),
@@ -394,19 +307,18 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
                   ],
                 ),
               ),
-              if (_projectOptions.isNotEmpty)
-                DropdownButtonFormField<String?>(
-                  value: _projectId,
-                  dropdownColor: AppTheme.metal,
-                  decoration: const InputDecoration(labelText: 'Project'),
-                  items: [
-                    const DropdownMenuItem(value: null, child: Text('None')),
-                    ..._projectOptions.map(
-                      (p) => DropdownMenuItem(value: p.id, child: Text(p.title)),
-                    ),
-                  ],
-                  onChanged: (v) => setState(() => _projectId = v),
-                ),
+              DropdownButtonFormField<String?>(
+                value: _projectId,
+                dropdownColor: AppTheme.metal,
+                decoration: const InputDecoration(labelText: 'Project'),
+                items: [
+                  const DropdownMenuItem(value: null, child: Text('None')),
+                  ..._projectOptions.map(
+                    (p) => DropdownMenuItem(value: p.id, child: Text(p.title)),
+                  ),
+                ],
+                onChanged: (v) => setState(() => _projectId = v),
+              ),
               const SizedBox(height: 16),
               FilledButton(onPressed: _save, child: const Text('Save changes')),
             ] else ...[
@@ -416,7 +328,9 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
                   children: [
                     Text(t.title,
                         style: const TextStyle(
-                            color: AppTheme.silver, fontSize: 20, fontWeight: FontWeight.w700)),
+                            color: AppTheme.silver,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700)),
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
@@ -426,18 +340,30 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
                         Chip(label: Text(_priorityLabel(t.priority))),
                         Chip(
                           label: Text(_dueLabel(t)),
-                          backgroundColor: t.isOverdue ? Colors.red.withValues(alpha: 0.25) : null,
+                          backgroundColor:
+                              t.isOverdue ? Colors.red.withValues(alpha: 0.25) : null,
                         ),
                       ],
                     ),
                     if ((_description ?? '').isNotEmpty) ...[
                       const SizedBox(height: 12),
-                      Text(_description!, style: const TextStyle(color: AppTheme.silver, height: 1.4)),
+                      Text(_description!,
+                          style: const TextStyle(color: AppTheme.silver, height: 1.4)),
                     ],
                   ],
                 ),
               ),
               const SizedBox(height: 16),
+              if (!done) ...[
+                WorkSessionPanel(
+                  taskId: widget.taskId,
+                  plannedMinutes: t.estimatedMinutes,
+                  onChanged: () {
+                    _load();
+                  },
+                ),
+                const SizedBox(height: 16),
+              ],
               Row(
                 children: [
                   if (!done)
@@ -473,34 +399,23 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
                 ],
               ),
               const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: _reschedule,
-                icon: const Icon(Icons.event),
-                label: const Text('Change due date'),
-              ),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  const Text('Blocked by',
-                      style: TextStyle(color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
-                  const Spacer(),
-                  TextButton(onPressed: _addBlocker, child: const Text('Add')),
-                ],
-              ),
-              if (_deps.isEmpty)
-                Text(
-                  'No dependencies — this task is free to start.',
-                  style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.35)),
-                )
-              else
-                ..._deps.map(
-                  (d) => ListTile(
-                    dense: true,
-                    title: Text('${d['depends_on_title']}', style: const TextStyle(color: AppTheme.silver)),
-                    subtitle: const Text('must finish first',
-                        style: TextStyle(color: AppTheme.silverMuted, fontSize: 11)),
-                  ),
-                ),
+              TextButton(onPressed: _reschedule, child: const Text('Change due date')),
+              if (_deps.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                const Text('Dependencies',
+                    style: TextStyle(
+                        color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 8),
+                ..._deps.map((d) => Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: GlassCard(
+                        child: Text(
+                          'Blocked by: ${d['depends_on_title'] ?? d['depends_on_task_id']}',
+                          style: const TextStyle(color: AppTheme.silver),
+                        ),
+                      ),
+                    )),
+              ],
             ],
           ],
         ),
