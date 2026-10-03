@@ -16,6 +16,7 @@ import '../screens/planning_screen.dart';
 import '../screens/practical_life_screen.dart';
 import '../screens/project_detail_screen.dart';
 import '../screens/routine_detail_screen.dart';
+import '../screens/schedule_screen.dart';
 import '../screens/wellness_screen.dart';
 import '../theme.dart';
 import '../widgets/glass.dart';
@@ -117,7 +118,6 @@ class _LifeHubState extends State<LifeHub> {
   @override
   Widget build(BuildContext context) {
     final attention = _attention;
-    // No page-level "Life" title — AppBar already shows the tab name.
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
       children: [
@@ -140,9 +140,17 @@ class _LifeHubState extends State<LifeHub> {
           },
         ),
         _navCard(
+          icon: Icons.schedule,
+          title: 'Schedule',
+          subtitle: 'Day grid · drag & drop time',
+          onTap: () {
+            Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ScheduleScreen()));
+          },
+        ),
+        _navCard(
           icon: Icons.view_timeline_outlined,
           title: 'Day plan',
-          subtitle: 'Sessions · free time · book tasks',
+          subtitle: 'Build my day · sessions',
           onTap: () {
             Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PlanningScreen()));
           },
