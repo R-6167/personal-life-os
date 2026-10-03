@@ -4,13 +4,18 @@ import '../../data/database.dart';
 import '../../data/extended_repository.dart';
 import '../../data/goal_repository.dart';
 import '../../data/habit_repository.dart';
+import '../../data/routine_repository.dart';
 import '../../domain/models.dart';
 import '../forms/create_forms.dart';
 import '../screens/calendar_screen.dart';
 import '../screens/goal_detail_screen.dart';
+import '../screens/habit_detail_screen.dart';
+import '../screens/needs_attention_screen.dart';
 import '../screens/note_detail_screen.dart';
 import '../screens/planning_screen.dart';
+import '../screens/practical_life_screen.dart';
 import '../screens/project_detail_screen.dart';
+import '../screens/routine_detail_screen.dart';
 import '../theme.dart';
 import '../widgets/glass.dart';
 
@@ -22,12 +27,14 @@ class LifeHub extends StatefulWidget {
     required this.notes,
     required this.projects,
     required this.onChanged,
+    this.routines = const [],
   });
 
   final List<Goal> goals;
   final List<Habit> habits;
   final List<Note> notes;
   final List<Project> projects;
+  final List<Routine> routines;
   final Future<void> Function() onChanged;
 
   @override
@@ -79,6 +86,36 @@ class _LifeHubState extends State<LifeHub> {
     return items.take(5).toList();
   }
 
+  Widget _navCard({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: GlassCard(
+        onTap: onTap,
+        child: Row(
+          children: [
+            Icon(icon, color: AppTheme.amber),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(color: AppTheme.silver, fontWeight: FontWeight.w600)),
+                  Text(subtitle, style: const TextStyle(color: AppTheme.silverMuted, fontSize: 12)),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: AppTheme.silverMuted),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final attention = _attention;
@@ -88,60 +125,56 @@ class _LifeHubState extends State<LifeHub> {
         const Text('Life', style: TextStyle(color: AppTheme.silver, fontSize: 22, fontWeight: FontWeight.w700)),
         const SizedBox(height: 4),
         Text(
-          'Goals → projects → tasks · habits · notes · plans',
+          'Habits · routines · practical · plans',
           style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45), fontSize: 12),
         ),
         const SizedBox(height: 12),
-        GlassCard(
+        _navCard(
+          icon: Icons.priority_high,
+          title: 'Needs attention',
+          subtitle: 'Unified feed of recurring + practical duties',
+          onTap: () {
+            Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const NeedsAttentionScreen()))
+                .then((_) => widget.onChanged());
+          },
+        ),
+        _navCard(
+          icon: Icons.view_timeline_outlined,
+          title: 'Day plan & time',
+          subtitle: 'Sessions · free time · book tasks',
           onTap: () {
             Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PlanningScreen()));
           },
-          child: const Row(
-            children: [
-              Icon(Icons.view_timeline_outlined, color: AppTheme.amber),
-              SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Day plan & time', style: TextStyle(color: AppTheme.silver, fontWeight: FontWeight.w600)),
-                    Text('Sessions · free time · book tasks', style: TextStyle(color: AppTheme.silverMuted, fontSize: 12)),
-                  ],
-                ),
-              ),
-              Icon(Icons.chevron_right, color: AppTheme.silverMuted),
-            ],
-          ),
         ),
-        const SizedBox(height: 8),
-        GlassCard(
+        _navCard(
+          icon: Icons.calendar_month,
+          title: 'Calendar',
+          subtitle: 'Events, reminders, month grid',
           onTap: () {
             Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CalendarScreen()));
           },
-          child: const Row(
-            children: [
-              Icon(Icons.calendar_month, color: AppTheme.amber),
-              SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Calendar', style: TextStyle(color: AppTheme.silver, fontWeight: FontWeight.w600)),
-                    Text('Events, reminders, month grid', style: TextStyle(color: AppTheme.silverMuted, fontSize: 12)),
-                  ],
-                ),
-              ),
-              Icon(Icons.chevron_right, color: AppTheme.silverMuted),
-            ],
-          ),
+        ),
+        _navCard(
+          icon: Icons.home_repair_service_outlined,
+          title: 'Practical life',
+          subtitle: 'Documents · appointments · vehicle · shopping',
+          onTap: () {
+            Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const PracticalLifeScreen()))
+                .then((_) {
+              _loadPractical();
+              return widget.onChanged();
+            });
+          },
         ),
         if (attention.isNotEmpty) ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: 4),
           GlassCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Needs attention', style: TextStyle(color: AppTheme.amber, fontWeight: FontWeight.w600)),
+                const Text('Quick heads-up', style: TextStyle(color: AppTheme.amber, fontWeight: FontWeight.w600)),
                 const SizedBox(height: 8),
                 ...attention.map((a) => Padding(
                       padding: const EdgeInsets.only(bottom: 4),
@@ -202,6 +235,11 @@ class _LifeHubState extends State<LifeHub> {
           ...widget.habits.map((h) => Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: GlassCard(
+                  onTap: () {
+                    Navigator.of(context)
+                        .push(MaterialPageRoute(builder: (_) => HabitDetailScreen(habitId: h.id)))
+                        .then((_) => widget.onChanged());
+                  },
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   child: ListTile(
                     title: Text(h.title, style: const TextStyle(color: AppTheme.silver)),
@@ -211,6 +249,76 @@ class _LifeHubState extends State<LifeHub> {
                         await HabitRepository(AppDatabase.instance).markDoneToday(h.id);
                         if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Logged ${h.title}')));
+                        }
+                        await widget.onChanged();
+                      },
+                    ),
+                  ),
+                ),
+              )),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            const Text('Routines', style: TextStyle(color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
+            const Spacer(),
+            TextButton(
+              onPressed: () async {
+                final c = TextEditingController();
+                final name = await showDialog<String>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    backgroundColor: AppTheme.metal,
+                    title: const Text('New routine', style: TextStyle(color: AppTheme.silver)),
+                    content: TextField(
+                      controller: c,
+                      autofocus: true,
+                      style: const TextStyle(color: AppTheme.silver),
+                      decoration: const InputDecoration(labelText: 'Name'),
+                    ),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+                      FilledButton(
+                        onPressed: () => Navigator.pop(ctx, c.text.trim()),
+                        child: const Text('Create'),
+                      ),
+                    ],
+                  ),
+                );
+                if (name != null && name.isNotEmpty) {
+                  final r = await RoutineRepository(AppDatabase.instance).create(name: name);
+                  if (context.mounted) {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => RoutineDetailScreen(routineId: r.id)),
+                    );
+                  }
+                  await widget.onChanged();
+                }
+              },
+              child: const Text('Add'),
+            ),
+          ],
+        ),
+        if (widget.routines.isEmpty)
+          _empty('Morning / evening sequences with optional steps.')
+        else
+          ...widget.routines.map((r) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: GlassCard(
+                  onTap: () {
+                    Navigator.of(context)
+                        .push(MaterialPageRoute(builder: (_) => RoutineDetailScreen(routineId: r.id)))
+                        .then((_) => widget.onChanged());
+                  },
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  child: ListTile(
+                    title: Text(r.name, style: const TextStyle(color: AppTheme.silver)),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.play_circle_outline, color: AppTheme.amber),
+                      onPressed: () async {
+                        await RoutineRepository(AppDatabase.instance).completeToday(r.id);
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context)
+                              .showSnackBar(SnackBar(content: Text('Completed ${r.name}')));
                         }
                         await widget.onChanged();
                       },
@@ -238,52 +346,6 @@ class _LifeHubState extends State<LifeHub> {
                     style: const TextStyle(color: AppTheme.silver),
                   ),
                 ),
-              )),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            const Text('Practical', style: TextStyle(color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
-            const Spacer(),
-            TextButton(
-              onPressed: () async {
-                final c = TextEditingController();
-                final title = await showDialog<String>(
-                  context: context,
-                  builder: (ctx) => AlertDialog(
-                    backgroundColor: AppTheme.metal,
-                    title: const Text('Practical item', style: TextStyle(color: AppTheme.silver)),
-                    content: TextField(
-                      controller: c,
-                      autofocus: true,
-                      style: const TextStyle(color: AppTheme.silver),
-                      decoration: const InputDecoration(labelText: 'Title *'),
-                    ),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-                      FilledButton(
-                        onPressed: () => Navigator.pop(ctx, c.text.trim()),
-                        child: const Text('Save'),
-                      ),
-                    ],
-                  ),
-                );
-                if (title != null && title.isNotEmpty) {
-                  await ExtendedRepository(AppDatabase.instance).addPractical(title);
-                  await _loadPractical();
-                  await widget.onChanged();
-                }
-              },
-              child: const Text('Add'),
-            ),
-          ],
-        ),
-        if (_practical.isEmpty)
-          _empty('Documents, vehicles, chores — add what needs tracking.')
-        else
-          ..._practical.map((p) => ListTile(
-                dense: true,
-                title: Text('${p['title']}', style: const TextStyle(color: AppTheme.silver)),
-                subtitle: Text('${p['type']}', style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11)),
               )),
       ],
     );
