@@ -91,7 +91,7 @@ class OfflineRuntime {
         bills.refreshOccurrenceStatuses(),
       ]);
       try {
-        await SmartReminderService(db).syncAll();
+        await SmartReminderService(db: db).syncAll();
       } catch (e, st) {
         await ErrorLogService.instance.log(
           message: 'smart_reminders: $e',
