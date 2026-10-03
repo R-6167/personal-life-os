@@ -31,6 +31,7 @@ import 'settings_screen.dart';
 import 'theme.dart';
 import 'widgets/empty_state.dart';
 import 'widgets/glass.dart';
+import 'widgets/offline_badge.dart';
 import 'widgets/pay_bill_dialog.dart';
 import 'widgets/section_header.dart';
 
@@ -196,12 +197,16 @@ class _HomeShellState extends State<HomeShell> {
             children: [
               Text(_titles[_tab], style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
               Text(
-                _tab == 0 ? _greeting : 'Offline · life workflows',
+                _tab == 0 ? _greeting : 'On-device · no account needed',
                 style: TextStyle(fontSize: 11, color: AppTheme.silver.withValues(alpha: 0.5)),
               ),
             ],
           ),
           actions: [
+            const Padding(
+              padding: EdgeInsets.only(right: 4),
+              child: Center(child: OfflineBadge()),
+            ),
             IconButton(
               tooltip: 'Intelligence',
               onPressed: () {
