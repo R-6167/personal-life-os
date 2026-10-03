@@ -13,7 +13,7 @@ class AppDatabase {
   Database? _db;
   static const _uuid = Uuid();
 
-  static const schemaVersion = 13;
+  static const schemaVersion = 14;
 
   Future<Database> get database async {
     if (_db != null) return _db!;
@@ -56,6 +56,7 @@ class AppDatabase {
         await _applyV6Constraints(db);
         await _migrateToV12(db);
         await _migrateToV13(db);
+        await _migrateToV14(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 6) await _migrateToV6(db);
@@ -66,6 +67,7 @@ class AppDatabase {
         if (oldVersion < 11) await _migrateToV11(db);
         if (oldVersion < 12) await _migrateToV12(db);
         if (oldVersion < 13) await _migrateToV13(db);
+        if (oldVersion < 14) await _migrateToV14(db);
       },
     );
   }
@@ -146,7 +148,6 @@ class AppDatabase {
     } catch (_) {}
   }
 
-  /// Project workspace: subtasks + project deadline.
   Future<void> _migrateToV13(Database db) async {
     await _applySchema(db);
     await _tryAlter(db, 'ALTER TABLE tasks ADD COLUMN parent_task_id TEXT');
@@ -154,6 +155,12 @@ class AppDatabase {
     await _tryAlter(db, 'ALTER TABLE projects ADD COLUMN description TEXT');
     await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id)');
     await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id)');
+  }
+
+  Future<void> _migrateToV14(Database db) async {
+    await _applySchema(db);
+    await _tryAlter(db, 'ALTER TABLE habits ADD COLUMN goal_id TEXT');
+    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_habits_goal ON habits(goal_id)');
   }
 
   Future<void> _tryAlter(Database db, String sql) async {
