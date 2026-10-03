@@ -105,6 +105,12 @@ class _HomeShellState extends State<HomeShell> {
     final r = await _routines.listActive();
     final inc = await _income.listRecent();
     final ev = await _ext.listEventsToday();
+    try {
+      await _habits.ensureAllTodayOccurrences();
+      await _habits.markMissedBeforeToday();
+      await _routines.ensureAllTodayOccurrences();
+      await _routines.markMissedBeforeToday();
+    } catch (_) {}
     final plan = await DayPlanner().buildPlan(limit: 6);
     final scheduled = await _tasks.listScheduledOnDay(DateTime.now());
     int free = 0;
@@ -233,6 +239,7 @@ class _HomeShellState extends State<HomeShell> {
           habits: _habitList,
           notes: _noteList,
           projects: _projectList,
+          routines: _routineList,
           onChanged: _reload,
         );
       case 3:
@@ -388,6 +395,7 @@ class _HomeShellState extends State<HomeShell> {
                             SnackBar(content: Text('Logged ${h.title}')),
                           );
                         }
+                        await _reload();
                       },
                     ),
                   ),
@@ -439,6 +447,7 @@ class _HomeShellState extends State<HomeShell> {
                             SnackBar(content: Text('Completed ${r.name}')),
                           );
                         }
+                        await _reload();
                       },
                     ),
                   ),
