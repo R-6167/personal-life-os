@@ -106,7 +106,7 @@ class AppTheme {
         contentTextStyle: const TextStyle(color: silver),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
-      dialogTheme: DialogTheme(
+      dialogTheme: DialogThemeData(
         backgroundColor: metal,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
