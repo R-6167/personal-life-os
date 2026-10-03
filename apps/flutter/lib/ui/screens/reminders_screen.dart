@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 
 import '../../data/database.dart';
 import '../../data/extended_repository.dart';
+import '../../services/notification_payload.dart';
+import '../../services/notification_router.dart';
 import '../../services/notification_service.dart';
+import '../../services/reminder_generator_service.dart';
 import '../theme.dart';
-import '../widgets/empty_state.dart';
 import '../widgets/glass.dart';
 
-/// Reminder lifecycle: create → notify → snooze → complete.
+/// Reminders inbox: Open · Snooze · Complete · Record result.
 class RemindersScreen extends StatefulWidget {
   const RemindersScreen({super.key});
 
@@ -101,14 +103,38 @@ class _RemindersScreenState extends State<RemindersScreen> {
 
   Future<void> _snooze(String id, {int minutes = 15}) async {
     await _ext.snoozeReminder(id, minutes: minutes);
+    try {
+      await ReminderGeneratorService().recordResult(
+        reminderId: id,
+        result: 'SNOOZED',
+        snoozeMinutes: minutes,
+      );
+    } catch (_) {}
     await _resyncNotifs();
     await _load();
   }
 
   Future<void> _complete(String id) async {
     await _ext.completeReminder(id);
+    try {
+      await ReminderGeneratorService().recordResult(
+        reminderId: id,
+        result: 'COMPLETED',
+      );
+    } catch (_) {}
     await _resyncNotifs();
     await _load();
+  }
+
+  Future<void> _openSource(Map<String, Object?> r) async {
+    final type = '${r['source_type'] ?? NotificationPayload.reminder}';
+    final sid = '${r['source_id'] ?? r['id']}';
+    final payload = NotificationPayload(
+      type: type.isEmpty ? NotificationPayload.reminder : type,
+      id: sid,
+      reminderId: '${r['id']}',
+    );
+    await NotificationRouter.handle(payload.encode());
   }
 
   String _whenLabel(int? ms) {
@@ -129,25 +155,42 @@ class _RemindersScreenState extends State<RemindersScreen> {
         backgroundColor: Colors.transparent,
         appBar: AppBar(
           title: const Text('Reminders'),
-          // Single add control — FAB only (no AppBar + empty-state duplicates).
+          actions: [
+            IconButton(
+              tooltip: 'Resync notifications',
+              icon: const Icon(Icons.sync),
+              onPressed: () async {
+                await _resyncNotifs();
+                await _load();
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Notifications resynced')),
+                  );
+                }
+              },
+            ),
+          ],
         ),
-        floatingActionButton: FloatingActionButton.extended(
+        floatingActionButton: FloatingActionButton(
           onPressed: _add,
-          icon: const Icon(Icons.alarm_add),
-          label: const Text('New reminder'),
+          child: const Icon(Icons.add),
         ),
         body: _loading
             ? const Center(child: CircularProgressIndicator(color: AppTheme.amber))
             : _pending.isEmpty
-                ? EmptyState(
-                    icon: Icons.alarm_off_outlined,
-                    title: 'No pending reminders',
-                    subtitle: 'Create one — it stays on this device and notifies locally.',
-                    // No third button here — use the FAB.
+                ? Center(
+                    child: Text(
+                      'No pending reminders.\nAuto-generated from tasks, bills, habits…',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45)),
+                    ),
                   )
                 : RefreshIndicator(
                     color: AppTheme.amber,
-                    onRefresh: _load,
+                    onRefresh: () async {
+                      await _resyncNotifs();
+                      await _load();
+                    },
                     child: ListView.builder(
                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
                       itemCount: _pending.length,
@@ -156,6 +199,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
                         final id = r['id'] as String;
                         final title = '${r['title']}';
                         final trigger = r['trigger_at'] as int?;
+                        final src = r['source_type'] as String?;
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 8),
                           child: GlassCard(
@@ -167,7 +211,8 @@ class _RemindersScreenState extends State<RemindersScreen> {
                                         color: AppTheme.silver, fontWeight: FontWeight.w600)),
                                 const SizedBox(height: 4),
                                 Text(
-                                  _whenLabel(trigger),
+                                  _whenLabel(trigger) +
+                                      (src != null ? ' · $src' : ''),
                                   style: TextStyle(
                                     color: AppTheme.silver.withValues(alpha: 0.45),
                                     fontSize: 12,
@@ -177,6 +222,11 @@ class _RemindersScreenState extends State<RemindersScreen> {
                                 Wrap(
                                   spacing: 8,
                                   children: [
+                                    if (src != null)
+                                      OutlinedButton(
+                                        onPressed: () => _openSource(r),
+                                        child: const Text('Open'),
+                                      ),
                                     OutlinedButton(
                                       onPressed: () => _snooze(id, minutes: 15),
                                       child: const Text('Snooze 15m'),

@@ -4,6 +4,7 @@ import '../data/habit_repository.dart';
 import '../data/routine_repository.dart';
 import 'error_log_service.dart';
 import 'integrity_service.dart';
+import 'notification_service.dart';
 import 'smart_reminder_service.dart';
 
 class OfflineCapabilities {
@@ -65,7 +66,7 @@ class OfflineRuntime {
     lastSuccessfulWriteAt = DateTime.now();
   }
 
-  /// Habit/routine occurrences, bill statuses, smart practical reminders, integrity.
+  /// Habit/routine, bills, smart practical reminders, notification schedule, integrity.
   Future<void> runMaintenance({bool force = false}) async {
     if (_running) return;
     if (!force &&
@@ -94,6 +95,15 @@ class OfflineRuntime {
       } catch (e, st) {
         await ErrorLogService.instance.log(
           message: 'smart_reminders: $e',
+          stack: '$st',
+          context: 'offline_runtime',
+        );
+      }
+      try {
+        await NotificationService.instance.syncFromDatabase();
+      } catch (e, st) {
+        await ErrorLogService.instance.log(
+          message: 'notifications_sync: $e',
           stack: '$st',
           context: 'offline_runtime',
         );
