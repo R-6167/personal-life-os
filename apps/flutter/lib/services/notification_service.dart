@@ -12,7 +12,7 @@ import 'reminder_generator_service.dart';
 import 'user_prefs.dart';
 
 /// Local notification lifecycle:
-/// Create → Schedule → Notify → Open → Snooze/Complete → Record result
+/// Create → Schedule → Notify → Open / Snooze / Delete → Record result
 class NotificationService {
   NotificationService._();
   static final instance = NotificationService._();
@@ -24,6 +24,12 @@ class NotificationService {
   static const _channelId = 'ordin_life';
   static const _channelName = 'Ordin Life';
   static const _channelDesc = 'Tasks, bills, habits, and life reminders';
+  static const _iosCategory = 'ordin_actions';
+
+  /// Notification action ids (must match Android + iOS definitions).
+  static const actionSnooze15 = 'SNOOZE_15';
+  static const actionSnooze60 = 'SNOOZE_60';
+  static const actionDelete = 'DELETE';
 
   Future<void> init() async {
     if (_ready) return;
@@ -37,14 +43,30 @@ class NotificationService {
     }
 
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const ios = DarwinInitializationSettings(
+    final ios = DarwinInitializationSettings(
       requestAlertPermission: true,
       requestBadgePermission: true,
       requestSoundPermission: true,
+      notificationCategories: [
+        DarwinNotificationCategory(
+          _iosCategory,
+          actions: <DarwinNotificationAction>[
+            DarwinNotificationAction.plain(actionSnooze15, 'Snooze 15m'),
+            DarwinNotificationAction.plain(actionSnooze60, 'Snooze 1h'),
+            DarwinNotificationAction.plain(
+              actionDelete,
+              'Delete',
+              options: <DarwinNotificationActionOption>{
+                DarwinNotificationActionOption.destructive,
+              },
+            ),
+          ],
+        ),
+      ],
     );
 
     await _plugin.initialize(
-      const InitializationSettings(android: android, iOS: ios),
+      InitializationSettings(android: android, iOS: ios),
       onDidReceiveNotificationResponse: _onResponse,
       onDidReceiveBackgroundNotificationResponse: notificationTapBackground,
     );
@@ -61,14 +83,12 @@ class NotificationService {
       ),
     );
 
-    // Cold start: user opened app from a notification
     final launch = await _plugin.getNotificationAppLaunchDetails();
     if (launch?.didNotificationLaunchApp == true) {
-      final p = launch!.notificationResponse?.payload;
-      if (p != null) {
-        // Defer until first frame / navigator ready
+      final response = launch!.notificationResponse;
+      if (response != null) {
         Future<void>.delayed(const Duration(milliseconds: 600), () {
-          NotificationRouter.handle(p);
+          _handleResponse(response);
         });
       }
     }
@@ -77,10 +97,112 @@ class NotificationService {
   }
 
   void _onResponse(NotificationResponse response) {
-    NotificationRouter.handle(response.payload);
+    _handleResponse(response);
+  }
+
+  /// Shared path for foreground, background, and cold-start taps/actions.
+  static Future<void> _handleResponse(NotificationResponse response) async {
+    final action = response.actionId;
+    final payload = response.payload;
+
+    if (action == actionSnooze15 || action == actionSnooze60 || action == actionDelete) {
+      await handleNotificationAction(
+        actionId: action!,
+        payload: payload,
+        notificationId: response.id,
+      );
+      return;
+    }
+
+    // Default body tap → open relevant screen
+    await NotificationRouter.handle(payload);
+  }
+
+  /// Process Snooze / Delete from the notification shade (no full UI required).
+  static Future<void> handleNotificationAction({
+    required String actionId,
+    String? payload,
+    int? notificationId,
+  }) async {
+    final parsed = NotificationPayload.tryParse(payload);
+    final reminderId = parsed?.reminderId;
+
+    // Always dismiss the current notification entry
+    try {
+      if (notificationId != null) {
+        await instance._plugin.cancel(notificationId);
+      }
+    } catch (_) {}
+
+    if (reminderId == null || reminderId.isEmpty) {
+      // Budget / synthetic alerts: Delete = dismiss only; Snooze = re-fire later
+      if (actionId == actionSnooze15 || actionId == actionSnooze60) {
+        final mins = actionId == actionSnooze15 ? 15 : 60;
+        try {
+          await instance._schedule(
+            id: notificationId ?? instance._stableId('snooze', payload ?? 'x'),
+            title: 'Snoozed reminder',
+            body: 'Back in ${mins}m',
+            when: DateTime.now().add(Duration(minutes: mins)),
+            payload: payload,
+          );
+        } catch (_) {}
+      }
+      return;
+    }
+
+    try {
+      // Ensure DB is available (esp. background isolate)
+      await AppDatabase.instance.database;
+      final ext = ExtendedRepository(AppDatabase.instance);
+
+      if (actionId == actionSnooze15 || actionId == actionSnooze60) {
+        final mins = actionId == actionSnooze15 ? 15 : 60;
+        await ext.snoozeReminder(reminderId, minutes: mins);
+        try {
+          await ReminderGeneratorService().recordResult(
+            reminderId: reminderId,
+            result: 'SNOOZED',
+            snoozeMinutes: mins,
+          );
+        } catch (_) {}
+        // Push updated schedule to OS
+        try {
+          await instance.syncFromDatabase();
+        } catch (_) {}
+        return;
+      }
+
+      if (actionId == actionDelete) {
+        await _cancelReminder(reminderId);
+        try {
+          await ReminderGeneratorService().recordResult(
+            reminderId: reminderId,
+            result: 'DISMISSED',
+          );
+        } catch (_) {}
+        try {
+          await instance.syncFromDatabase();
+        } catch (_) {}
+      }
+    } catch (_) {
+      // Best-effort in background; next maintenance will realign
+    }
+  }
+
+  static Future<void> _cancelReminder(String id) async {
+    final now = AppDatabase.nowMs();
+    await (await AppDatabase.instance.database).update(
+      'reminders',
+      {'status': 'CANCELLED', 'updated_at': now},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<void> cancelAll() => _plugin.cancelAll();
+
+  Future<void> cancelId(int id) => _plugin.cancel(id);
 
   /// Full pipeline: generate entity reminders → schedule OS notifications.
   Future<int> syncFromDatabase() async {
@@ -173,6 +295,27 @@ class NotificationService {
     String? payload,
   }) async {
     final tzWhen = tz.TZDateTime.from(when, tz.local);
+    const actions = <AndroidNotificationAction>[
+      AndroidNotificationAction(
+        actionSnooze15,
+        'Snooze 15m',
+        showsUserInterface: false,
+        cancelNotification: true,
+      ),
+      AndroidNotificationAction(
+        actionSnooze60,
+        'Snooze 1h',
+        showsUserInterface: false,
+        cancelNotification: true,
+      ),
+      AndroidNotificationAction(
+        actionDelete,
+        'Delete',
+        showsUserInterface: false,
+        cancelNotification: true,
+      ),
+    ];
+
     await _plugin.zonedSchedule(
       id,
       title,
@@ -186,8 +329,12 @@ class NotificationService {
           importance: high ? Importance.max : Importance.high,
           priority: high ? Priority.max : Priority.high,
           icon: '@mipmap/ic_launcher',
+          actions: actions,
+          category: AndroidNotificationCategory.reminder,
         ),
-        iOS: const DarwinNotificationDetails(),
+        iOS: const DarwinNotificationDetails(
+          categoryIdentifier: _iosCategory,
+        ),
       ),
       androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
       uiLocalNotificationDateInterpretation:
@@ -197,7 +344,6 @@ class NotificationService {
   }
 
   int _stableId(String prefix, String key) {
-    // 31-bit positive int from string
     var h = prefix.hashCode ^ key.hashCode;
     h = h & 0x7fffffff;
     if (h == 0) h = 1;
@@ -207,5 +353,6 @@ class NotificationService {
 
 @pragma('vm:entry-point')
 void notificationTapBackground(NotificationResponse response) {
-  // Background isolate — full navigation happens on next foreground via payload.
+  // Background isolate — process snooze/delete without opening the app UI.
+  NotificationService._handleResponse(response);
 }
