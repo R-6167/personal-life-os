@@ -66,7 +66,7 @@ class DayPlanner {
         kind: PlanItemKind.overdueTask,
         id: t.id,
         title: t.title,
-        score: 100 + t.priority * 5,
+        score: (100 + t.priority * 5).toInt(),
         reason: 'Overdue',
       ));
     }
@@ -77,7 +77,7 @@ class DayPlanner {
         kind: PlanItemKind.dueTodayTask,
         id: t.id,
         title: t.title,
-        score: 80 + t.priority * 4,
+        score: (80 + t.priority * 4).toInt(),
         reason: 'Due today',
       ));
     }
@@ -113,7 +113,7 @@ class DayPlanner {
         kind: PlanItemKind.openTask,
         id: t.id,
         title: t.title,
-        score: 40 + t.priority * 3,
+        score: (40 + t.priority * 3).toInt(),
         reason: t.status,
       ));
     }

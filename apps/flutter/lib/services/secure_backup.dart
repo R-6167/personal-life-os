@@ -6,22 +6,14 @@ import 'package:crypto/crypto.dart';
 import 'package:encrypt/encrypt.dart' as enc;
 
 /// Passphrase-protected offline backup envelope.
-///
-/// Format (JSON):
-/// {
-///   "v": 1,
-///   "alg": "AES-256-CBC",
-///   "salt": "...",
-///   "iv": "...",
-///   "ciphertext": "..."
-/// }
 class SecureBackup {
-  static const _iterationsNote = 'SHA256(passphrase+salt) used as AES key material';
+  static const _iterationsNote = 'PBKDF2-HMAC-SHA256-x10000';
 
   /// Encrypt plaintext JSON backup with [passphrase].
   static String encrypt(String plaintext, String passphrase) {
     if (passphrase.length < 6) {
-      throw ArgumentError('Passphrase must be at least 6 characters');\n    }
+      throw ArgumentError('Passphrase must be at least 6 characters');
+    }
     final salt = _randomBytes(16);
     final iv = _randomBytes(16);
     final key = _deriveKey(passphrase, salt);
@@ -39,48 +31,38 @@ class SecureBackup {
     return const JsonEncoder.withIndent('  ').convert(envelope);
   }
 
-  /// Decrypt envelope JSON → plaintext backup JSON.
   static String decrypt(String envelopeJson, String passphrase) {
-    final map = jsonDecode(envelopeJson);
-    if (map is! Map) throw const FormatException('Invalid encrypted backup');
-    final saltB64 = map['salt'] as String?;
-    final ivB64 = map['iv'] as String?;
-    final ct = map['ciphertext'] as String?;
-    if (saltB64 == null || ivB64 == null || ct == null) {
-      throw const FormatException('Missing salt/iv/ciphertext');
+    final map = jsonDecode(envelopeJson) as Map<String, dynamic>;
+    if (map['app'] != 'personal-life-os') {
+      throw StateError('Not a Personal Life OS backup');
     }
-    final salt = base64.decode(saltB64);
-    final iv = base64.decode(ivB64);
-    final key = _deriveKey(passphrase, Uint8List.fromList(salt));
+    final salt = base64.decode(map['salt'] as String);
+    final iv = base64.decode(map['iv'] as String);
+    final key = _deriveKey(passphrase, salt);
     final encryptor = enc.Encrypter(enc.AES(enc.Key(key), mode: enc.AESMode.cbc));
-    try {
-      return encryptor.decrypt64(ct, iv: enc.IV(Uint8List.fromList(iv)));
-    } catch (_) {
-      throw const FormatException('Wrong passphrase or corrupted backup');
-    }
+    return encryptor.decrypt64(map['ciphertext'] as String, iv: enc.IV(iv));
   }
 
   static bool looksEncrypted(String raw) {
     try {
-      final m = jsonDecode(raw);
-      return m is Map && m['ciphertext'] != null && m['salt'] != null;
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      return map['alg'] == 'AES-256-CBC' && map['ciphertext'] is String;
     } catch (_) {
       return false;
     }
   }
 
-  static Uint8List _deriveKey(String passphrase, List<int> salt) {
-    // Lightweight KDF suitable for offline local use (not server auth).
-    var material = utf8.encode(passphrase) + salt;
-    Digest dig = sha256.convert(material);
-    for (var i = 0; i < 10000; i++) {
-      dig = sha256.convert(dig.bytes + salt);
-    }
-    return Uint8List.fromList(dig.bytes); // 32 bytes
-  }
-
   static Uint8List _randomBytes(int n) {
     final r = Random.secure();
     return Uint8List.fromList(List.generate(n, (_) => r.nextInt(256)));
+  }
+
+  static Uint8List _deriveKey(String passphrase, List<int> salt) {
+    final bytes = utf8.encode(passphrase);
+    Digest digest = sha256.convert([...salt, ...bytes]);
+    for (var i = 0; i < 9999; i++) {
+      digest = sha256.convert(digest.bytes);
+    }
+    return Uint8List.fromList(digest.bytes);
   }
 }
