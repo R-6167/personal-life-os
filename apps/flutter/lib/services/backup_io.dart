@@ -21,7 +21,8 @@ class BackupIo {
     final plain = await ExportService(_db).buildBackupJson();
     if (!encrypted) return plain;
     if (passphrase == null || passphrase.length < 6) {
-      throw ArgumentError('Passphrase must be at least 6 characters');\n    }
+      throw ArgumentError('Passphrase must be at least 6 characters');
+    }
     return SecureBackup.encrypt(plain, passphrase);
   }
 
@@ -53,7 +54,6 @@ class BackupIo {
       );
 
       if (saved != null && saved.isNotEmpty) {
-        // Some platforms write via [bytes]; others need explicit write.
         try {
           final f = File(saved);
           if (!await f.exists() || await f.length() == 0) {
@@ -69,7 +69,6 @@ class BackupIo {
         );
       }
 
-      // User cancelled save dialog → offer share as fallback.
       final dir = await getTemporaryDirectory();
       final file = File('${dir.path}/$name');
       await file.writeAsString(json);
@@ -152,7 +151,6 @@ class BackupIo {
     }
   }
 
-  /// Continue import after user supplies passphrase.
   Future<BackupIoResult> importEncryptedRaw(String encrypted, String passphrase) async {
     try {
       final plain = SecureBackup.decrypt(encrypted, passphrase);
