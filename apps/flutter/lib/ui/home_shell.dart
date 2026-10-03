@@ -106,44 +106,66 @@ class _HomeShellState extends State<HomeShell> {
   Future<void> _reload() async {
     QueryCache.instance.invalidate();
 
-    await softFuture(() async {
+    await softRun(() async {
       await Future.wait([
-        softFuture(() => _habits.ensureAllTodayOccurrences(), null, label: 'habit.ensure'),
-        softFuture(() => _routines.ensureAllTodayOccurrences(), null, label: 'routine.ensure'),
+        softRun(() => _habits.ensureAllTodayOccurrences(), label: 'habit.ensure'),
+        softRun(() => _routines.ensureAllTodayOccurrences(), label: 'routine.ensure'),
       ]);
       await Future.wait([
-        softFuture(() => _habits.markMissedBeforeToday(), 0, label: 'habit.missed'),
-        softFuture(() => _routines.markMissedBeforeToday(), 0, label: 'routine.missed'),
+        softRun(() async {
+          await _habits.markMissedBeforeToday();
+        }, label: 'habit.missed'),
+        softRun(() async {
+          await _routines.markMissedBeforeToday();
+        }, label: 'routine.missed'),
       ]);
-    }, null, label: 'maintenance');
+    }, label: 'maintenance');
 
-    final taskList = await softFuture(_tasks.listOpen, <Task>[], label: 'tasks.open');
-    final overdue = await softFuture(_tasks.listOverdue, <Task>[], label: 'tasks.overdue');
-    final habitList = await softFuture(_habits.listActive, <Habit>[], label: 'habits');
-    final goalList = await softFuture(_goals.listActive, <Goal>[], label: 'goals');
-    final noteList = await softFuture(_notes.list, <Note>[], label: 'notes');
-    final projectList = await softFuture(_projects.listActive, <Project>[], label: 'projects');
-    final expenseList = await softFuture(_expenses.listRecent, <Expense>[], label: 'expenses');
-    final monthSpend = await softFuture(_expenses.totalMinorThisMonth, 0, label: 'spend');
-    final billOcc = await softFuture(_bills.listOpenOccurrences, <BillOccurrence>[], label: 'bills');
-    final routineList = await softFuture(_routines.listActive, <Routine>[], label: 'routines');
-    final incomeList = await softFuture(_income.listRecent, <Income>[], label: 'income');
-    final eventsToday =
-        await softFuture(_ext.listEventsToday, <Map<String, Object?>>[], label: 'events');
-    final plan = await softFuture(() => DayPlanner().buildPlan(limit: 6), <PlanItem>[], label: 'plan');
-    final scheduled =
-        await softFuture(() => _tasks.listScheduledOnDay(DateTime.now()), <Task>[], label: 'scheduled');
+    final taskList =
+        await softFuture(_tasks.listOpen, fallback: <Task>[], label: 'tasks.open') ?? <Task>[];
+    final overdue =
+        await softFuture(_tasks.listOverdue, fallback: <Task>[], label: 'tasks.overdue') ?? <Task>[];
+    final habitList =
+        await softFuture(_habits.listActive, fallback: <Habit>[], label: 'habits') ?? <Habit>[];
+    final goalList =
+        await softFuture(_goals.listActive, fallback: <Goal>[], label: 'goals') ?? <Goal>[];
+    final noteList =
+        await softFuture(_notes.list, fallback: <Note>[], label: 'notes') ?? <Note>[];
+    final projectList =
+        await softFuture(_projects.listActive, fallback: <Project>[], label: 'projects') ?? <Project>[];
+    final expenseList =
+        await softFuture(_expenses.listRecent, fallback: <Expense>[], label: 'expenses') ?? <Expense>[];
+    final monthSpend =
+        await softFuture(_expenses.totalMinorThisMonth, fallback: 0, label: 'spend') ?? 0;
+    final billOcc = await softFuture(_bills.listOpenOccurrences,
+            fallback: <BillOccurrence>[], label: 'bills') ??
+        <BillOccurrence>[];
+    final routineList =
+        await softFuture(_routines.listActive, fallback: <Routine>[], label: 'routines') ??
+            <Routine>[];
+    final incomeList =
+        await softFuture(_income.listRecent, fallback: <Income>[], label: 'income') ?? <Income>[];
+    final eventsToday = await softFuture(_ext.listEventsToday,
+            fallback: <Map<String, Object?>>[], label: 'events') ??
+        <Map<String, Object?>>[];
+    final plan = await softFuture(() => DayPlanner().buildPlan(limit: 6),
+            fallback: <PlanItem>[], label: 'plan') ??
+        <PlanItem>[];
+    final scheduled = await softFuture(() => _tasks.listScheduledOnDay(DateTime.now()),
+            fallback: <Task>[], label: 'scheduled') ??
+        <Task>[];
     final freeMin = await softFuture(
-      () => PlanningRepository(AppDatabase.instance).availableMinutes(day: DateTime.now()),
-      0,
-      label: 'freeMin',
-    );
+          () => PlanningRepository(AppDatabase.instance).availableMinutes(day: DateTime.now()),
+          fallback: 0,
+          label: 'freeMin',
+        ) ??
+        0;
 
     if (!_notifsSynced) {
-      await softFuture(() async {
+      await softRun(() async {
         await NotificationService.instance.syncFromDatabase();
         _notifsSynced = true;
-      }, null, label: 'notifs.sync');
+      }, label: 'notifs.sync');
     }
 
     if (!mounted) return;
