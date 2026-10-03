@@ -298,7 +298,7 @@ CREATE TABLE IF NOT EXISTS goal_reflections (
 
 CREATE TABLE IF NOT EXISTS budgets (
   id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, name TEXT NOT NULL,
-  match_key TEXT, amount_minor INTEGER NOT NULL,
+  match_key TEXT, category_id TEXT, amount_minor INTEGER NOT NULL,
   period TEXT NOT NULL DEFAULT 'MONTHLY',
   alert_threshold REAL NOT NULL DEFAULT 0.8,
   currency TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'ACTIVE',
