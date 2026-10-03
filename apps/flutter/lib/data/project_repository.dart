@@ -77,6 +77,24 @@ class ProjectRepository {
     );
   }
 
+  Future<void> updateMeta({
+    required String id,
+    String? title,
+    String? description,
+    int? targetDate,
+    bool clearTarget = false,
+  }) async {
+    final patch = <String, Object?>{'updated_at': AppDatabase.nowMs()};
+    if (title != null) patch['title'] = title;
+    if (description != null) patch['description'] = description.isEmpty ? null : description;
+    if (clearTarget) {
+      patch['target_date'] = null;
+    } else if (targetDate != null) {
+      patch['target_date'] = targetDate;
+    }
+    await (await _db.database).update('projects', patch, where: 'id = ?', whereArgs: [id]);
+  }
+
   Future<Map<String, int>> progress(String projectId) async {
     final db = await _db.database;
     final total = await db.rawQuery(

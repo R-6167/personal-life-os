@@ -13,8 +13,7 @@ class AppDatabase {
   Database? _db;
   static const _uuid = Uuid();
 
-  /// Bump only when adding a non-destructive migration in onUpgrade.
-  static const schemaVersion = 12;
+  static const schemaVersion = 13;
 
   Future<Database> get database async {
     if (_db != null) return _db!;
@@ -56,6 +55,7 @@ class AppDatabase {
         await _seedDefaultUser(db);
         await _applyV6Constraints(db);
         await _migrateToV12(db);
+        await _migrateToV13(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 6) await _migrateToV6(db);
@@ -65,6 +65,7 @@ class AppDatabase {
         if (oldVersion < 10) await _migrateToV10(db);
         if (oldVersion < 11) await _migrateToV11(db);
         if (oldVersion < 12) await _migrateToV12(db);
+        if (oldVersion < 13) await _migrateToV13(db);
       },
     );
   }
@@ -96,12 +97,9 @@ class AppDatabase {
     await _applySchema(db);
   }
 
-  /// Explicit additive columns + indexes for older installs (CREATE IF NOT EXISTS
-  /// does not add missing columns to existing tables).
   Future<void> _migrateToV12(Database db) async {
     await _applySchema(db);
 
-    // Tasks
     await _tryAlter(db, 'ALTER TABLE tasks ADD COLUMN description TEXT');
     await _tryAlter(db, 'ALTER TABLE tasks ADD COLUMN milestone_id TEXT');
     await _tryAlter(db, 'ALTER TABLE tasks ADD COLUMN scheduled_start INTEGER');
@@ -110,12 +108,10 @@ class AppDatabase {
     await _tryAlter(db, 'ALTER TABLE tasks ADD COLUMN completed_at INTEGER');
     await _tryAlter(db, 'ALTER TABLE tasks ADD COLUMN archived_at INTEGER');
 
-    // Habits / routines
     await _tryAlter(db, 'ALTER TABLE habits ADD COLUMN description TEXT');
     await _tryAlter(db, 'ALTER TABLE habits ADD COLUMN archived_at INTEGER');
     await _tryAlter(db, 'ALTER TABLE routines ADD COLUMN archived_at INTEGER');
 
-    // Finance
     await _tryAlter(db, 'ALTER TABLE expenses ADD COLUMN account_id TEXT');
     await _tryAlter(db, 'ALTER TABLE expenses ADD COLUMN category_id TEXT');
     await _tryAlter(db, 'ALTER TABLE expenses ADD COLUMN payment_method TEXT');
@@ -127,49 +123,43 @@ class AppDatabase {
     await _tryAlter(db, 'ALTER TABLE bill_occurrences ADD COLUMN actual_amount_minor INTEGER');
     await _tryAlter(db, 'ALTER TABLE bill_occurrences ADD COLUMN expense_id TEXT');
 
-    // Notes / people
     await _tryAlter(db, 'ALTER TABLE notes ADD COLUMN archived_at INTEGER');
     await _tryAlter(db, 'ALTER TABLE people ADD COLUMN phone TEXT');
     await _tryAlter(db, 'ALTER TABLE people ADD COLUMN archived_at INTEGER');
 
-    // Budgets
     await _tryAlter(db, 'ALTER TABLE budgets ADD COLUMN category_id TEXT');
 
-    // Reminders
     await _tryAlter(db, 'ALTER TABLE reminders ADD COLUMN message TEXT');
     await _tryAlter(db, 'ALTER TABLE reminders ADD COLUMN source_type TEXT');
     await _tryAlter(db, 'ALTER TABLE reminders ADD COLUMN source_id TEXT');
 
-    // Indexes (idempotent)
     await _tryAlter(
       db,
       'CREATE UNIQUE INDEX IF NOT EXISTS uq_habit_occ_day ON habit_occurrences(habit_id, scheduled_date)',
     );
-    await _tryAlter(
-      db,
-      'CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)',
-    );
-    await _tryAlter(
-      db,
-      'CREATE INDEX IF NOT EXISTS idx_expenses_occurred ON expenses(occurred_at)',
-    );
-    await _tryAlter(
-      db,
-      'CREATE INDEX IF NOT EXISTS idx_activity_occurred ON activity_events(occurred_at)',
-    );
+    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)');
+    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_expenses_occurred ON expenses(occurred_at)');
+    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_activity_occurred ON activity_events(occurred_at)');
 
-    // Normalize debt vocabulary
     try {
       await db.execute("UPDATE debts SET status = 'OPEN' WHERE status = 'ACTIVE'");
     } catch (_) {}
   }
 
+  /// Project workspace: subtasks + project deadline.
+  Future<void> _migrateToV13(Database db) async {
+    await _applySchema(db);
+    await _tryAlter(db, 'ALTER TABLE tasks ADD COLUMN parent_task_id TEXT');
+    await _tryAlter(db, 'ALTER TABLE projects ADD COLUMN target_date INTEGER');
+    await _tryAlter(db, 'ALTER TABLE projects ADD COLUMN description TEXT');
+    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id)');
+    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id)');
+  }
+
   Future<void> _tryAlter(Database db, String sql) async {
     try {
       await db.execute(sql);
-    } catch (_) {
-      // Column/index already exists or table missing — non-fatal.
-    }
+    } catch (_) {}
   }
 
   Future<void> _applyV6Constraints(Database db) async {
