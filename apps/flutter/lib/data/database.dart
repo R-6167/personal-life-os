@@ -14,7 +14,7 @@ class AppDatabase {
   static const _uuid = Uuid();
 
   /// Bump only when adding a non-destructive migration in onUpgrade.
-  static const schemaVersion = 6;
+  static const schemaVersion = 7;
 
   Future<Database> get database async {
     if (_db != null) return _db!;
@@ -35,23 +35,27 @@ class AppDatabase {
         await _applyV6Constraints(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
-        // Never drop user data. Only additive / constraint migrations.
         if (oldVersion < 6) {
           await _migrateToV6(db);
+        }
+        if (oldVersion < 7) {
+          await _migrateToV7(db);
         }
       },
     );
   }
 
   Future<void> _migrateToV6(Database db) async {
-    // Ensure all tables from schema exist (IF NOT EXISTS is safe).
     await _applySchema(db);
     await _applyV6Constraints(db);
     await _seedDefaultUser(db);
   }
 
+  Future<void> _migrateToV7(Database db) async {
+    await _applySchema(db);
+  }
+
   Future<void> _applyV6Constraints(Database db) async {
-    // Deduplicate habit occurrences before unique index (keep latest).
     try {
       await db.execute('''
         DELETE FROM habit_occurrences
@@ -64,7 +68,6 @@ class AppDatabase {
         )
       ''');
     } catch (_) {
-      // SQLite without window functions: best-effort cleanup via grouped max.
       try {
         await db.execute('''
           DELETE FROM habit_occurrences WHERE id NOT IN (
@@ -87,9 +90,7 @@ class AppDatabase {
       if (s.isEmpty || s.toUpperCase().startsWith('PRAGMA')) continue;
       try {
         await db.execute(s);
-      } catch (_) {
-        // Table may already exist during additive upgrade.
-      }
+      } catch (_) {}
     }
   }
 
