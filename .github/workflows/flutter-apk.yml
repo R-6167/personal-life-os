@@ -56,7 +56,6 @@ jobs:
           fi
           chmod +x android/gradlew
 
-          # Re-assert product identity (flutter create may reset some files)
           GRADLE=android/app/build.gradle
           if [ -f "$GRADLE" ]; then
             sed -i 's|namespace *= *"[^"]*"|namespace = "com.aetherion.ordin"|g' "$GRADLE"
@@ -68,13 +67,16 @@ jobs:
             if ! grep -q POST_NOTIFICATIONS "$MANIFEST"; then
               sed -i 's|<application|<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>\n    <uses-permission android:name="android.permission.VIBRATE"/>\n    <application|' "$MANIFEST"
             fi
-            # Prefer custom Ordin icon if present
             if [ -f android/app/src/main/res/drawable/ic_launcher_ordin.xml ]; then
               sed -i 's|android:icon="@mipmap/ic_launcher"|android:icon="@drawable/ic_launcher_ordin"|g' "$MANIFEST"
               sed -i 's|android:icon="@android:drawable/[^"]*"|android:icon="@drawable/ic_launcher_ordin"|g' "$MANIFEST"
               if grep -q 'android:roundIcon' "$MANIFEST"; then
                 sed -i 's|android:roundIcon="[^"]*"|android:roundIcon="@drawable/ic_launcher_ordin"|g' "$MANIFEST"
               fi
+            fi
+            # Preserve largeHeap for on-device LLM
+            if ! grep -q 'largeHeap' "$MANIFEST"; then
+              sed -i 's|<application|<application android:largeHeap="true" |' "$MANIFEST"
             fi
           fi
 
@@ -88,6 +90,9 @@ jobs:
           find lib -name '*.dart' -exec perl -pi -e 's/activeTrackColor:/activeColor:/g' {} +
           echo "Sanitized. Remaining equired (should be empty):"
           grep -Rn --include='*.dart' -P '(?<![A-Za-z])equired ' lib || true
+
+      - name: Unit & smoke tests
+        run: flutter test --reporter expanded
 
       - name: Analyze
         run: |

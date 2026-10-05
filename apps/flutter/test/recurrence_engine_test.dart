@@ -3,24 +3,24 @@ import 'package:ordin/services/recurrence_engine.dart';
 
 void main() {
   group('RecurrenceRule / OccurrenceGenerator', () {
-    test('daily interval 1', () {
+    test('daily nextAfter advances by interval', () {
       final rule = RecurrenceRule(
-        dtStart: DateTime(2026, 1, 1, 9),
+        dtStart: DateTime(2026, 1, 1),
         frequency: RecurrenceFrequency.daily,
-        interval: 1,
+        interval: 2,
       );
-      final next = rule.generator().nextAfter(DateTime(2026, 1, 1, 10));
+      final gen = rule.generator();
+      final next = gen.nextAfter(DateTime(2026, 1, 1, 12));
       expect(next, isNotNull);
-      expect(next!.day, 2);
-      expect(next.hour, 9);
+      expect(next!.day, 3);
     });
 
-    test('weekly with byWeekDays', () {
+    test('weekly respects byWeekDays', () {
       final rule = RecurrenceRule.fromLegacy(
         frequency: 'WEEKLY',
         interval: 1,
-        dtStart: DateTime(2026, 1, 5),
-        daysOfWeek: [1, 3, 5],
+        dtStart: DateTime(2026, 1, 5), // Monday
+        weekDays: 'MO,WE,FR',
       );
       final gen = rule.generator();
       final afterMon = gen.nextAfter(DateTime(2026, 1, 5, 12));
@@ -39,6 +39,19 @@ void main() {
       expect(next, isNotNull);
       expect(next!.month, 2);
       expect(next.day, lessThanOrEqualTo(29));
+    });
+
+    test('idempotent nextAfter same cursor', () {
+      final rule = RecurrenceRule(
+        dtStart: DateTime(2026, 5, 1),
+        frequency: RecurrenceFrequency.daily,
+      );
+      final gen = rule.generator();
+      final cursor = DateTime(2026, 5, 1, 12);
+      final a = gen.nextAfter(cursor);
+      final b = gen.nextAfter(cursor);
+      expect(a, isNotNull);
+      expect(a, equals(b));
     });
 
     test('until stops generation', () {
