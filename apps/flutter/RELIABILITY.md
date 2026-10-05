@@ -18,6 +18,8 @@ Or `AtomicWrite.runWithEvents` when multiple events belong to one lifecycle step
 
 Do **not** insert into `activity_events` outside the same transaction as the state write.
 
+Work sessions: `start` / `complete` use a single SQLite `transaction` for session row + task stamp + activity event.
+
 ## CI gates (must stay green)
 
 1. `flutter analyze --no-fatal-infos --no-fatal-warnings`
@@ -35,6 +37,17 @@ Do **not** insert into `activity_events` outside the same transaction as the sta
 | Prompt grounding | `prompt_builder_test.dart` |
 | Atomic contract types | `atomic_write_contract_test.dart` |
 | Critical flow smoke | `smoke_critical_flows_test.dart` |
+
+## Integration tests (in-memory SQLite)
+
+Uses `sqflite_common_ffi` + `AppDatabase.openInMemoryForTest()`:
+
+| File | Flow |
+|------|------|
+| `integration_task_lifecycle_test.dart` | Task complete + AtomicWrite |
+| `integration_work_session_test.dart` | Work session start atomicity |
+
+Run: `cd apps/flutter && flutter test`
 
 ## Artifacts
 
