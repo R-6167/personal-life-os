@@ -127,9 +127,42 @@ class _PlanningScreenState extends State<PlanningScreen> {
     return _atHour(hour, minute: minute);
   }
 
-  Future<void> _onDrop(_DragPayload payload, int hour, {Offset? local, double rowHeight = 56}) async {
+    Future<void> _onDrop(_DragPayload payload, int hour, {Offset? local, double rowHeight = 56}) async {
     final start = _snapDrop(hour, local, rowHeight);
     final duration = payload.durationMin.clamp(15, 180);
+
+    // Warn when dropping onto a busy slot (calendar / block / other task).
+    final conflict = await _plan.conflictsWithLocked(
+      start: start,
+      durationMinutes: duration,
+      ignoreTaskId: payload.kind == DaySlotKind.task ? payload.id : null,
+      ignoreBlockId: payload.kind == DaySlotKind.block ? payload.id : null,
+    );
+    if (conflict && mounted) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Slot overlap'),
+          content: Text(
+            '${payload.title} overlaps something already on your day '
+            '(${start.hour.toString().padLeft(2, '0')}:'
+            '${start.minute.toString().padLeft(2, '0')}, ${duration}m).\n\n'
+            'Place it anyway?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Place anyway'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
 
     // Optimistic local reorder for built timeline
     _optimisticMove(payload, start, duration);
@@ -153,10 +186,15 @@ class _PlanningScreenState extends State<PlanningScreen> {
       } else if (payload.kind == DaySlotKind.block ||
           payload.kind == DaySlotKind.habit ||
           payload.kind == DaySlotKind.routine) {
-        // Prefer move by block id when locked block; else create focus block
         final blockId = payload.existing?.entityId;
-        if (payload.kind == DaySlotKind.block && blockId != null && payload.existing?.locked == true) {
-          await _plan.moveBlock(blockId: blockId, start: start, durationMinutes: duration);
+        if (payload.kind == DaySlotKind.block &&
+            blockId != null &&
+            payload.existing?.locked == true) {
+          await _plan.moveBlock(
+            blockId: blockId,
+            start: start,
+            durationMinutes: duration,
+          );
         } else {
           await _plan.addFocusBlock(
             start: start,
@@ -169,7 +207,6 @@ class _PlanningScreenState extends State<PlanningScreen> {
           );
         }
       }
-      // Calendar events: do not move via this path
       HapticFeedback.selectionClick();
     } catch (e) {
       if (mounted) {
