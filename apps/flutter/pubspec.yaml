@@ -20,6 +20,8 @@ dependencies:
   timezone: ^0.9.4
   crypto: ^3.0.5
   encrypt: ^5.0.3
+  # On-device GGUF via llama.cpp (Android/iOS)
+  llama_flutter_android: ^0.2.6
 
 dev_dependencies:
   flutter_test:
