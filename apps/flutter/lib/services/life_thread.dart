@@ -39,7 +39,6 @@ class LifeThreadActivity {
   });
 }
 
-/// Nested branch under a goal: Project → milestones → tasks.
 class ProjectBranch {
   final Map<String, Object?> project;
   final List<Map<String, Object?>> milestones;
@@ -67,7 +66,7 @@ class ProjectBranch {
 }
 
 class GoalNextMove {
-  final String kind; // TASK | HABIT | PROJECT
+  final String kind;
   final String id;
   final String title;
   final String reason;
@@ -207,7 +206,6 @@ class LifeThreadService {
         .where((t) => dbStrOrNull(t['project_id']) == null || !projectIds.contains(dbStr(t['project_id'])))
         .toList();
 
-    // Habits linked to this goal (goal_id column or entity_links).
     final habits = await _habitsForGoal(db, goalId);
 
     final now = DateTime.now();
@@ -229,7 +227,6 @@ class LifeThreadService {
     };
     final activity = await _activityFor(entityIds.toList(), limit: 40);
 
-    // Nested branches per project
     final branches = <ProjectBranch>[];
     for (final p in projects) {
       final pid = dbStr(p['id']);
@@ -241,7 +238,7 @@ class LifeThreadService {
       final mt = pMs.length;
       final pr = (tt + mt == 0)
           ? 0.0
-          : ((tt == 0 ? 0.0 : td / tt) * 0.7 + (mt == 0 ? 0.0 : md / mt) * 0.3).clamp(0.0, 1.0);
+          : ((tt == 0 ? 0.0 : td / tt) * 0.55 + (mt == 0 ? 0.0 : md / mt) * 0.45).clamp(0.0, 1.0);
       final open = pTs.where((t) => dbStr(t['status']) != 'COMPLETED').toList();
       String? nextTitle;
       String? nextId;
@@ -282,11 +279,15 @@ class LifeThreadService {
     final mt = milestones.length;
     double ratio = 0;
     if (tt + pt + mt > 0) {
-      ratio = ((tt == 0 ? 0.0 : tasksDone / tt) * 0.55 +
-              (pt == 0 ? 0.0 : projectsDone / pt) * 0.25 +
-              (mt == 0 ? 0.0 : milestonesDone / mt) * 0.20)
+      ratio = ((tt == 0 ? 0.0 : tasksDone / tt) * 0.45 +
+              (pt == 0 ? 0.0 : projectsDone / pt) * 0.20 +
+              (mt == 0 ? 0.0 : milestonesDone / mt) * 0.35)
           .clamp(0.0, 1.0);
     }
+    final workBoost = await _recentWorkBoost(
+      allTasks.map((t) => dbStr(t['id'])).where((id) => id.isNotEmpty).toList(),
+    );
+    ratio = (ratio + workBoost).clamp(0.0, 1.0);
 
     final nextMoves = _buildNextMoves(branches: branches, directTasks: directTasks, habits: habits);
     final summary = _doingSummary(
@@ -296,6 +297,7 @@ class LifeThreadService {
       habits: habits.length,
       scheduled: scheduled.length,
       progress: ratio,
+      workBoost: workBoost,
     );
 
     return GoalThread(
@@ -391,12 +393,16 @@ class LifeThreadService {
     required int habits,
     required int scheduled,
     required double progress,
+    double workBoost = 0,
   }) {
     if (branches.isEmpty && directOpen == 0 && habits == 0) {
       return 'Nothing is linked to “$goalTitle” yet. Add a project or habit to start moving.';
     }
     final parts = <String>[];
     parts.add('${(progress * 100).round()}% overall');
+    if (workBoost > 0.02) {
+      parts.add('recent focused work');
+    }
     if (branches.isNotEmpty) {
       final active = branches.where((b) => dbStr(b.project['status']) != 'COMPLETED').length;
       parts.add('$active active project${active == 1 ? '' : 's'}');
@@ -454,10 +460,14 @@ class LifeThreadService {
         milestones.where((m) => dbStr(m['status']) == 'COMPLETED').length;
     final tt = tasks.length;
     final mt = milestones.length;
-    final ratio = (tt + mt == 0)
+    var ratio = (tt + mt == 0)
         ? 0.0
-        : ((tt == 0 ? 0.0 : tasksDone / tt) * 0.7 + (mt == 0 ? 0.0 : milestonesDone / mt) * 0.3)
+        : ((tt == 0 ? 0.0 : tasksDone / tt) * 0.55 + (mt == 0 ? 0.0 : milestonesDone / mt) * 0.45)
             .clamp(0.0, 1.0);
+    final workBoost = await _recentWorkBoost(
+      tasks.map((x) => dbStr(x['id'])).where((id) => id.isNotEmpty).toList(),
+    );
+    ratio = (ratio + workBoost).clamp(0.0, 1.0);
 
     return ProjectThread(
       project: project,
@@ -472,6 +482,30 @@ class LifeThreadService {
       milestonesDone: milestonesDone,
       milestonesTotal: mt,
     );
+  }
+
+  /// Up to +15% progress when there is recent completed work on these tasks.
+  Future<double> _recentWorkBoost(List<String> taskIds) async {
+    if (taskIds.isEmpty) return 0;
+    final db = await _db.database;
+    final since = DateTime.now().subtract(const Duration(days: 14)).millisecondsSinceEpoch;
+    final placeholders = List.filled(taskIds.length, '?').join(',');
+    try {
+      final rows = await db.rawQuery(
+        'SELECT COALESCE(SUM(accumulated_ms), 0) AS ms, COUNT(*) AS n '
+        'FROM work_sessions '
+        "WHERE task_id IN ($placeholders) AND status = 'COMPLETED' AND started_at >= ?",
+        [...taskIds, since],
+      );
+      if (rows.isEmpty) return 0;
+      final ms = (rows.first['ms'] as int?) ?? 0;
+      final n = (rows.first['n'] as int?) ?? 0;
+      if (n == 0 || ms <= 0) return 0;
+      final hours = ms / 3600000.0;
+      return (hours * 0.05).clamp(0.0, 0.15);
+    } catch (_) {
+      return 0;
+    }
   }
 
   Future<List<LifeThreadActivity>> _activityFor(List<String> entityIds, {int limit = 20}) async {
@@ -498,7 +532,6 @@ class LifeThreadService {
         .toList();
   }
 
-  /// Link an existing habit to a goal (goal_id + entity_links fallback).
   Future<void> linkHabitToGoal({required String goalId, required String habitId}) async {
     final db = await _db.database;
     final ownerId = await _db.requireOwnerId();
