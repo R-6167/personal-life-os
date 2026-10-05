@@ -176,6 +176,7 @@ class TaskRepository {
     String? title,
     String? status,
     int? dueAt,
+    bool clearDue = false,
     int? priority,
     String? description,
     String? projectId,
@@ -188,15 +189,34 @@ class TaskRepository {
     final patch = <String, Object?>{'updated_at': now};
     if (title != null) patch['title'] = title;
     if (status != null) patch['status'] = status;
-    if (dueAt != null) patch['due_at'] = dueAt;
+    if (clearDue) {
+      patch['due_at'] = null;
+    } else if (dueAt != null) {
+      patch['due_at'] = dueAt;
+    }
     if (priority != null) patch['priority'] = priority;
     if (description != null) patch['description'] = description;
-    if (projectId != null) patch['project_id'] = projectId;
+    if (projectId != null) patch['project_id'] = projectId.isEmpty ? null : projectId;
     if (goalId != null) patch['goal_id'] = goalId;
     if (scheduledStart != null) patch['scheduled_start'] = scheduledStart;
     if (scheduledEnd != null) patch['scheduled_end'] = scheduledEnd;
     if (estimatedMinutes != null) patch['estimated_minutes'] = estimatedMinutes;
     await (await _db.database).update('tasks', patch, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<List<Map<String, Object?>>> dependencies(String taskId) async {
+    final db = await _db.database;
+    try {
+      return await db.rawQuery(
+        'SELECT d.id, d.depends_on_task_id, t.title AS depends_on_title '
+        'FROM task_dependencies d '
+        'LEFT JOIN tasks t ON t.id = d.depends_on_task_id '
+        'WHERE d.task_id = ?',
+        [taskId],
+      );
+    } catch (_) {
+      return [];
+    }
   }
 
   Future<void> clearSchedule(String taskId) async {
@@ -299,7 +319,6 @@ class TaskRepository {
       description: await descriptionOf(completedTaskId),
       parentTaskId: completedTaskId,
     );
-    // Carry the same canonical rule onto the next instance.
     await setRecurrenceRule(taskId: created.id, rule: rule);
     return created;
   }
