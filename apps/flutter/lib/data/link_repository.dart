@@ -116,6 +116,26 @@ class LinkRepository {
     return {'type': fromType, 'id': fromId};
   }
 
+  /// Bidirectional related peers with resolved titles (notes, tasks, people, …).
+  Future<List<Map<String, String>>> relatedWithTitles(String type, String id) async {
+    final rows = await linksFor(type, id);
+    final out = <Map<String, String>>[];
+    final seen = <String>{};
+    for (final r in rows) {
+      final peer = peerOf(r, type, id);
+      final pType = peer['type'] ?? '';
+      final pId = peer['id'] ?? '';
+      if (pType.isEmpty || pId.isEmpty) continue;
+      final key = '$pType:$pId';
+      if (seen.contains(key)) continue;
+      seen.add(key);
+      final title = await resolveTitle(pType, pId) ?? pId;
+      final rel = '${r['relation'] ?? r['relationship_type'] ?? 'RELATED'}';
+      out.add({'type': pType, 'id': pId, 'title': title, 'relation': rel});
+    }
+    return out;
+  }
+
   Future<String?> resolveTitle(String entityType, String entityId) async {
     final db = await _db.database;
     try {
