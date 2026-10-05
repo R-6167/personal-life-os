@@ -23,7 +23,7 @@ class TimelineEntry {
 
 class TimelineDayGroup {
   TimelineDayGroup({required this.label, required this.entries});
-  final String label; // Today | Yesterday | Monday, 3 Oct
+  final String label;
   final List<TimelineEntry> entries;
 }
 
@@ -32,7 +32,6 @@ class ActivityTimelineService {
   ActivityTimelineService({AppDatabase? db}) : _db = db ?? AppDatabase.instance;
   final AppDatabase _db;
 
-  /// System noise — keep in DB, hide from Life Timeline.
   static const _hidden = {
     'SMART_REMINDERS_SCHEDULED',
     'INTEGRITY',
@@ -46,7 +45,7 @@ class ActivityTimelineService {
     final rows = await db.query(
       'activity_events',
       orderBy: 'occurred_at DESC',
-      limit: limit * 2, // room to filter
+      limit: limit * 2,
     );
     final out = <TimelineEntry>[];
     for (final r in rows) {
@@ -74,7 +73,6 @@ class ActivityTimelineService {
     return out;
   }
 
-  /// Group entries for the UI: Today / Yesterday / date labels.
   List<TimelineDayGroup> groupByDay(List<TimelineEntry> entries) {
     final map = <String, List<TimelineEntry>>{};
     final order = <String>[];
@@ -188,7 +186,28 @@ class ActivityTimelineService {
         return 'Wellness check-in';
       case 'BUDGET_CREATED':
         return q == null ? 'Set a budget' : 'Set budget $q';
+      case 'DEBT_PAID_OFF':
+        return q == null ? 'Cleared a debt' : 'Cleared debt $q';
+      case 'PRACTICAL_COMPLETED':
+        return q == null ? 'Finished a practical item' : 'Finished $q';
+      case 'DOCUMENT_RENEWED':
+        return q == null ? 'Renewed a document' : 'Renewed $q';
+      case 'TASK_RESCHEDULED':
+        return q == null ? 'Rescheduled a task' : 'Rescheduled $q';
+      case 'TIME_BLOCK_CREATED':
+        return q == null ? 'Blocked time' : 'Blocked time for $q';
+      case 'ROUTINE_RECOVERED':
+        return q == null ? 'Caught up a routine' : 'Caught up on $q';
+      case 'NOTE_UPDATED':
+        return q == null ? 'Updated a note' : 'Updated note $q';
+      case 'MILESTONE_CREATED':
+        return q == null ? 'Added a milestone' : 'Added milestone $q';
+      case 'ACCOUNT_ADJUSTED':
+        return q == null ? 'Adjusted an account' : 'Adjusted $q';
       default:
+        if (type.startsWith('TASK_CREATED_FROM_')) {
+          return q == null ? 'Created a task from life item' : 'Created task $q from life item';
+        }
         final soft = type.replaceAll('_', ' ').toLowerCase();
         return q == null ? soft : '$soft — $q';
     }
@@ -196,15 +215,14 @@ class ActivityTimelineService {
 
   String? _detail(String type, String? metadata) {
     if (metadata == null || metadata.isEmpty) return null;
-    // Light parse for common JSON-ish metadata without a full decoder dependency path.
     try {
-      if (metadata.contains('actualMinutes')) {
-        final m = RegExp(r'"actualMinutes"\s*:\s*(\d+)').firstMatch(metadata);
+      if (metadata.contains('actualMinutes') || metadata.contains('minutes')) {
+        final m = RegExp(r'"(?:actualMinutes|minutes)"\s*:\s*(\d+)').firstMatch(metadata);
         final p = RegExp(r'"plannedMinutes"\s*:\s*(\d+)').firstMatch(metadata);
         if (m != null) {
           final a = m.group(1);
           final pl = p?.group(1);
-          return pl == null ? '${a}m worked' : '${a}m worked (planned ${pl}m)';
+          return pl == null ? '${a}m of focused work' : '${a}m worked (planned ${pl}m)';
         }
       }
       if (metadata.contains('amount')) {
@@ -212,9 +230,30 @@ class ActivityTimelineService {
         if (m != null) {
           final minor = int.tryParse(m.group(1)!);
           if (minor != null) {
-            return '${(minor / 100).toStringAsFixed(0)} recorded';
+            final major = (minor / 100).toStringAsFixed(minor % 100 == 0 ? 0 : 2);
+            if (type.contains('DEBT')) return '$major paid toward debt';
+            if (type.contains('SAVINGS')) return '$major saved';
+            if (type.contains('BILL') || type.contains('SUBSCRIPTION')) return '$major paid';
+            if (type.contains('EXPENSE')) return '$major spent';
+            if (type.contains('INCOME')) return '$major received';
+            return '$major recorded';
           }
         }
+      }
+      if (metadata.contains('remaining')) {
+        final m = RegExp(r'"remaining"\s*:\s*(\d+)').firstMatch(metadata);
+        if (m != null) {
+          final rem = int.tryParse(m.group(1)!);
+          if (rem != null) {
+            return rem == 0
+                ? 'Fully paid off'
+                : '${(rem / 100).toStringAsFixed(0)} still remaining';
+          }
+        }
+      }
+      if (metadata.contains('fromType')) {
+        final m = RegExp(r'"fromType"\s*:\s*"([^"]+)"').firstMatch(metadata);
+        if (m != null) return 'Linked from ${m.group(1)!.toLowerCase()}';
       }
     } catch (_) {}
     return null;
@@ -264,6 +303,13 @@ class ActivityTimelineService {
           return _field(db, 'debts', entityId, 'title');
         case 'SUBSCRIPTION':
           return _field(db, 'subscriptions', entityId, 'service_name');
+        case 'PRACTICAL':
+          return _field(db, 'practical_items', entityId, 'title');
+        case 'DOCUMENT':
+          return _field(db, 'documents', entityId, 'title');
+        case 'ACCOUNT':
+        case 'FINANCIAL_ACCOUNT':
+          return _field(db, 'financial_accounts', entityId, 'name');
         case 'REMINDER':
           return _field(db, 'reminders', entityId, 'title');
         default:
