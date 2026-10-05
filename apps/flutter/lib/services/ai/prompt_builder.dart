@@ -43,4 +43,25 @@ class AiPromptBuilder {
   static String userMessageWithContext(PersonalSituation s, String userMessage) {
     return '${situationBlock(s)}\n\nUSER:\n$userMessage';
   }
+
+  /// Shorter block for small on-device context windows.
+  static String situationBlockCompact(PersonalSituation s) {
+    final buf = StringBuffer();
+    buf.writeln('CONTEXT (do not invent beyond this):');
+    buf.writeln(
+        'tasks ${s.openTaskCount} · overdue ${s.overdueCount} · due today ${s.dueTodayCount}');
+    buf.writeln('free ${s.availableMinutesToday}m · ${s.capacityLabel}');
+    if (s.pressure.isNotEmpty) {
+      buf.writeln(
+          'Pressure: ${s.pressure.take(3).map((p) => p.label).join('; ')}');
+    }
+    if (s.opportunities.isNotEmpty) {
+      buf.writeln(
+          'Next: ${s.opportunities.take(3).map((o) => o.title).join('; ')}');
+    }
+    if (s.priorityLines.isNotEmpty) {
+      buf.writeln('Priority: ${s.priorityLines.take(2).join('; ')}');
+    }
+    return buf.toString().trim();
+  }
 }
