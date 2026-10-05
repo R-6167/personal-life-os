@@ -1,6 +1,7 @@
 import '../domain/enums.dart';
 import '../services/user_prefs.dart';
 import '../domain/models.dart';
+import 'atomic_write.dart';
 import 'database.dart';
 
 class ExpenseRepository {
@@ -17,6 +18,7 @@ class ExpenseRepository {
     return rows.map(Expense.fromMap).toList();
   }
 
+  /// Records an expense and its activity event in one transaction.
   Future<Expense> create({
     required String description,
     required double amountMajor,
@@ -29,29 +31,30 @@ class ExpenseRepository {
     final id = AppDatabase.newId();
     final minor = (amountMajor * 100).round();
     final cur = currency ?? UserPrefs.instance.currency;
-    await (await _db.database).insert('expenses', {
-      'id': id,
-      'owner_id': ownerId,
-      'account_id': accountId,
-      'description': description,
-      'amount_minor': minor,
-      'currency': cur,
-      'occurred_at': now,
-      'category_id': categoryId,
-      'created_at': now,
-      'updated_at': now,
-    });
-    await (await _db.database).insert('activity_events', {
-      'id': AppDatabase.newId(),
-      'owner_id': ownerId,
-      'event_type': 'EXPENSE_RECORDED',
-      'entity_type': 'EXPENSE',
-      'entity_id': id,
-      'occurred_at': now,
-      'recorded_at': now,
-      'source': EventSource.user,
-      'metadata': '{"amount":$minor,"currency":"$cur"}',
-    });
+
+    await AtomicWrite.run(
+      db: _db,
+      state: (txn) async {
+        await txn.insert('expenses', {
+          'id': id,
+          'owner_id': ownerId,
+          'account_id': accountId,
+          'description': description,
+          'amount_minor': minor,
+          'currency': cur,
+          'occurred_at': now,
+          'category_id': categoryId,
+          'created_at': now,
+          'updated_at': now,
+        });
+      },
+      eventType: 'EXPENSE_RECORDED',
+      entityType: 'EXPENSE',
+      entityId: id,
+      occurredAt: now,
+      metadata: '{"amount":$minor,"currency":"$cur"}',
+    );
+
     return Expense(
       id: id,
       ownerId: ownerId,
