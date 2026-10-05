@@ -60,6 +60,7 @@ class PlanningRepository {
   }
 
   /// Atomic: task schedule fields + time_block + activity event in one transaction.
+  /// Cancels prior PLANNED blocks for the same task (reschedule-safe).
   Future<String> scheduleTaskSession({
     required String taskId,
     required DateTime start,
@@ -73,6 +74,12 @@ class PlanningRepository {
     final blockId = AppDatabase.newId();
 
     await _db.txn((txn) async {
+      await txn.update(
+        'time_blocks',
+        {'status': 'CANCELLED', 'updated_at': now},
+        where: "task_id = ? AND status = 'PLANNED'",
+        whereArgs: [taskId],
+      );
       await txn.update(
         'tasks',
         {
@@ -123,7 +130,6 @@ class PlanningRepository {
     return blockId;
   }
 
-  /// Alias used by Planning UI drag-drop for unscheduled tasks.
   Future<String> dropTaskOntoDay({
     required String taskId,
     required DateTime start,
@@ -137,7 +143,6 @@ class PlanningRepository {
         title: title,
       );
 
-  /// Atomic reschedule of task session + matching time blocks.
   Future<void> rescheduleTaskSession({
     required String taskId,
     required DateTime start,
@@ -393,6 +398,36 @@ class PlanningRepository {
     } catch (_) {}
 
     return mergeBusyIntervals(busy);
+  }
+
+  Future<bool> conflictsWithLocked({
+    required DateTime start,
+    required int durationMinutes,
+  }) async {
+    final end = start.add(Duration(minutes: durationMinutes));
+    final startMs = start.millisecondsSinceEpoch;
+    final endMs = end.millisecondsSinceEpoch;
+    final db = await _db.database;
+    final blocks = await db.query(
+      'time_blocks',
+      where: 'start_at < ? AND end_at > ? AND status != ?',
+      whereArgs: [endMs, startMs, 'CANCELLED'],
+      limit: 1,
+    );
+    if (blocks.isNotEmpty) return true;
+    try {
+      final events = await db.query(
+        'calendar_events',
+        where: 'start_at < ? AND end_at > ?',
+        whereArgs: [endMs, startMs],
+        limit: 8,
+      );
+      for (final e in events) {
+        if ('${e['status'] ?? ''}' == 'CANCELLED') continue;
+        return true;
+      }
+    } catch (_) {}
+    return false;
   }
 
   Future<int> availableMinutes({
