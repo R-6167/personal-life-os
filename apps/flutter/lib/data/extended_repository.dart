@@ -1,4 +1,5 @@
 import '../domain/enums.dart';
+import '../services/domain_recurrence.dart';
 import '../services/smart_reminder_service.dart';
 import 'database.dart';
 
@@ -170,19 +171,97 @@ class ExtendedRepository {
     );
   }
 
-  Future<void> addSubscription(String name, double amountMajor, {int daysToRenewal = 30}) async {
+  Future<void> addSubscription(
+    String name,
+    double amountMajor, {
+    int daysToRenewal = 30,
+    String frequency = 'MONTHLY',
+    int interval = 1,
+    String? accountId,
+  }) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
+    final next = now + Duration(days: daysToRenewal).inMilliseconds;
     await (await _db.database).insert('subscriptions', {
       'id': AppDatabase.newId(),
       'owner_id': ownerId,
       'service_name': name,
       'amount_minor': (amountMajor * 100).round(),
       'currency': Defaults.currency,
+      'frequency': frequency,
+      'interval': interval,
+      'next_renewal_at': next,
+      'default_account_id': accountId,
       'status': 'ACTIVE',
       'created_at': now,
       'updated_at': now,
     });
+  }
+
+  /// Advance [next_renewal_at] using the canonical recurrence brain.
+  Future<int?> renewSubscription(String subscriptionId) async {
+    final db = await _db.database;
+    final rows = await db.query('subscriptions', where: 'id = ?', whereArgs: [subscriptionId], limit: 1);
+    if (rows.isEmpty) return null;
+    final row = rows.first;
+    final frequency = row['frequency'] as String? ?? 'MONTHLY';
+    if (!DomainRecurrence.isRecurringFrequency(frequency)) return null;
+    final fromMs = (row['next_renewal_at'] as int?) ?? AppDatabase.nowMs();
+    final rule = DomainRecurrence.ruleFromScheduleMap(
+      row,
+      fallbackStart: DateTime.fromMillisecondsSinceEpoch(fromMs),
+    );
+    final next = DomainRecurrence.nextAfterMs(rule, fromMs);
+    if (next == null) return null;
+    final now = AppDatabase.nowMs();
+    final ownerId = await _db.requireOwnerId();
+    await _db.txn((txn) async {
+      await txn.update(
+        'subscriptions',
+        {'next_renewal_at': next, 'updated_at': now},
+        where: 'id = ?',
+        whereArgs: [subscriptionId],
+      );
+      await txn.insert('activity_events', {
+        'id': AppDatabase.newId(),
+        'owner_id': ownerId,
+        'event_type': 'SUBSCRIPTION_RENEWED',
+        'entity_type': 'SUBSCRIPTION',
+        'entity_id': subscriptionId,
+        'occurred_at': now,
+        'recorded_at': now,
+        'source': EventSource.user,
+        'metadata': '{"nextRenewal":$next}',
+      });
+    });
+    return next;
+  }
+
+  Future<void> pauseSubscription(String id) async {
+    await (await _db.database).update(
+      'subscriptions',
+      {'status': 'PAUSED', 'updated_at': AppDatabase.nowMs()},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<void> cancelSubscription(String id) async {
+    await (await _db.database).update(
+      'subscriptions',
+      {'status': 'CANCELLED', 'updated_at': AppDatabase.nowMs()},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<void> resumeSubscription(String id) async {
+    await (await _db.database).update(
+      'subscriptions',
+      {'status': 'ACTIVE', 'updated_at': AppDatabase.nowMs()},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<List<Map<String, Object?>>> listDebts() async {
