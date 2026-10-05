@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../services/intelligence_assistant.dart';
+import '../services/ai/ai.dart';
 import 'theme.dart';
 import 'widgets/glass.dart';
 
@@ -12,7 +12,7 @@ class AssistantScreen extends StatefulWidget {
 }
 
 class _AssistantScreenState extends State<AssistantScreen> {
-  final _assistant = IntelligenceAssistant();
+  final _ai = AiOrchestrator();
   final _controller = TextEditingController();
   final _scroll = ScrollController();
   final _messages = <_Msg>[];
@@ -33,7 +33,8 @@ class _AssistantScreenState extends State<AssistantScreen> {
 
   Future<void> _bootstrap() async {
     setState(() => _busy = true);
-    final text = await _assistant.reply('situation');
+    final reply = await _ai.reply('situation');
+    final text = reply.text;
     setState(() {
       _messages.add(_Msg(role: 'assistant', text: text));
       _busy = false;
@@ -48,7 +49,8 @@ class _AssistantScreenState extends State<AssistantScreen> {
       _messages.add(_Msg(role: 'user', text: text));
       _busy = true;
     });
-    final reply = await _assistant.reply(text);
+    final result = await _ai.reply(text);
+    final reply = result.text;
     setState(() {
       _messages.add(_Msg(role: 'assistant', text: reply));
       _busy = false;
@@ -73,7 +75,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Intelligence'),
-              Text('Personal Context · Offline',
+              Text('Personal Context · AI layer',
                   style: TextStyle(fontSize: 11, color: Colors.white54)),
             ],
           ),
