@@ -7,6 +7,13 @@ import '../data/task_repository.dart';
 import '../domain/db_map.dart';
 import '../domain/models.dart';
 
+class _Gap {
+  const _Gap(this.start, this.end);
+  final DateTime start;
+  final DateTime end;
+  int get minutes => end.difference(start).inMinutes;
+}
+
 enum DaySlotKind {
   event,
   block,
@@ -176,9 +183,7 @@ class BuildMyDayEngine {
       if (fit == null) {
         final largest = gaps.isEmpty
             ? 0
-            : gaps
-                .map((g) => g.\$2.difference(g.\$1).inMinutes)
-                .reduce((a, b) => a > b ? a : b);
+            : gaps.map((g) => g.minutes).reduce((a, b) => a > b ? a : b);
         final why = largest > 0 && c.durationMin > largest
             ? 'Needs ${c.durationMin}m — largest gap ${largest}m'
             : 'No free slot large enough';
@@ -193,8 +198,8 @@ class BuildMyDayEngine {
         continue;
       }
       placed.add(DaySlot(
-        start: fit.\$1,
-        end: fit.\$2,
+        start: fit.start,
+        end: fit.end,
         title: c.title,
         kind: c.kind,
         entityId: c.id,
@@ -203,8 +208,8 @@ class BuildMyDayEngine {
         priority: c.score,
       ));
       usedIds.add(c.id);
-      final bufferedEnd = fit.\$2.add(const Duration(minutes: 5));
-      _consumeGap(gaps, fit.\$1, bufferedEnd.isAfter(dayEnd) ? dayEnd : bufferedEnd);
+      final bufferedEnd = fit.end.add(const Duration(minutes: 5));
+      _consumeGap(gaps, fit.start, bufferedEnd.isAfter(dayEnd) ? dayEnd : bufferedEnd);
     }
 
     for (final entry in blockedReasons.entries) {
@@ -232,7 +237,7 @@ class BuildMyDayEngine {
     }
     var free = 0;
     for (final g in gaps) {
-      free += g.\$2.difference(g.\$1).inMinutes;
+      free += g.minutes;
     }
 
     return BuiltDay(
@@ -504,23 +509,19 @@ class BuildMyDayEngine {
     return false;
   }
 
-  List<(DateTime, DateTime)> _freeGaps(
-    DateTime from,
-    DateTime to,
-    List<DaySlot> locked,
-  ) {
+  List<_Gap> _freeGaps(DateTime from, DateTime to, List<DaySlot> locked) {
     final sorted = [...locked]..sort((a, b) => a.start.compareTo(b.start));
-    final gaps = <(DateTime, DateTime)>[];
+    final gaps = <_Gap>[];
     var cursor = from;
     for (final s in sorted) {
       if (s.start.isAfter(cursor)) {
-        gaps.add((cursor, s.start.isAfter(to) ? to : s.start));
+        gaps.add(_Gap(cursor, s.start.isAfter(to) ? to : s.start));
       }
       if (s.end.isAfter(cursor)) cursor = s.end;
       if (cursor.isAfter(to)) break;
     }
-    if (cursor.isBefore(to)) gaps.add((cursor, to));
-    return gaps.where((g) => g.\$2.difference(g.\$1).inMinutes >= 10).toList();
+    if (cursor.isBefore(to)) gaps.add(_Gap(cursor, to));
+    return gaps.where((g) => g.minutes >= 10).toList();
   }
 
   int _preferredHour(FlexibleCandidate c) {
@@ -532,36 +533,32 @@ class BuildMyDayEngine {
     return 14;
   }
 
-  (DateTime, DateTime)? _placeInGaps(
-    List<(DateTime, DateTime)> gaps,
-    int minutes, {
-    int? preferredHour,
-  }) {
-    (DateTime, DateTime)? bestExact;
+  _Gap? _placeInGaps(List<_Gap> gaps, int minutes, {int? preferredHour}) {
+    _Gap? bestExact;
     var bestExactDist = 1 << 30;
-    (DateTime, DateTime)? bestFit;
+    _Gap? bestFit;
     var bestFitAvail = 0;
 
     for (final g in gaps) {
-      final avail = g.\$2.difference(g.\$1).inMinutes;
+      final avail = g.minutes;
       if (avail < minutes) {
         if (avail >= 15 && avail > bestFitAvail) {
           bestFitAvail = avail;
-          bestFit = (g.\$1, g.\$1.add(Duration(minutes: avail.clamp(15, minutes))));
+          bestFit = _Gap(g.start, g.start.add(Duration(minutes: avail.clamp(15, minutes))));
         }
         continue;
       }
-      var start = g.\$1;
+      var start = g.start;
       if (preferredHour != null) {
-        final prefer = DateTime(g.\$1.year, g.\$1.month, g.\$1.day, preferredHour);
-        if (!prefer.isBefore(g.\$1) &&
-            !prefer.add(Duration(minutes: minutes)).isAfter(g.\$2)) {
+        final prefer = DateTime(g.start.year, g.start.month, g.start.day, preferredHour);
+        if (!prefer.isBefore(g.start) &&
+            !prefer.add(Duration(minutes: minutes)).isAfter(g.end)) {
           start = prefer;
         }
       }
       var end = start.add(Duration(minutes: minutes));
-      if (end.isAfter(g.\$2)) {
-        start = g.\$1;
+      if (end.isAfter(g.end)) {
+        start = g.start;
         end = start.add(Duration(minutes: minutes));
       }
       final dist = preferredHour == null
@@ -569,7 +566,7 @@ class BuildMyDayEngine {
           : (start.hour - preferredHour).abs() * 60 + start.minute;
       if (dist < bestExactDist) {
         bestExactDist = dist;
-        bestExact = (start, end);
+        bestExact = _Gap(start, end);
       }
     }
 
@@ -578,17 +575,17 @@ class BuildMyDayEngine {
     return null;
   }
 
-  void _consumeGap(List<(DateTime, DateTime)> gaps, DateTime start, DateTime end) {
+  void _consumeGap(List<_Gap> gaps, DateTime start, DateTime end) {
     for (var i = 0; i < gaps.length; i++) {
       final g = gaps[i];
-      if (!start.isBefore(g.\$2) || !end.isAfter(g.\$1)) continue;
-      final before = start.isAfter(g.\$1) ? (g.\$1, start) : null;
-      final after = end.isBefore(g.\$2) ? (end, g.\$2) : null;
+      if (!start.isBefore(g.end) || !end.isAfter(g.start)) continue;
+      final before = start.isAfter(g.start) ? _Gap(g.start, start) : null;
+      final after = end.isBefore(g.end) ? _Gap(end, g.end) : null;
       gaps.removeAt(i);
-      if (after != null && after.\$2.difference(after.\$1).inMinutes >= 10) {
+      if (after != null && after.minutes >= 10) {
         gaps.insert(i, after);
       }
-      if (before != null && before.\$2.difference(before.\$1).inMinutes >= 10) {
+      if (before != null && before.minutes >= 10) {
         gaps.insert(i, before);
       }
       return;
