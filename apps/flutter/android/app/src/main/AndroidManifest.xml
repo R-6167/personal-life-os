@@ -11,7 +11,8 @@
         android:name="${applicationName}"
         android:icon="@drawable/ic_launcher_ordin"
         android:roundIcon="@drawable/ic_launcher_ordin"
-        android:usesCleartextTraffic="false">
+        android:usesCleartextTraffic="false"
+        android:largeHeap="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"
