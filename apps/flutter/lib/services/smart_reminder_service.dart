@@ -1,4 +1,3 @@
-import '../data/atomic_write.dart';
 import '../data/database.dart';
 import '../data/extended_repository.dart';
 import '../domain/enums.dart';
@@ -45,6 +44,7 @@ class SmartReminderService {
   }
 
   /// Replace pending reminders for [sourceType]/[sourceId] with a smart series.
+  /// Reminders + activity event commit in one SQLite transaction.
   Future<int> scheduleSeries({
     required String sourceType,
     required String sourceId,
@@ -53,66 +53,71 @@ class SmartReminderService {
     String? kind,
     String? verb, // 'due' | 'expires'
   }) async {
+    final ownerId = await _db.requireOwnerId();
     final now = DateTime.now();
     final nowMs = AppDatabase.nowMs();
     final dueDay = DateTime(dueOrExpiry.year, dueOrExpiry.month, dueOrExpiry.day, 9);
     final action = verb ?? 'due';
     final leads = leadDaysForKind(kind);
 
-    final created = await AtomicWrite.run<int>(
-      db: _db,
-      state: (txn) async {
-        // Drop existing pending for this source so re-sync is clean.
-        try {
-          await txn.update(
-            'reminders',
-            {'status': 'CANCELLED', 'updated_at': nowMs},
-            where: "source_type = ? AND source_id = ? AND status = 'PENDING'",
-            whereArgs: [sourceType, sourceId],
-          );
-        } catch (_) {}
+    final created = await _db.txn((txn) async {
+      // Drop existing pending for this source so re-sync is clean.
+      try {
+        await txn.update(
+          'reminders',
+          {'status': 'CANCELLED', 'updated_at': nowMs},
+          where: "source_type = ? AND source_id = ? AND status = 'PENDING'",
+          whereArgs: [sourceType, sourceId],
+        );
+      } catch (_) {}
 
-        var n = 0;
-        for (final daysBefore in leads) {
-          final trigger = dueDay.subtract(Duration(days: daysBefore));
-          // Only future triggers (or up to 1 hour in the past → nudge in 2 min)
-          DateTime when = trigger;
-          if (when.isBefore(now.subtract(const Duration(hours: 1)))) {
-            continue;
-          }
-          if (when.isBefore(now)) {
-            when = now.add(const Duration(minutes: 2));
-          }
-
-          final message = daysBefore == 0
-              ? '${title} is $action today'
-              : daysBefore == 1
-                  ? '${title} $action tomorrow'
-                  : '${title} $action in $daysBefore days';
-
-          await txn.insert('reminders', {
-            'id': AppDatabase.newId(),
-            'owner_id': await _db.requireOwnerId(),
-            'title': daysBefore == 0 ? title : 'Upcoming: $title',
-            'message': message,
-            'trigger_at': when.millisecondsSinceEpoch,
-            'source_type': sourceType,
-            'source_id': sourceId,
-            'status': 'PENDING',
-            'created_at': nowMs,
-            'updated_at': nowMs,
-          });
-          n++;
+      var n = 0;
+      for (final daysBefore in leads) {
+        final trigger = dueDay.subtract(Duration(days: daysBefore));
+        // Only future triggers (or up to 1 hour in the past → nudge in 2 min)
+        DateTime when = trigger;
+        if (when.isBefore(now.subtract(const Duration(hours: 1)))) {
+          continue;
         }
-        return n;
-      },
-      eventType: 'SMART_REMINDERS_SCHEDULED',
-      entityType: sourceType,
-      entityId: sourceId,
-      source: EventSource.system,
-      occurredAt: nowMs,
-      metadata: '{"count":0,"kind":"${kind ?? ''}"}',
-    );
+        if (when.isBefore(now)) {
+          when = now.add(const Duration(minutes: 2));
+        }
+
+        final message = daysBefore == 0
+            ? '${title} is $action today'
+            : daysBefore == 1
+                ? '${title} $action tomorrow'
+                : '${title} $action in $daysBefore days';
+
+        await txn.insert('reminders', {
+          'id': AppDatabase.newId(),
+          'owner_id': ownerId,
+          'title': daysBefore == 0 ? title : 'Upcoming: $title',
+          'message': message,
+          'trigger_at': when.millisecondsSinceEpoch,
+          'source_type': sourceType,
+          'source_id': sourceId,
+          'status': 'PENDING',
+          'created_at': nowMs,
+          'updated_at': nowMs,
+        });
+        n++;
+      }
+
+      await txn.insert('activity_events', {
+        'id': AppDatabase.newId(),
+        'owner_id': ownerId,
+        'event_type': 'SMART_REMINDERS_SCHEDULED',
+        'entity_type': sourceType,
+        'entity_id': sourceId,
+        'occurred_at': nowMs,
+        'recorded_at': nowMs,
+        'source': EventSource.system,
+        'metadata': '{"count":$n,"kind":"${kind ?? ''}"}',
+      });
+
+      return n;
+    });
 
     // Best-effort push into OS notification scheduler (outside txn)
     try {
