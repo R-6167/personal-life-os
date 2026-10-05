@@ -1,3 +1,4 @@
+import '../data/atomic_write.dart';
 import '../data/bill_repository.dart';
 import '../data/database.dart';
 import '../data/extended_repository.dart';
@@ -137,19 +138,17 @@ class NoteIntelligence {
       n++;
     }
     if (n > 0) {
-      final ownerId = await _db.requireOwnerId();
       final now = AppDatabase.nowMs();
-      await (await _db.database).insert('activity_events', {
-        'id': AppDatabase.newId(),
-        'owner_id': ownerId,
-        'event_type': 'NOTE_AUTO_LINKED',
-        'entity_type': 'NOTE',
-        'entity_id': noteId,
-        'occurred_at': now,
-        'recorded_at': now,
-        'source': EventSource.system,
-        'metadata': '{"count":$n}',
-      });
+      await AtomicWrite.run(
+        db: _db,
+        state: (_) async {},
+        eventType: 'NOTE_AUTO_LINKED',
+        entityType: 'NOTE',
+        entityId: noteId,
+        source: EventSource.system,
+        occurredAt: now,
+        metadata: '{"count":$n}',
+      );
     }
     return n;
   }
@@ -192,19 +191,16 @@ class NoteIntelligence {
       );
       n++;
     }
-    final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
-    await (await _db.database).insert('activity_events', {
-      'id': AppDatabase.newId(),
-      'owner_id': ownerId,
-      'event_type': 'NOTE_TASKS_EXTRACTED',
-      'entity_type': 'NOTE',
-      'entity_id': noteId,
-      'occurred_at': now,
-      'recorded_at': now,
-      'source': EventSource.user,
-      'metadata': '{"count":$n}',
-    });
+    await AtomicWrite.run(
+      db: _db,
+      state: (_) async {},
+      eventType: 'NOTE_TASKS_EXTRACTED',
+      entityType: 'NOTE',
+      entityId: noteId,
+      occurredAt: now,
+      metadata: '{"count":$n}',
+    );
     return n;
   }
 
