@@ -99,7 +99,9 @@ class ActivityTimelineService {
     final diff = today.difference(day).inDays;
     if (diff == 0) return 'Today';
     if (diff == 1) return 'Yesterday';
-    const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const weekdays = [
+      'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'
+    ];
     const months = [
       'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
@@ -112,9 +114,7 @@ class ActivityTimelineService {
   static String formatTime(int ms) {
     if (ms <= 0) return '';
     final d = DateTime.fromMillisecondsSinceEpoch(ms);
-    final h = d.hour.toString().padLeft(2, '0');
-    final m = d.minute.toString().padLeft(2, '0');
-    return '$h:$m';
+    return '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
   }
 
   String _headline(String type, String? title) {
@@ -126,6 +126,8 @@ class ActivityTimelineService {
         return q == null ? 'Added a task' : 'Added task $q';
       case 'TASK_SCHEDULED':
         return q == null ? 'Scheduled work' : 'Scheduled $q';
+      case 'TASK_RESCHEDULED':
+        return q == null ? 'Rescheduled a task' : 'Rescheduled $q';
       case 'TASK_UPDATED':
         return q == null ? 'Updated a task' : 'Updated $q';
       case 'TASK_REOPENED':
@@ -150,6 +152,8 @@ class ActivityTimelineService {
         return q == null ? 'Achieved a goal' : 'Achieved goal $q';
       case 'MILESTONE_COMPLETED':
         return q == null ? 'Reached a milestone' : 'Reached milestone $q';
+      case 'MILESTONE_CREATED':
+        return q == null ? 'Added a milestone' : 'Added milestone $q';
       case 'HABIT_COMPLETED':
         return q == null ? 'Completed a habit' : 'Completed habit $q';
       case 'HABIT_SKIPPED':
@@ -160,6 +164,8 @@ class ActivityTimelineService {
         return q == null ? 'Finished a routine' : 'Finished $q';
       case 'ROUTINE_MISSED':
         return q == null ? 'Missed a routine' : 'Missed $q';
+      case 'ROUTINE_RECOVERED':
+        return q == null ? 'Caught up a routine' : 'Caught up on $q';
       case 'BILL_PAID':
         return q == null ? 'Paid a bill' : 'Paid $q';
       case 'BILL_CREATED':
@@ -170,6 +176,8 @@ class ActivityTimelineService {
         return q == null ? 'Recorded income' : 'Received: $q';
       case 'DEBT_PAYMENT_RECORDED':
         return q == null ? 'Made a debt payment' : 'Debt payment — $q';
+      case 'DEBT_PAID_OFF':
+        return q == null ? 'Cleared a debt' : 'Cleared debt $q';
       case 'SAVINGS_CONTRIBUTION_RECORDED':
         return q == null ? 'Saved money' : 'Saved toward $q';
       case 'SAVINGS_GOAL_REACHED':
@@ -180,33 +188,25 @@ class ActivityTimelineService {
         return q == null ? 'Added a subscription' : 'Added subscription $q';
       case 'NOTE_CREATED':
         return q == null ? 'Wrote a note' : 'Noted: $q';
+      case 'NOTE_UPDATED':
+        return q == null ? 'Updated a note' : 'Updated note $q';
+      case 'PRACTICAL_COMPLETED':
+        return q == null ? 'Finished a practical item' : 'Finished $q';
+      case 'DOCUMENT_RENEWED':
+        return q == null ? 'Renewed a document' : 'Renewed $q';
+      case 'TIME_BLOCK_CREATED':
+        return q == null ? 'Blocked time' : 'Blocked time for $q';
       case 'REMINDER_CREATED':
         return q == null ? 'Set a reminder' : 'Reminder: $q';
       case 'WELLNESS_CHECKIN':
         return 'Wellness check-in';
       case 'BUDGET_CREATED':
         return q == null ? 'Set a budget' : 'Set budget $q';
-      case 'DEBT_PAID_OFF':
-        return q == null ? 'Cleared a debt' : 'Cleared debt $q';
-      case 'PRACTICAL_COMPLETED':
-        return q == null ? 'Finished a practical item' : 'Finished $q';
-      case 'DOCUMENT_RENEWED':
-        return q == null ? 'Renewed a document' : 'Renewed $q';
-      case 'TASK_RESCHEDULED':
-        return q == null ? 'Rescheduled a task' : 'Rescheduled $q';
-      case 'TIME_BLOCK_CREATED':
-        return q == null ? 'Blocked time' : 'Blocked time for $q';
-      case 'ROUTINE_RECOVERED':
-        return q == null ? 'Caught up a routine' : 'Caught up on $q';
-      case 'NOTE_UPDATED':
-        return q == null ? 'Updated a note' : 'Updated note $q';
-      case 'MILESTONE_CREATED':
-        return q == null ? 'Added a milestone' : 'Added milestone $q';
-      case 'ACCOUNT_ADJUSTED':
-        return q == null ? 'Adjusted an account' : 'Adjusted $q';
       default:
         if (type.startsWith('TASK_CREATED_FROM_')) {
-          return q == null ? 'Created a task from life item' : 'Created task $q from life item';
+          return q == null
+              ? 'Created a task from life item'
+              : 'Created task $q from life item';
         }
         final soft = type.replaceAll('_', ' ').toLowerCase();
         return q == null ? soft : '$soft — $q';
@@ -217,7 +217,8 @@ class ActivityTimelineService {
     if (metadata == null || metadata.isEmpty) return null;
     try {
       if (metadata.contains('actualMinutes') || metadata.contains('minutes')) {
-        final m = RegExp(r'"(?:actualMinutes|minutes)"\s*:\s*(\d+)').firstMatch(metadata);
+        final m =
+            RegExp(r'"(?:actualMinutes|minutes)"\s*:\s*(\d+)').firstMatch(metadata);
         final p = RegExp(r'"plannedMinutes"\s*:\s*(\d+)').firstMatch(metadata);
         if (m != null) {
           final a = m.group(1);
@@ -230,10 +231,13 @@ class ActivityTimelineService {
         if (m != null) {
           final minor = int.tryParse(m.group(1)!);
           if (minor != null) {
-            final major = (minor / 100).toStringAsFixed(minor % 100 == 0 ? 0 : 2);
+            final major =
+                (minor / 100).toStringAsFixed(minor % 100 == 0 ? 0 : 2);
             if (type.contains('DEBT')) return '$major paid toward debt';
             if (type.contains('SAVINGS')) return '$major saved';
-            if (type.contains('BILL') || type.contains('SUBSCRIPTION')) return '$major paid';
+            if (type.contains('BILL') || type.contains('SUBSCRIPTION')) {
+              return '$major paid';
+            }
             if (type.contains('EXPENSE')) return '$major spent';
             if (type.contains('INCOME')) return '$major received';
             return '$major recorded';
@@ -252,14 +256,16 @@ class ActivityTimelineService {
         }
       }
       if (metadata.contains('fromType')) {
-        final m = RegExp(r'"fromType"\s*:\s*"([^"]+)"').firstMatch(metadata);
+        final m =
+            RegExp(r'"fromType"\s*:\s*"([^"]+)"').firstMatch(metadata);
         if (m != null) return 'Linked from ${m.group(1)!.toLowerCase()}';
       }
     } catch (_) {}
     return null;
   }
 
-  Future<String?> _resolveTitle(dynamic db, String entityType, String entityId) async {
+  Future<String?> _resolveTitle(
+      dynamic db, String entityType, String entityId) async {
     try {
       switch (entityType) {
         case 'GOAL':
