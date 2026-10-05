@@ -33,7 +33,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
 
   Future<void> _bootstrap() async {
     setState(() => _busy = true);
-    final text = await _assistant.reply('today');
+    final text = await _assistant.reply('situation');
     setState(() {
       _messages.add(_Msg(role: 'assistant', text: text));
       _busy = false;
@@ -73,7 +73,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Intelligence'),
-              Text('Memory · Reasoning · Offline',
+              Text('Personal Context · Offline',
                   style: TextStyle(fontSize: 11, color: Colors.white54)),
             ],
           ),
@@ -98,7 +98,8 @@ class _AssistantScreenState extends State<AssistantScreen> {
                   final m = _messages[i];
                   final isUser = m.role == 'user';
                   return Align(
-                    alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+                    alignment:
+                        isUser ? Alignment.centerRight : Alignment.centerLeft,
                     child: ConstrainedBox(
                       constraints: BoxConstraints(
                           maxWidth: MediaQuery.of(context).size.width * 0.85),
@@ -126,6 +127,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
               child: Row(
                 children: [
                   for (final chip in [
+                    'Situation',
                     'Today',
                     'Plan',
                     'Insights',
@@ -141,7 +143,8 @@ class _AssistantScreenState extends State<AssistantScreen> {
                         label: Text(chip),
                         onPressed: () => _send(chip.toLowerCase()),
                         backgroundColor: AppTheme.seed.withValues(alpha: 0.2),
-                        side: BorderSide(color: AppTheme.seed.withValues(alpha: 0.4)),
+                        side: BorderSide(
+                            color: AppTheme.seed.withValues(alpha: 0.4)),
                       ),
                     ),
                 ],
@@ -156,7 +159,8 @@ class _AssistantScreenState extends State<AssistantScreen> {
                       controller: _controller,
                       style: const TextStyle(color: Colors.white),
                       decoration: const InputDecoration(
-                        hintText: 'Ask your local OS… remember · why · goal progress',
+                        hintText:
+                            'situation · focus · plan · remember · why…',
                       ),
                       onSubmitted: (_) => _send(),
                     ),
