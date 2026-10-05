@@ -18,6 +18,17 @@ Or `AtomicWrite.runWithEvents` when multiple events belong to one lifecycle step
 
 Do **not** insert into `activity_events` outside the same transaction as the state write.
 
+### Covered write paths
+
+| Path | Pattern |
+|------|---------|
+| Task create / complete / status | `txn` or `AtomicWrite` |
+| Work session start / complete | single SQLite `transaction` |
+| Expense create | `AtomicWrite.run` |
+| Income create (+ optional balance credit) | `AtomicWrite.run` |
+| Bill create / payOccurrence | `_db.txn` (multi-table + multi-event) |
+| Note auto-link / task extract audit | `AtomicWrite.run` |
+
 Work sessions: `start` / `complete` use a single SQLite `transaction` for session row + task stamp + activity event.
 
 ## CI gates (must stay green)
@@ -40,12 +51,13 @@ Work sessions: `start` / `complete` use a single SQLite `transaction` for sessio
 
 ## Integration tests (in-memory SQLite)
 
-Uses `sqflite_common_ffi` + `AppDatabase.openInMemoryForTest()`:
+Uses `sqflite_common_ffi` + `AppDatabase.attachForTest` via `test/helpers/test_db.dart`:
 
 | File | Flow |
 |------|------|
 | `integration_task_lifecycle_test.dart` | Task complete + AtomicWrite |
 | `integration_work_session_test.dart` | Work session start atomicity |
+| `integration_finance_lifecycle_test.dart` | Expense, income+balance, bill pay |
 
 Run: `cd apps/flutter && flutter test`
 
