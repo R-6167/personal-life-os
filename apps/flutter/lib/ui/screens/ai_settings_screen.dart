@@ -1,6 +1,5 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:path/path.dart' as p;
 
 import '../../services/ai/ai.dart';
 import '../theme.dart';
@@ -20,8 +19,9 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
   final _model = TextEditingController(text: 'gpt-4o-mini');
   String _localPath = '';
   String _localLabel = '';
+  String? _sizeLabel;
   bool _loading = true;
-  bool _loadingModel = false;
+  bool _busy = false;
   String? _engineStatus;
 
   @override
@@ -49,12 +49,35 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
       _localPath = s.localModelPath;
       _localLabel = s.localModelLabel;
       _loading = false;
-      _engineStatus = LocalLlmEngine.instance.isSupported
-          ? (LocalLlmEngine.instance.isLoaded
-              ? 'Model loaded in memory'
-              : 'Ready — pick a .gguf file')
-          : 'On-device GGUF needs Android/iOS';
+      _refreshEngineStatus();
     });
+  }
+
+  void _refreshEngineStatus() {
+    final eng = LocalLlmEngine.instance;
+    if (!eng.isSupported) {
+      _engineStatus = 'On-device GGUF needs Android/iOS';
+      return;
+    }
+    switch (eng.status) {
+      case LlmEngineStatus.ready:
+        _engineStatus = 'Ready: ${eng.loadedLabel ?? _localLabel}';
+        break;
+      case LlmEngineStatus.loading:
+        _engineStatus = 'Loading model…';
+        break;
+      case LlmEngineStatus.generating:
+        _engineStatus = 'Generating…';
+        break;
+      case LlmEngineStatus.error:
+        _engineStatus = eng.lastError ?? 'Error';
+        break;
+      case LlmEngineStatus.idle:
+        _engineStatus = _localPath.isEmpty
+            ? 'Pick a .gguf (copied into app storage)'
+            : 'Model path saved — tap Load';
+        break;
+    }
   }
 
   Future<void> _save() async {
@@ -68,11 +91,11 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
     ));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('AI settings saved on device')),
+      const SnackBar(content: Text('AI settings saved')),
     );
   }
 
-  Future<void> _pickGguf() async {
+  Future<void> _pickAndImport() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.any,
       allowMultiple: false,
@@ -98,32 +121,60 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
       return;
     }
     setState(() {
-      _localPath = path;
-      _localLabel = f.name.isNotEmpty ? f.name : p.basename(path);
+      _busy = true;
+      _engineStatus = 'Importing into app storage…';
     });
+    try {
+      final imported = await LocalModelStore.instance.importGguf(
+        path,
+        preferredName: f.name,
+      );
+      if (!mounted) return;
+      setState(() {
+        _localPath = imported.path;
+        _localLabel = imported.label;
+        _sizeLabel = LocalModelStore.formatBytes(imported.bytes);
+        _busy = false;
+        _engineStatus = 'Imported $_localLabel ($_sizeLabel)';
+      });
+      await _save();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _engineStatus = 'Import failed: $e';
+      });
+    }
   }
 
   Future<void> _preload() async {
     if (_localPath.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pick a .gguf file first')),
+        const SnackBar(content: Text('Import a .gguf file first')),
       );
       return;
     }
     setState(() {
-      _loadingModel = true;
-      _engineStatus = 'Loading model into memory…';
+      _busy = true;
+      _engineStatus = 'Loading into RAM (may take a minute)…';
     });
     await _save();
     final settings = await AiSettingsStore.instance.load();
     final ok = await LocalLlmEngine.instance.ensureLoaded(settings);
     if (!mounted) return;
     setState(() {
-      _loadingModel = false;
-      _engineStatus = ok
-          ? 'Loaded: $_localLabel'
-          : (LocalLlmEngine.instance.lastError ?? 'Load failed');
+      _busy = false;
+      _refreshEngineStatus();
+      if (!ok) {
+        _engineStatus = LocalLlmEngine.instance.lastError ?? 'Load failed';
+      }
     });
+  }
+
+  Future<void> _unload() async {
+    await LocalLlmEngine.instance.unload();
+    if (!mounted) return;
+    setState(_refreshEngineStatus);
   }
 
   @override
@@ -142,10 +193,9 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Personal Context is always built first and injected as ground truth.\n\n'
-                          '• Rule engine — offline, no model file\n'
-                          '• On-device GGUF — llama.cpp on this phone (private)\n'
-                          '• Remote — optional OpenAI-compatible API',
+                          'Personal Context is always injected first.\n\n'
+                          'On-device: import a .gguf, load it, set mode to '
+                          'On-device GGUF. Prefer small Q4 models on phones.',
                           style: TextStyle(
                             color: AppTheme.silver.withValues(alpha: 0.55),
                             fontSize: 13,
@@ -197,16 +247,21 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                         const SizedBox(height: 8),
                         Text(
                           _localLabel.isEmpty
-                              ? 'No model selected'
+                              ? 'No model imported'
                               : _localLabel,
                           style: const TextStyle(color: AppTheme.silver),
                         ),
+                        if (_sizeLabel != null)
+                          Text(_sizeLabel!,
+                              style: TextStyle(
+                                  color: AppTheme.silver.withValues(alpha: 0.5),
+                                  fontSize: 12)),
                         if (_localPath.isNotEmpty)
                           Text(
                             _localPath,
                             style: TextStyle(
-                              color: AppTheme.silver.withValues(alpha: 0.4),
-                              fontSize: 11,
+                              color: AppTheme.silver.withValues(alpha: 0.35),
+                              fontSize: 10,
                             ),
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
@@ -216,41 +271,35 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                           Text(
                             _engineStatus!,
                             style: TextStyle(
-                              color: AppTheme.amber.withValues(alpha: 0.85),
+                              color: AppTheme.amber.withValues(alpha: 0.9),
                               fontSize: 12,
                             ),
                           ),
                         ],
-                        const SizedBox(height: 8),
-                        Row(
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
                           children: [
                             FilledButton.tonal(
-                              onPressed: _pickGguf,
-                              child: const Text('Pick .gguf'),
+                              onPressed: _busy ? null : _pickAndImport,
+                              child: const Text('Import .gguf'),
                             ),
-                            const SizedBox(width: 8),
                             FilledButton.tonal(
-                              onPressed: _loadingModel ? null : _preload,
-                              child: _loadingModel
-                                  ? const SizedBox(
-                                      width: 18,
-                                      height: 18,
-                                      child: CircularProgressIndicator(
-                                          strokeWidth: 2),
-                                    )
-                                  : const Text('Load model'),
+                              onPressed: _busy ? null : _preload,
+                              child: const Text('Load model'),
+                            ),
+                            TextButton(
+                              onPressed: _busy ? null : _unload,
+                              child: const Text('Unload'),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Tip: use a small quant (Q4_K_M) such as Phi-3 mini, '
-                          'Gemma 2B, or Qwen 1.5–3B for phones.',
-                          style: TextStyle(
-                            color: AppTheme.silver.withValues(alpha: 0.45),
-                            fontSize: 12,
+                        if (_busy)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 12),
+                            child: LinearProgressIndicator(),
                           ),
-                        ),
                       ],
                     ),
                   ),
@@ -286,7 +335,7 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                   ),
                   const SizedBox(height: 16),
                   FilledButton(
-                    onPressed: _save,
+                    onPressed: _busy ? null : _save,
                     child: const Text('Save AI settings'),
                   ),
                   const SizedBox(height: 40),
