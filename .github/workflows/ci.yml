@@ -41,6 +41,9 @@ jobs:
           find lib -name '*.dart' -exec perl -pi -e 's/(?<![A-Za-z])equired /required /g' {} +
           find lib -name '*.dart' -exec perl -pi -e 's/activeTrackColor:/activeColor:/g' {} +
 
+      - name: Unit, smoke & integration tests
+        run: flutter test --reporter expanded
+
       - name: Analyze
         run: |
           set +e
@@ -52,9 +55,6 @@ jobs:
             grep -E "error •|Error:" /tmp/analyze.txt || true
             exit "$CODE"
           fi
-
-      - name: Unit & smoke tests
-        run: flutter test --reporter expanded
 
       - name: Atomic write pattern scan
         run: |
