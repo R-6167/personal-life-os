@@ -73,7 +73,8 @@ class _AssistantScreenState extends State<AssistantScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Intelligence'),
-              Text('Local Personal Context', style: TextStyle(fontSize: 11, color: Colors.white54)),
+              Text('Memory · Reasoning · Offline',
+                  style: TextStyle(fontSize: 11, color: Colors.white54)),
             ],
           ),
         ),
@@ -99,7 +100,8 @@ class _AssistantScreenState extends State<AssistantScreen> {
                   return Align(
                     alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
                     child: ConstrainedBox(
-                      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.85),
+                      constraints: BoxConstraints(
+                          maxWidth: MediaQuery.of(context).size.width * 0.85),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(vertical: 6),
                         child: GlassCard(
@@ -123,7 +125,16 @@ class _AssistantScreenState extends State<AssistantScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Row(
                 children: [
-                  for (final chip in ['Today', 'Overdue', 'Habits', 'Bills', 'Spend', 'Help'])
+                  for (final chip in [
+                    'Today',
+                    'Plan',
+                    'Insights',
+                    'Overdue',
+                    'Habits',
+                    'Bills',
+                    'Spend',
+                    'Help'
+                  ])
                     Padding(
                       padding: const EdgeInsets.only(right: 8),
                       child: ActionChip(
@@ -145,7 +156,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
                       controller: _controller,
                       style: const TextStyle(color: Colors.white),
                       decoration: const InputDecoration(
-                        hintText: 'Ask your local OS…',
+                        hintText: 'Ask your local OS… remember · why · goal progress',
                       ),
                       onSubmitted: (_) => _send(),
                     ),
