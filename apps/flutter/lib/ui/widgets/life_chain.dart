@@ -1,78 +1,52 @@
 import 'package:flutter/material.dart';
 
 import '../theme.dart';
+import 'glass.dart';
 
-/// Compact vertical chain of life nodes (goal → project → task…).
-class LifeChain extends StatelessWidget {
-  const LifeChain({super.key, required this.nodes});
+/// Visual “one system” chain: Goal → Project → Milestone → Task → Schedule → Done.
+class LifeChainBanner extends StatelessWidget {
+  const LifeChainBanner({
+    super.key,
+    required this.steps,
+    this.subtitle,
+  });
 
-  final List<({String label, String? sub})> nodes;
+  final List<String> steps;
+  final String? subtitle;
 
   @override
   Widget build(BuildContext context) {
-    if (nodes.isEmpty) return const SizedBox.shrink();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        for (var i = 0; i < nodes.length; i++) ...[
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Column(
-                children: [
-                  Container(
-                    width: 10,
-                    height: 10,
-                    decoration: BoxDecoration(
-                      color: i == 0 ? AppTheme.amber : AppTheme.woodLight,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  if (i < nodes.length - 1)
-                    Container(
-                      width: 2,
-                      height: 22,
-                      color: AppTheme.silver.withValues(alpha: 0.25),
-                    ),
-                ],
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        nodes[i].label,
-                        style: const TextStyle(
-                          color: AppTheme.silver,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13,
-                        ),
-                      ),
-                      if (nodes[i].sub != null && nodes[i].sub!.isNotEmpty)
-                        Text(
-                          nodes[i].sub!,
-                          style: TextStyle(
-                            color: AppTheme.silver.withValues(alpha: 0.45),
-                            fontSize: 11,
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
+    return GlassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            steps.join('  →  '),
+            style: const TextStyle(
+              color: AppTheme.amber,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.2,
+            ),
           ),
+          if (subtitle != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              subtitle!,
+              style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.5), fontSize: 12),
+            ),
+          ],
         ],
-      ],
+      ),
     );
   }
 }
 
 class ActivityTimeline extends StatelessWidget {
-  const ActivityTimeline({super.key, required this.items});
+  const ActivityTimeline({
+    super.key,
+    required this.items,
+  });
 
   final List<({String label, int at})> items;
 
@@ -80,36 +54,29 @@ class ActivityTimeline extends StatelessWidget {
   Widget build(BuildContext context) {
     if (items.isEmpty) {
       return Text(
-        'No activity yet',
-        style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4)),
+        'No activity yet on this thread',
+        style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 13),
       );
     }
     return Column(
-      children: items.map((a) {
-        final d = DateTime.fromMillisecondsSinceEpoch(a.at);
+      children: items.map((e) {
+        final dt = DateTime.fromMillisecondsSinceEpoch(e.at);
         final stamp =
-            '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')} '
-            '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+            '${dt.month}/${dt.day} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
         return Padding(
           padding: const EdgeInsets.only(bottom: 8),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                stamp,
-                style: TextStyle(
-                  color: AppTheme.silver.withValues(alpha: 0.35),
-                  fontSize: 11,
+          child: GlassCard(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              children: [
+                const Icon(Icons.circle, size: 8, color: AppTheme.amber),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(e.label, style: const TextStyle(color: AppTheme.silver, fontSize: 13)),
                 ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  a.label,
-                  style: const TextStyle(color: AppTheme.silver, fontSize: 13),
-                ),
-              ),
-            ],
+                Text(stamp, style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11)),
+              ],
+            ),
           ),
         );
       }).toList(),
