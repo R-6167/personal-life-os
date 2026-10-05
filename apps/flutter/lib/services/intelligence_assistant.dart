@@ -10,6 +10,7 @@ import 'day_planner.dart';
 import 'life_memory.dart';
 import 'life_thread.dart';
 import 'needs_attention.dart';
+import 'personal_context_engine.dart';
 
 /// Local PersonalContext + patterns from activity history.
 class IntelligenceAssistant {
@@ -117,6 +118,14 @@ class IntelligenceAssistant {
         (q.contains('progress') || q.contains('status') || q.contains('how'))) {
       return _goalProgressReply(raw);
     }
+    if (q.contains('situation') ||
+        q.contains('context') ||
+        q.contains('capacity') ||
+        q.contains('pressure') ||
+        q.contains('full picture') ||
+        q.contains('where am i')) {
+      return _situationReply();
+    }
     if (q.isEmpty ||
         q.contains('today') ||
         q.contains('brief') ||
@@ -126,7 +135,11 @@ class IntelligenceAssistant {
         q.contains('morning') ||
         q.contains('should i') ||
         q.contains('what next')) {
-      return ctx.focusAdvice();
+      try {
+        return await PersonalContextEngine(db: _db).build().then((s) => s.narrative());
+      } catch (_) {
+        return ctx.focusAdvice();
+      }
     }
     if (q.contains('attention') || q.contains('urgent') || q.contains('needs')) {
       return _attentionReply();
@@ -171,7 +184,7 @@ class IntelligenceAssistant {
     }
     if (q.contains('help') || q.contains('what can')) {
       return 'Offline assistant on your SQLite data.\n'
-          'Try: focus · plan · overdue · habits · bills · patterns · insights\n'
+          'Try: focus · situation · plan · overdue · habits · bills · patterns · insights\n'
           'Memory: “remember X” or “what about Y”\n'
           'Reasoning: “why am I behind?” · “goal progress”\n'
           'No cloud — answers from notes, activity, tasks, and links only.';
@@ -341,6 +354,11 @@ class IntelligenceAssistant {
       }
     }
     return buf.toString();
+  }
+
+  Future<String> _situationReply() async {
+    final s = await PersonalContextEngine(db: _db).build();
+    return s.narrative();
   }
 
   Future<String> _attentionReply() async {
