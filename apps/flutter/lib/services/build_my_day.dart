@@ -2,6 +2,7 @@ import '../data/database.dart';
 import '../data/habit_repository.dart';
 import '../data/planning_repository.dart';
 import '../data/routine_repository.dart';
+import '../data/task_dependency_queries.dart';
 import '../data/task_repository.dart';
 import '../domain/db_map.dart';
 import '../domain/models.dart';
@@ -16,7 +17,6 @@ enum DaySlotKind {
   free,
 }
 
-/// One timed entry on the built day timeline.
 class DaySlot {
   final DateTime start;
   final DateTime end;
@@ -95,13 +95,15 @@ class BuildMyDayEngine {
         _plan = PlanningRepository(db ?? AppDatabase.instance),
         _tasks = TaskRepository(db ?? AppDatabase.instance),
         _habits = HabitRepository(db ?? AppDatabase.instance),
-        _routines = RoutineRepository(db ?? AppDatabase.instance);
+        _routines = RoutineRepository(db ?? AppDatabase.instance),
+        _deps = TaskDependencyQueries(db ?? AppDatabase.instance);
 
   final AppDatabase _db;
   final PlanningRepository _plan;
   final TaskRepository _tasks;
   final HabitRepository _habits;
   final RoutineRepository _routines;
+  final TaskDependencyQueries _deps;
 
   Future<BuiltDay> build({
     DateTime? day,
@@ -114,7 +116,8 @@ class BuildMyDayEngine {
     final dayStart = DateTime(d.year, d.month, d.day, dayStartHour);
     final dayEnd = DateTime(d.year, d.month, d.day, dayEndHour);
     final now = DateTime.now();
-    final isToday = d.year == now.year && d.month == now.month && d.day == now.day;
+    final isToday =
+        d.year == now.year && d.month == now.month && d.day == now.day;
 
     var workStart = dayStart;
     if (isToday && now.isAfter(workStart)) {
@@ -151,16 +154,33 @@ class BuildMyDayEngine {
     final placed = <DaySlot>[...locked];
     final unplaced = <FlexibleCandidate>[];
     final usedIds = locked.map((s) => s.entityId).whereType<String>().toSet();
+    final blockedReasons = await _deps.listBlockedWithReasons();
 
     for (final c in candidates) {
       if (usedIds.contains(c.id)) continue;
-      final fit = _placeInGaps(gaps, c.durationMin);
+      if (blockedReasons.containsKey(c.id)) {
+        final blockers = blockedReasons[c.id]!;
+        final label = blockers.take(2).join(', ');
+        unplaced.add(FlexibleCandidate(
+          id: c.id,
+          title: c.title,
+          kind: c.kind,
+          durationMin: c.durationMin,
+          score: c.score,
+          reason: blockers.isEmpty ? 'Blocked by dependency' : 'Blocked by: $label',
+        ));
+        continue;
+      }
+      final preferHour = _preferredHour(c);
+      final fit = _placeInGaps(gaps, c.durationMin, preferredHour: preferHour);
       if (fit == null) {
         final largest = gaps.isEmpty
             ? 0
-            : gaps.map((g) => g.$2.difference(g.$1).inMinutes).reduce((a, b) => a > b ? a : b);
+            : gaps
+                .map((g) => g.\$2.difference(g.\$1).inMinutes)
+                .reduce((a, b) => a > b ? a : b);
         final why = largest > 0 && c.durationMin > largest
-            ? 'Too long for free gaps'
+            ? 'Needs ${c.durationMin}m — largest gap ${largest}m'
             : 'No free slot large enough';
         unplaced.add(FlexibleCandidate(
           id: c.id,
@@ -173,8 +193,8 @@ class BuildMyDayEngine {
         continue;
       }
       placed.add(DaySlot(
-        start: fit.$1,
-        end: fit.$2,
+        start: fit.\$1,
+        end: fit.\$2,
         title: c.title,
         kind: c.kind,
         entityId: c.id,
@@ -183,22 +203,24 @@ class BuildMyDayEngine {
         priority: c.score,
       ));
       usedIds.add(c.id);
-      _consumeGap(gaps, fit.$1, fit.$2);
+      final bufferedEnd = fit.\$2.add(const Duration(minutes: 5));
+      _consumeGap(gaps, fit.\$1, bufferedEnd.isAfter(dayEnd) ? dayEnd : bufferedEnd);
     }
 
-    final blockedIds = await _tasks.listBlockedTaskIds();
-    final seenUnplaced = unplaced.map((u) => u.id).toSet();
-    for (final id in blockedIds) {
-      if (usedIds.contains(id) || seenUnplaced.contains(id)) continue;
-      final task = await _tasks.getById(id);
+    for (final entry in blockedReasons.entries) {
+      if (usedIds.contains(entry.key) || unplaced.any((u) => u.id == entry.key)) {
+        continue;
+      }
+      final task = await _tasks.getById(entry.key);
       if (task == null || task.scheduledStart != null) continue;
+      final label = entry.value.take(2).join(', ');
       unplaced.add(FlexibleCandidate(
         id: task.id,
         title: task.title,
         kind: DaySlotKind.task,
         durationMin: (task.estimatedMinutes ?? 30).clamp(15, 180),
         score: 0,
-        reason: 'Blocked by incomplete dependency',
+        reason: label.isEmpty ? 'Blocked by dependency' : 'Blocked by: $label',
       ));
     }
 
@@ -210,7 +232,7 @@ class BuildMyDayEngine {
     }
     var free = 0;
     for (final g in gaps) {
-      free += g.$2.difference(g.$1).inMinutes;
+      free += g.\$2.difference(g.\$1).inMinutes;
     }
 
     return BuiltDay(
@@ -231,10 +253,14 @@ class BuildMyDayEngine {
       if (s.locked) continue;
       if (s.kind == DaySlotKind.task && s.entityId != null) {
         if (blocked.contains(s.entityId)) continue;
+        final mins = s.minutes.clamp(15, 180);
+        if (await _plan.conflictsWithLocked(start: s.start, durationMinutes: mins)) {
+          continue;
+        }
         await _plan.scheduleTaskSession(
           taskId: s.entityId!,
           start: s.start,
-          durationMinutes: s.minutes.clamp(15, 180),
+          durationMinutes: mins,
           title: s.title,
         );
         n++;
@@ -349,6 +375,15 @@ class BuildMyDayEngine {
     final dueToday = await _tasks.listDueToday();
     final open = await _tasks.listOpen();
 
+    final dependentsBoost = <String, int>{};
+    for (final t in [...overdue, ...dueToday, ...open]) {
+      if (blockedIds.contains(t.id)) continue;
+      try {
+        final n = await _deps.countDependentsWaiting(t.id);
+        if (n > 0) dependentsBoost[t.id] = n * 12;
+      } catch (_) {}
+    }
+
     void addTask(Task t, int base, String reason) {
       if (lockedIds.contains(t.id)) return;
       if (blockedIds.contains(t.id)) return;
@@ -358,13 +393,32 @@ class BuildMyDayEngine {
       var score = base + t.priority * 6;
       if (t.projectId != null) score += 8;
       if (t.goalId != null) score += 5;
+      score += dependentsBoost[t.id] ?? 0;
+      if (t.dueAt != null) {
+        final hours =
+            (t.dueAt! - DateTime.now().millisecondsSinceEpoch) / 3600000.0;
+        if (hours < 0) {
+          score += 20;
+        } else if (hours < 4) {
+          score += 18;
+        } else if (hours < 12) {
+          score += 12;
+        } else if (hours < 24) {
+          score += 6;
+        }
+      }
+      if (dur >= 90) score -= 4;
+      if (dur <= 20) score += 2;
+      final why = (dependentsBoost[t.id] ?? 0) > 0
+          ? '$reason · unblocks ${dependentsBoost[t.id]! ~/ 12}'
+          : reason;
       candidates.add(FlexibleCandidate(
         id: t.id,
         title: t.title,
         kind: DaySlotKind.task,
         durationMin: dur,
         score: score,
-        reason: reason,
+        reason: why,
       ));
     }
 
@@ -376,7 +430,11 @@ class BuildMyDayEngine {
     }
     for (final t in open) {
       if (t.isOverdue || t.isDueToday) continue;
-      addTask(t, 40 + t.priority * 3, t.projectId != null ? 'Project work' : 'Open task');
+      addTask(
+        t,
+        40 + t.priority * 3,
+        t.projectId != null ? 'Project work' : 'Open task',
+      );
     }
 
     final habits = await _habits.listActive();
@@ -462,49 +520,75 @@ class BuildMyDayEngine {
       if (cursor.isAfter(to)) break;
     }
     if (cursor.isBefore(to)) gaps.add((cursor, to));
-    return gaps.where((g) => g.$2.difference(g.$1).inMinutes >= 10).toList();
+    return gaps.where((g) => g.\$2.difference(g.\$1).inMinutes >= 10).toList();
   }
 
-  (DateTime, DateTime)? _placeInGaps(List<(DateTime, DateTime)> gaps, int minutes) {
-    for (var i = 0; i < gaps.length; i++) {
-      final g = gaps[i];
-      final avail = g.$2.difference(g.$1).inMinutes;
-      if (avail >= minutes) {
-        final start = g.$1;
-        final end = start.add(Duration(minutes: minutes));
-        return (start, end);
+  int _preferredHour(FlexibleCandidate c) {
+    if (c.kind == DaySlotKind.habit) return 7;
+    if (c.kind == DaySlotKind.routine) return 8;
+    if (c.score >= 90) return 9;
+    if (c.score >= 70) return 10;
+    if (c.score >= 50) return 11;
+    return 14;
+  }
+
+  (DateTime, DateTime)? _placeInGaps(
+    List<(DateTime, DateTime)> gaps,
+    int minutes, {
+    int? preferredHour,
+  }) {
+    (DateTime, DateTime)? bestExact;
+    var bestExactDist = 1 << 30;
+    (DateTime, DateTime)? bestFit;
+    var bestFitAvail = 0;
+
+    for (final g in gaps) {
+      final avail = g.\$2.difference(g.\$1).inMinutes;
+      if (avail < minutes) {
+        if (avail >= 15 && avail > bestFitAvail) {
+          bestFitAvail = avail;
+          bestFit = (g.\$1, g.\$1.add(Duration(minutes: avail.clamp(15, minutes))));
+        }
+        continue;
       }
-    }
-    if (minutes > 15) {
-      var bestI = -1;
-      var bestAvail = 0;
-      for (var i = 0; i < gaps.length; i++) {
-        final avail = gaps[i].$2.difference(gaps[i].$1).inMinutes;
-        if (avail >= 15 && avail > bestAvail) {
-          bestAvail = avail;
-          bestI = i;
+      var start = g.\$1;
+      if (preferredHour != null) {
+        final prefer = DateTime(g.\$1.year, g.\$1.month, g.\$1.day, preferredHour);
+        if (!prefer.isBefore(g.\$1) &&
+            !prefer.add(Duration(minutes: minutes)).isAfter(g.\$2)) {
+          start = prefer;
         }
       }
-      if (bestI >= 0) {
-        final g = gaps[bestI];
-        final use = bestAvail.clamp(15, minutes);
-        return (g.$1, g.$1.add(Duration(minutes: use)));
+      var end = start.add(Duration(minutes: minutes));
+      if (end.isAfter(g.\$2)) {
+        start = g.\$1;
+        end = start.add(Duration(minutes: minutes));
+      }
+      final dist = preferredHour == null
+          ? 0
+          : (start.hour - preferredHour).abs() * 60 + start.minute;
+      if (dist < bestExactDist) {
+        bestExactDist = dist;
+        bestExact = (start, end);
       }
     }
+
+    if (bestExact != null) return bestExact;
+    if (minutes > 15 && bestFit != null) return bestFit;
     return null;
   }
 
   void _consumeGap(List<(DateTime, DateTime)> gaps, DateTime start, DateTime end) {
     for (var i = 0; i < gaps.length; i++) {
       final g = gaps[i];
-      if (!start.isBefore(g.$2) || !end.isAfter(g.$1)) continue;
-      final before = start.isAfter(g.$1) ? (g.$1, start) : null;
-      final after = end.isBefore(g.$2) ? (end, g.$2) : null;
+      if (!start.isBefore(g.\$2) || !end.isAfter(g.\$1)) continue;
+      final before = start.isAfter(g.\$1) ? (g.\$1, start) : null;
+      final after = end.isBefore(g.\$2) ? (end, g.\$2) : null;
       gaps.removeAt(i);
-      if (after != null && after.$2.difference(after.$1).inMinutes >= 10) {
+      if (after != null && after.\$2.difference(after.\$1).inMinutes >= 10) {
         gaps.insert(i, after);
       }
-      if (before != null && before.$2.difference(before.$1).inMinutes >= 10) {
+      if (before != null && before.\$2.difference(before.\$1).inMinutes >= 10) {
         gaps.insert(i, before);
       }
       return;
