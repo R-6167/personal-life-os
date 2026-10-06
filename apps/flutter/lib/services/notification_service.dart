@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
@@ -20,9 +22,10 @@ class NotificationService {
   bool _ready = false;
   bool enabled = true;
 
-  static const _channelId = 'ordin_life';
-  static const _channelName = 'Ordin Life';
-  static const _channelDesc = 'Tasks, bills, habits, and life reminders';
+  /// Bumped channel id so Android applies sound/vibration (channels are immutable).
+  static const _channelId = 'ordin_alerts_v2';
+  static const _channelName = 'Ordin Alerts';
+  static const _channelDesc = 'Tasks, bills, habits, and life reminders with sound';
   static const _iosCategory = 'ordin_actions';
 
   static const actionSnooze15 = 'SNOOZE_15';
@@ -72,12 +75,18 @@ class NotificationService {
     final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin>();
     await androidPlugin?.requestNotificationsPermission();
+    try {
+      await androidPlugin?.requestExactAlarmsPermission();
+    } catch (_) {}
     await androidPlugin?.createNotificationChannel(
       const AndroidNotificationChannel(
         _channelId,
         _channelName,
         description: _channelDesc,
-        importance: Importance.high,
+        importance: Importance.max,
+        playSound: true,
+        enableVibration: true,
+        showBadge: true,
       ),
     );
 
@@ -235,6 +244,7 @@ class NotificationService {
         title: '${r['title']}',
         body: body,
         when: when,
+        high: true,
         payload: payload.encode(),
       );
       n++;
@@ -334,9 +344,22 @@ class NotificationService {
           icon: '@mipmap/ic_launcher',
           actions: actions,
           category: AndroidNotificationCategory.reminder,
+          playSound: true,
+          enableVibration: true,
+          vibrationPattern: high
+              ? Int64List.fromList([0, 300, 120, 300, 120, 300])
+              : Int64List.fromList([0, 200, 100, 200]),
+          ticker: title,
         ),
-        iOS: const DarwinNotificationDetails(
+        iOS: DarwinNotificationDetails(
           categoryIdentifier: _iosCategory,
+          presentAlert: true,
+          presentBadge: true,
+          presentSound: true,
+          sound: 'default',
+          interruptionLevel: high
+              ? InterruptionLevel.timeSensitive
+              : InterruptionLevel.active,
         ),
       ),
       androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
