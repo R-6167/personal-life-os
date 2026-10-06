@@ -14,6 +14,11 @@ import 'user_prefs.dart';
 
 /// Local notification lifecycle:
 /// Create → Schedule → Notify → Open / Snooze / Delete → Record result
+///
+/// Sound + vibration: Android channel is immutable, so channel id is bumped
+/// when defaults change. Uses system default notification sound (ringtone-class
+/// for alerts) plus explicit vibration patterns. Haptics for in-app actions
+/// live in [FeedbackService].
 class NotificationService {
   NotificationService._();
   static final instance = NotificationService._();
@@ -22,15 +27,22 @@ class NotificationService {
   bool _ready = false;
   bool enabled = true;
 
-  /// Bumped channel id so Android applies sound/vibration (channels are immutable).
-  static const _channelId = 'ordin_alerts_v2';
+  /// Bumped to v3 so Android applies ringtone-style sound + vibration pattern.
+  static const _channelId = 'ordin_alerts_v3';
   static const _channelName = 'Ordin Alerts';
-  static const _channelDesc = 'Tasks, bills, habits, and life reminders with sound';
+  static const _channelDesc =
+      'Tasks, bills, habits, and life reminders — sound & vibration';
   static const _iosCategory = 'ordin_actions';
 
   static const actionSnooze15 = 'SNOOZE_15';
   static const actionSnooze60 = 'SNOOZE_60';
   static const actionDelete = 'DELETE';
+
+  /// Triple pulse for high-priority reminders (tasks / bills).
+  static final Int64List _vibeHigh = Int64List.fromList([0, 300, 120, 300, 120, 300]);
+
+  /// Double pulse for standard alerts (budget, soft reminders).
+  static final Int64List _vibeNormal = Int64List.fromList([0, 200, 100, 200]);
 
   Future<void> init() async {
     if (_ready) return;
@@ -78,14 +90,18 @@ class NotificationService {
     try {
       await androidPlugin?.requestExactAlarmsPermission();
     } catch (_) {}
+
+    // Channel-level defaults: system default sound + vibration pattern.
+    // (Channels are immutable; id bump forces re-create on install/update.)
     await androidPlugin?.createNotificationChannel(
-      const AndroidNotificationChannel(
+      AndroidNotificationChannel(
         _channelId,
         _channelName,
         description: _channelDesc,
         importance: Importance.max,
         playSound: true,
         enableVibration: true,
+        vibrationPattern: _vibeHigh,
         showBadge: true,
       ),
     );
@@ -273,8 +289,7 @@ class NotificationService {
       await _schedule(
         id: _stableId('bud', b.id),
         title: exceeded ? 'Budget exceeded: ${b.name}' : 'Budget warning: ${b.name}',
-        body: '$cat · $spent / $limit ${UserPrefs.instance.currency}'
-            '${exceeded ? ' — over limit' : ' — near limit'}',
+        body: '$cat · $spent / $limit',
         when: when,
         high: exceeded,
         payload: payload.encode(),
@@ -284,16 +299,8 @@ class NotificationService {
     return n;
   }
 
-  Future<List<BudgetStatus>> checkCategoryAfterExpense(String? categoryId) async {
-    if (categoryId == null) {
-      final all = await BudgetRepository(AppDatabase.instance).alerts();
-      if (all.isNotEmpty) await notifyBudgetAlerts();
-      return all;
-    }
-    final statuses = await BudgetRepository(AppDatabase.instance).statuses();
-    final hit = statuses
-        .where((s) => s.categoryId == categoryId || s.scopeLabel == categoryId)
-        .toList();
+  Future<List<BudgetAlert>> checkBudgetsNow() async {
+    final hit = await BudgetRepository(AppDatabase.instance).alerts();
     final alerts = hit.where((s) => s.level != BudgetAlertLevel.ok).toList();
     if (alerts.isNotEmpty) await notifyBudgetAlerts();
     return hit;
@@ -329,6 +336,17 @@ class NotificationService {
       ),
     ];
 
+    // Prefer exact alarm when permitted; fall back to inexact.
+    AndroidScheduleMode mode = AndroidScheduleMode.inexactAllowWhileIdle;
+    try {
+      final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      final canExact = await androidPlugin?.canScheduleExactNotifications();
+      if (canExact == true) {
+        mode = AndroidScheduleMode.exactAllowWhileIdle;
+      }
+    } catch (_) {}
+
     await _plugin.zonedSchedule(
       id,
       title,
@@ -343,13 +361,14 @@ class NotificationService {
           priority: high ? Priority.max : Priority.high,
           icon: '@mipmap/ic_launcher',
           actions: actions,
+          // Reminder category + ringtone usage → system default alert sound.
           category: AndroidNotificationCategory.reminder,
+          audioAttributesUsage: AudioAttributesUsage.notificationRingtone,
           playSound: true,
           enableVibration: true,
-          vibrationPattern: high
-              ? Int64List.fromList([0, 300, 120, 300, 120, 300])
-              : Int64List.fromList([0, 200, 100, 200]),
+          vibrationPattern: high ? _vibeHigh : _vibeNormal,
           ticker: title,
+          visibility: NotificationVisibility.public,
         ),
         iOS: DarwinNotificationDetails(
           categoryIdentifier: _iosCategory,
@@ -362,7 +381,7 @@ class NotificationService {
               : InterruptionLevel.active,
         ),
       ),
-      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      androidScheduleMode: mode,
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
       payload: payload,

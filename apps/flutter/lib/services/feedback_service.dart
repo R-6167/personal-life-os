@@ -1,6 +1,13 @@
 import 'package:flutter/services.dart';
 
 /// In-app haptics for actions that change life state.
+///
+/// Pair with [NotificationService] for out-of-app sound/vibration on reminders.
+/// - selection: light UI taps
+/// - light: dismiss / soft cancel
+/// - success: complete task, approve assistant action
+/// - heavy: important confirmations
+/// - warn: delete / destructive
 class FeedbackService {
   FeedbackService._();
   static final instance = FeedbackService._();
