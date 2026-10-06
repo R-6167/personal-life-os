@@ -216,7 +216,7 @@ class ExtendedRepository {
         'occurred_at': now,
         'recorded_at': now,
         'source': EventSource.user,
-        'metadata': '{\"nextRenewal\":$next}',
+        'metadata': '{"nextRenewal":$next}',
       });
     });
     return next;
@@ -333,8 +333,8 @@ class ExtendedRepository {
     final now = AppDatabase.nowMs();
     await (await _db.database).insert('savings_goals', {
       'id': AppDatabase.newId(),
-      'owner_id': ownerId,
       'name': name,
+      'owner_id': ownerId,
       'target_amount_minor': (targetMajor * 100).round(),
       'current_amount_minor': 0,
       'currency': Defaults.currency,
@@ -403,5 +403,99 @@ class ExtendedRepository {
       }
     } catch (_) {}
     return out;
+  }
+
+  // ---- Practical life: documents, maintenance, shopping, appointments ----
+
+  Future<List<Map<String, Object?>>> listDocuments() async {
+    final db = await _db.database;
+    try {
+      return await db.query(
+        'documents',
+        where: "status IS NULL OR status != 'ARCHIVED'",
+        orderBy: 'expires_at ASC, updated_at DESC',
+      );
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> addDocument(String title, {DateTime? expiresAt}) async {
+    final ownerId = await _db.requireOwnerId();
+    final now = AppDatabase.nowMs();
+    await (await _db.database).insert('documents', {
+      'id': AppDatabase.newId(),
+      'owner_id': ownerId,
+      'title': title,
+      'expires_at': expiresAt?.millisecondsSinceEpoch,
+      'status': 'ACTIVE',
+      'created_at': now,
+      'updated_at': now,
+    });
+  }
+
+  Future<List<Map<String, Object?>>> listPractical() async {
+    final db = await _db.database;
+    try {
+      return await db.query(
+        'practical_items',
+        where: "status IS NULL OR status NOT IN ('DONE', 'CANCELLED')",
+        orderBy: 'due_at ASC, updated_at DESC',
+      );
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> addPractical(String title, {String? type, DateTime? dueAt}) async {
+    final ownerId = await _db.requireOwnerId();
+    final now = AppDatabase.nowMs();
+    final row = <String, Object?>{
+      'id': AppDatabase.newId(),
+      'owner_id': ownerId,
+      'title': type != null && type.isNotEmpty ? '[$type] $title' : title,
+      'status': 'OPEN',
+      'due_at': dueAt?.millisecondsSinceEpoch,
+      'created_at': now,
+      'updated_at': now,
+    };
+    await (await _db.database).insert('practical_items', row);
+  }
+
+  Future<List<Map<String, Object?>>> listUpcomingAppointments({int days = 14}) async {
+    final db = await _db.database;
+    final now = AppDatabase.nowMs();
+    final until = now + Duration(days: days).inMilliseconds;
+    try {
+      return await db.query(
+        'calendar_events',
+        where: "start_at >= ? AND start_at <= ? AND (status IS NULL OR status != 'CANCELLED')",
+        whereArgs: [now - const Duration(hours: 1).inMilliseconds, until],
+        orderBy: 'start_at ASC',
+      );
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<List<Map<String, Object?>>> listShoppingLists() async {
+    final db = await _db.database;
+    try {
+      return await db.query('shopping_lists', orderBy: 'updated_at DESC');
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> addShoppingList(String name) async {
+    final ownerId = await _db.requireOwnerId();
+    final now = AppDatabase.nowMs();
+    await (await _db.database).insert('shopping_lists', {
+      'id': AppDatabase.newId(),
+      'owner_id': ownerId,
+      'name': name,
+      'created_at': now,
+      'updated_at': now,
+    });
   }
 }

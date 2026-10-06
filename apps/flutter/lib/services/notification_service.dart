@@ -299,7 +299,7 @@ class NotificationService {
     return n;
   }
 
-  Future<List<BudgetAlert>> checkBudgetsNow() async {
+  Future<List<BudgetStatus>> checkBudgetsNow() async {
     final hit = await BudgetRepository(AppDatabase.instance).alerts();
     final alerts = hit.where((s) => s.level != BudgetAlertLevel.ok).toList();
     if (alerts.isNotEmpty) await notifyBudgetAlerts();
