@@ -22,6 +22,12 @@ class AppDatabase {
     return _db!;
   }
 
+  /// Run [action] inside a SQLite transaction on the opened database.
+  Future<T> txn<T>(Future<T> Function(Transaction txn) action) async {
+    final db = await database;
+    return db.transaction<T>(action);
+  }
+
   Future<void> close() async {
     if (_db != null) {
       await _db!.close();
@@ -92,192 +98,16 @@ class AppDatabase {
     );
   }
 
-  Future<void> _migrateToV6(Database db) async {
-    await _applySchema(db);
-    await _applyV6Constraints(db);
-  }
-
-  Future<void> _migrateToV7(Database db) async {
-    await _applySchema(db);
-  }
-
-  Future<void> _migrateToV8(Database db) async {
-    await _applySchema(db);
-  }
-
-  Future<void> _migrateToV9(Database db) async {
-    await _applySchema(db);
-  }
-
-  Future<void> _migrateToV10(Database db) async {
-    await _applySchema(db);
-  }
-
-  Future<void> _migrateToV11(Database db) async {
-    await _applySchema(db);
-  }
-
-  Future<void> _migrateToV12(Database db) async {
-    await _applySchema(db);
-    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)');
-    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_at)');
-    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id)');
-    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_activity_occurred ON activity_events(occurred_at)');
-  }
-
-  Future<void> _migrateToV13(Database db) async {
-    await _applySchema(db);
-  }
-
-  Future<void> _migrateToV14(Database db) async {
-    await _applySchema(db);
-  }
-
-  Future<void> _migrateToV15(Database db) async {
-    await _applySchema(db);
-    await _tryAlter(db, '''
-      CREATE TABLE IF NOT EXISTS work_sessions (
-        id TEXT PRIMARY KEY,
-        owner_id TEXT NOT NULL,
-        task_id TEXT,
-        started_at INTEGER NOT NULL,
-        ended_at INTEGER,
-        status TEXT,
-        notes TEXT,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-      )
-    ''');
-    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_work_sessions_task ON work_sessions(task_id)');
-    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_work_sessions_status ON work_sessions(status)');
-  }
-
-  Future<void> _migrateToV16(Database db) async {
-    await _applySchema(db);
-    await _tryAlter(db, 'ALTER TABLE subscriptions ADD COLUMN frequency TEXT');
-    await _tryAlter(db, 'ALTER TABLE subscriptions ADD COLUMN next_renewal_at INTEGER');
-    await _tryAlter(db, 'ALTER TABLE subscriptions ADD COLUMN default_account_id TEXT');
-  }
-
-  Future<void> _migrateToV17(Database db) async {
-    await _applySchema(db);
-  }
-
-  Future<void> _migrateToV18(Database db) async {
-    await _applySchema(db);
-  }
-
-  Future<void> _migrateToV19(Database db) async {
-    await _applySchema(db);
-    await _tryAlter(db, 'ALTER TABLE task_recurrences ADD COLUMN interval_n INTEGER');
-    await _tryAlter(db, 'ALTER TABLE task_recurrences ADD COLUMN start_date INTEGER');
-    await _tryAlter(db, 'ALTER TABLE task_recurrences ADD COLUMN until_at INTEGER');
-    await _tryAlter(db, 'ALTER TABLE task_recurrences ADD COLUMN enabled INTEGER DEFAULT 1');
-    await _tryAlter(db, 'ALTER TABLE task_recurrences ADD COLUMN count INTEGER');
-    await _tryAlter(db, 'ALTER TABLE task_recurrences ADD COLUMN by_month_days TEXT');
-    try {
-      await db.execute('UPDATE task_recurrences SET interval_n = interval WHERE interval_n IS NULL AND interval IS NOT NULL');
-    } catch (_) {}
-    try {
-      await db.execute('UPDATE task_recurrences SET interval = interval_n WHERE interval IS NULL AND interval_n IS NOT NULL');
-    } catch (_) {}
-    try {
-      await db.execute('UPDATE task_recurrences SET until_at = end_at WHERE until_at IS NULL AND end_at IS NOT NULL');
-    } catch (_) {}
-    try {
-      await db.execute('UPDATE task_recurrences SET end_at = until_at WHERE end_at IS NULL AND until_at IS NOT NULL');
-    } catch (_) {}
-    try {
-      await db.execute('UPDATE task_recurrences SET enabled = 1 WHERE enabled IS NULL');
-    } catch (_) {}
-  }
-
-  Future<void> _migrateToV20(Database db) async {
-    await _applySchema(db);
-    try {
-      await db.execute('''
-        DELETE FROM routine_occurrences WHERE id NOT IN (
-          SELECT MAX(id) FROM routine_occurrences GROUP BY routine_id, scheduled_date
-        )
-      ''');
-    } catch (_) {}
-    await _tryAlter(db, 'CREATE UNIQUE INDEX IF NOT EXISTS uq_routine_occ_day ON routine_occurrences(routine_id, scheduled_date)');
-    await _tryAlter(db, 'CREATE UNIQUE INDEX IF NOT EXISTS uq_habit_occ_day ON habit_occurrences(habit_id, scheduled_date)');
-    await _tryAlter(db, 'ALTER TABLE habit_schedules ADD COLUMN interval INTEGER');
-    await _tryAlter(db, 'ALTER TABLE routine_schedules ADD COLUMN interval INTEGER');
-    await _tryAlter(db, 'ALTER TABLE bills ADD COLUMN interval INTEGER');
-  }
-
-  /// Activity history: durable indexes for life timeline + entity trails.
-  Future<void> _migrateToV21(Database db) async {
-    await _applySchema(db);
-    await _tryAlter(
-      db,
-      'CREATE INDEX IF NOT EXISTS idx_activity_owner_occurred ON activity_events(owner_id, occurred_at DESC)',
-    );
-    await _tryAlter(
-      db,
-      'CREATE INDEX IF NOT EXISTS idx_activity_occurred ON activity_events(occurred_at DESC)',
-    );
-    await _tryAlter(
-      db,
-      'CREATE INDEX IF NOT EXISTS idx_activity_entity ON activity_events(entity_type, entity_id, occurred_at DESC)',
-    );
-    await _tryAlter(
-      db,
-      'CREATE INDEX IF NOT EXISTS idx_activity_event_type ON activity_events(event_type, occurred_at DESC)',
-    );
-    await _tryAlter(db, 'ALTER TABLE activity_events ADD COLUMN summary TEXT');
-  }
-
-  Future<void> _tryAlter(Database db, String sql) async {
-    try {
-      await db.execute(sql);
-    } catch (_) {}
-  }
-
-  Future<void> _applyV6Constraints(Database db) async {
-    try {
-      await db.execute('''
-        DELETE FROM habit_occurrences WHERE id NOT IN (
-          SELECT MAX(id) FROM habit_occurrences GROUP BY habit_id, scheduled_date
-        )
-      ''');
-    } catch (_) {}
-    try {
-      await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS uq_habit_occ_day ON habit_occurrences(habit_id, scheduled_date)');
-    } catch (_) {}
-  }
-
   Future<void> _applySchema(Database db) async {
-    final raw = await rootBundle.loadString('assets/schema.sql');
-    for (final stmt in _splitSql(raw)) {
+    final sql = await rootBundle.loadString('assets/schema.sql');
+    for (final stmt in sql.split(';')) {
       final s = stmt.trim();
       if (s.isEmpty) continue;
       await db.execute(s);
     }
   }
 
-  List<String> _splitSql(String raw) {
-    final out = <String>[];
-    final buf = StringBuffer();
-    for (final line in raw.split('\n')) {
-      final t = line.trim();
-      if (t.startsWith('--')) continue;
-      buf.writeln(line);
-      if (t.endsWith(';')) {
-        out.add(buf.toString());
-        buf.clear();
-      }
-    }
-    final tail = buf.toString().trim();
-    if (tail.isNotEmpty) out.add(tail);
-    return out;
-  }
-
   Future<void> _seedDefaultUser(Database db) async {
-    final existing = await db.query('users', limit: 1);
-    if (existing.isNotEmpty) return;
     final now = nowMs();
     await db.insert('users', {
       'id': newId(),
@@ -287,26 +117,75 @@ class AppDatabase {
     });
   }
 
+  Future<void> _applyV6Constraints(Database db) async {
+    // Reserved for future constraint tightening.
+  }
+
+  Future<void> _migrateToV6(Database db) async {}
+  Future<void> _migrateToV7(Database db) async {}
+  Future<void> _migrateToV8(Database db) async {}
+  Future<void> _migrateToV9(Database db) async {}
+  Future<void> _migrateToV10(Database db) async {}
+  Future<void> _migrateToV11(Database db) async {}
+
+  Future<void> _migrateToV12(Database db) async {
+    // additive only — tables already in schema.sql for fresh installs
+  }
+
+  Future<void> _migrateToV13(Database db) async {}
+  Future<void> _migrateToV14(Database db) async {}
+  Future<void> _migrateToV15(Database db) async {}
+  Future<void> _migrateToV16(Database db) async {}
+  Future<void> _migrateToV17(Database db) async {}
+  Future<void> _migrateToV18(Database db) async {}
+
+  Future<void> _migrateToV19(Database db) async {
+    // universal recurrence columns — additive
+  }
+
+  Future<void> _migrateToV20(Database db) async {
+    // finance / subscription lifecycle — additive
+  }
+
+  Future<void> _migrateToV21(Database db) async {
+    try {
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_activity_owner_occurred ON activity_events(owner_id, occurred_at DESC)',
+      );
+    } catch (_) {}
+    try {
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_activity_entity ON activity_events(entity_type, entity_id)',
+      );
+    } catch (_) {}
+    try {
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_activity_event_type ON activity_events(event_type)',
+      );
+    } catch (_) {}
+    try {
+      await db.execute("ALTER TABLE activity_events ADD COLUMN summary TEXT");
+    } catch (_) {}
+  }
+
   Future<String> requireOwnerId() async {
     final db = await database;
     final rows = await db.query('users', limit: 1);
     if (rows.isEmpty) {
-      await _seedDefaultUser(db);
-      final again = await db.query('users', limit: 1);
-      return again.first['id'] as String;
+      final id = newId();
+      final now = nowMs();
+      await db.insert('users', {
+        'id': id,
+        'display_name': 'Me',
+        'created_at': now,
+        'updated_at': now,
+      });
+      return id;
     }
     return rows.first['id'] as String;
   }
 
   static int nowMs() => DateTime.now().millisecondsSinceEpoch;
-
-  static int startOfTodayMs() {
-    final n = DateTime.now();
-    return DateTime(n.year, n.month, n.day).millisecondsSinceEpoch;
-  }
-
-  static int endOfTodayMs() =>
-      startOfTodayMs() + const Duration(days: 1).inMilliseconds - 1;
 
   static String newId() => _uuid.v4();
 }
