@@ -167,7 +167,8 @@ CREATE TABLE IF NOT EXISTS bills (
 
 CREATE TABLE IF NOT EXISTS bill_occurrences (
   id TEXT PRIMARY KEY, bill_id TEXT NOT NULL, due_at INTEGER NOT NULL,
-  expected_amount_minor INTEGER, status TEXT,
+  expected_amount_minor INTEGER, actual_amount_minor INTEGER,
+  status TEXT, paid_at INTEGER, expense_id TEXT,
   created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
 );
 
