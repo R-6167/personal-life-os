@@ -1,3 +1,5 @@
+import '../ordin_operator.dart';
+
 /// Result of one AI turn (local rule, on-device LLM, or remote).
 class AiReply {
   AiReply({
@@ -6,6 +8,7 @@ class AiReply {
     this.model,
     this.usedSituation = false,
     this.error,
+    this.proposals = const [],
   });
 
   final String text;
@@ -13,8 +16,11 @@ class AiReply {
   final String? model;
   final bool usedSituation;
   final String? error;
+  /// Structured actions for the approve → execute loop (OrdinOperator).
+  final List<OrdinActionProposal> proposals;
 
   bool get ok => error == null && text.isNotEmpty;
+  bool get hasActions => proposals.isNotEmpty;
 }
 
 enum AiSource { local, onDevice, remote, hybrid }
