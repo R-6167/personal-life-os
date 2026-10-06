@@ -1,5 +1,6 @@
 import '../domain/enums.dart';
 import '../domain/models.dart';
+import 'atomic_write.dart';
 import 'database.dart';
 
 class GoalRepository {
@@ -25,11 +26,12 @@ class GoalRepository {
   }
 
   Future<Map<String, Object?>?> rawById(String id) async {
-    final rows = await (await _db.database).query('goals', where: 'id = ?', whereArgs: [id], limit: 1);
+    final rows =
+        await (await _db.database).query('goals', where: 'id = ?', whereArgs: [id], limit: 1);
     return rows.isEmpty ? null : rows.first;
   }
 
-  Future<Goal> create({required String title, String? description, int? targetDate, int priority = 0}) async {
+  Future<Goal> create({equired String title, String? description, int? targetDate, int priority = 0}) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
     final goal = Goal(
@@ -41,22 +43,19 @@ class GoalRepository {
       createdAt: now,
       updatedAt: now,
     );
-    await _db.txn((txn) async {
-      final map = goal.toInsertMap();
-      if (description != null && description.isNotEmpty) map['description'] = description;
-      if (targetDate != null) map['target_date'] = targetDate;
-      await txn.insert('goals', map);
-      await txn.insert('activity_events', {
-        'id': AppDatabase.newId(),
-        'owner_id': ownerId,
-        'event_type': 'GOAL_CREATED',
-        'entity_type': 'GOAL',
-        'entity_id': goal.id,
-        'occurred_at': now,
-        'recorded_at': now,
-        'source': EventSource.user,
-      });
-    });
+    await AtomicWrite.run(
+      db: _db,
+      state: (txn) async {
+        final map = goal.toInsertMap();
+        if (description != null && description.isNotEmpty) map['description'] = description;
+        if (targetDate != null) map['target_date'] = targetDate;
+        await txn.insert('goals', map);
+      },
+      eventType: 'GOAL_CREATED',
+      entityType: 'GOAL',
+      entityId: goal.id,
+      occurredAt: now,
+    );
     return goal;
   }
 
@@ -166,28 +165,24 @@ class GoalRepository {
   }
 
   Future<void> complete(String id) async {
-    await _db.txn((txn) async {
-      final now = AppDatabase.nowMs();
-      final ownerId = await _db.requireOwnerId();
-      await txn.update(
-        'goals',
-        {
-          'status': EntityStatus.completed,
-          'updated_at': now,
-        },
-        where: 'id = ?',
-        whereArgs: [id],
-      );
-      await txn.insert('activity_events', {
-        'id': AppDatabase.newId(),
-        'owner_id': ownerId,
-        'event_type': 'GOAL_COMPLETED',
-        'entity_type': 'GOAL',
-        'entity_id': id,
-        'occurred_at': now,
-        'recorded_at': now,
-        'source': EventSource.user,
-      });
-    });
+    final now = AppDatabase.nowMs();
+    await AtomicWrite.run(
+      db: _db,
+      state: (txn) async {
+        await txn.update(
+          'goals',
+          {
+            'status': EntityStatus.completed,
+            'updated_at': now,
+          },
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+      },
+      eventType: 'GOAL_COMPLETED',
+      entityType: 'GOAL',
+      entityId: id,
+      occurredAt: now,
+    );
   }
 }
