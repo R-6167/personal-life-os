@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/ai/ai.dart';
+import '../services/app_data_bus.dart';
 import '../services/feedback_service.dart';
 import '../services/ordin_operator.dart';
 import 'theme.dart';
@@ -106,11 +107,39 @@ class _AssistantScreenState extends State<AssistantScreen> {
     _scrollToEnd();
   }
 
+  void _notifyBusFor(OrdinActionResult result, OrdinActionProposal proposal) {
+    if (!result.ok) return;
+    final t = result.entityType ?? proposal.entityType;
+    switch (t) {
+      case 'TASK':
+        AppDataBus.instance.tasksChanged();
+        break;
+      case 'HABIT':
+      case 'NOTE':
+      case 'REMINDER':
+      case 'PROJECT':
+      case 'GOAL':
+        AppDataBus.instance.lifeChanged();
+        break;
+      case 'BILL':
+      case 'BILL_OCCURRENCE':
+      case 'SUBSCRIPTION':
+      case 'ACCOUNT':
+      case 'EXPENSE':
+      case 'INCOME':
+        AppDataBus.instance.financeChanged();
+        break;
+      default:
+        AppDataBus.instance.allChanged();
+    }
+  }
+
   Future<void> _approve(int msgIndex, OrdinActionProposal proposal) async {
     FeedbackService.instance.success();
     setState(() => _busy = true);
     final op = OrdinOperator();
     final result = await op.execute(proposal);
+    _notifyBusFor(result, proposal);
     if (!mounted) return;
     setState(() {
       _busy = false;
