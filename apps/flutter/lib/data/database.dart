@@ -14,7 +14,7 @@ class AppDatabase {
   Database? _db;
   static const _uuid = Uuid();
 
-  static const schemaVersion = 21;
+  static const schemaVersion = 22;
 
   Future<Database> get database async {
     if (_db != null) return _db!;
