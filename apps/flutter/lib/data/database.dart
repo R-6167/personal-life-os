@@ -14,6 +14,7 @@ class AppDatabase {
   Database? _db;
   static const _uuid = Uuid();
 
+  // Bump this whenever the database schema/migration contract changes.
   static const schemaVersion = 22;
 
   Future<Database> get database async {
@@ -47,24 +48,31 @@ class AppDatabase {
   Future<Database> _open() async {
     final dir = await getApplicationDocumentsDirectory();
     final path = p.join(dir.path, 'personal_life_os.db');
+
     return openDatabase(
       path,
       version: schemaVersion,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
+
         try {
           await db.rawQuery('PRAGMA journal_mode = WAL');
         } catch (_) {}
+
         try {
           await db.execute('PRAGMA synchronous = NORMAL');
         } catch (_) {}
+
         try {
           await db.execute('PRAGMA temp_store = MEMORY');
         } catch (_) {}
       },
+
+      // Fresh installation.
       onCreate: (db, version) async {
         await _applySchema(db);
         await _seedDefaultUser(db);
+
         await _applyV6Constraints(db);
         await _migrateToV12(db);
         await _migrateToV13(db);
@@ -76,7 +84,10 @@ class AppDatabase {
         await _migrateToV19(db);
         await _migrateToV20(db);
         await _migrateToV21(db);
+        await _migrateToV22(db);
       },
+
+      // Existing installation being upgraded.
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 6) await _migrateToV6(db);
         if (oldVersion < 7) await _migrateToV7(db);
@@ -94,23 +105,35 @@ class AppDatabase {
         if (oldVersion < 19) await _migrateToV19(db);
         if (oldVersion < 20) await _migrateToV20(db);
         if (oldVersion < 21) await _migrateToV21(db);
+        if (oldVersion < 22) await _migrateToV22(db);
       },
     );
   }
 
+  /// Apply the canonical schema.
+  ///
+  /// Every statement uses IF NOT EXISTS where appropriate, so this is safe
+  /// to run against both fresh and partially-created databases.
   Future<void> _applySchema(Database db) async {
     final sql = await rootBundle.loadString('assets/schema.sql');
+
     for (final stmt in sql.split(';')) {
       final s = stmt.trim();
+
       if (s.isEmpty) continue;
+
       try {
         await db.execute(s);
-      } catch (_) {}
+      } catch (_) {
+        // Keep schema application tolerant of already-existing objects
+        // and historical migration differences.
+      }
     }
   }
 
   Future<void> _seedDefaultUser(Database db) async {
     final now = nowMs();
+
     await db.insert('users', {
       'id': newId(),
       'display_name': 'Me',
@@ -184,38 +207,65 @@ class AppDatabase {
   Future<void> _migrateToV21(Database db) async {
     try {
       await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_activity_owner_occurred ON activity_events(owner_id, occurred_at DESC)',
+        'CREATE INDEX IF NOT EXISTS '
+        'idx_activity_owner_occurred '
+        'ON activity_events(owner_id, occurred_at DESC)',
       );
     } catch (_) {}
+
     try {
       await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_activity_entity ON activity_events(entity_type, entity_id)',
+        'CREATE INDEX IF NOT EXISTS '
+        'idx_activity_entity '
+        'ON activity_events(entity_type, entity_id)',
       );
     } catch (_) {}
+
     try {
       await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_activity_event_type ON activity_events(event_type)',
+        'CREATE INDEX IF NOT EXISTS '
+        'idx_activity_event_type '
+        'ON activity_events(event_type)',
       );
     } catch (_) {}
+
     try {
-      await db.execute('ALTER TABLE activity_events ADD COLUMN summary TEXT');
+      await db.execute(
+        'ALTER TABLE activity_events ADD COLUMN summary TEXT',
+      );
     } catch (_) {}
+  }
+
+  /// Repairs databases created by older builds that may be missing tables.
+  ///
+  /// schema.sql uses CREATE TABLE IF NOT EXISTS, so re-applying it is safe
+  /// and restores missing tables such as `users` without destroying data.
+  Future<void> _migrateToV22(Database db) async {
+    await _applySchema(db);
   }
 
   Future<String> requireOwnerId() async {
     final db = await database;
-    final rows = await db.query('users', limit: 1);
+
+    final rows = await db.query(
+      'users',
+      limit: 1,
+    );
+
     if (rows.isEmpty) {
       final id = newId();
       final now = nowMs();
+
       await db.insert('users', {
         'id': id,
         'display_name': 'Me',
         'created_at': now,
         'updated_at': now,
       });
+
       return id;
     }
+
     return rows.first['id'] as String;
   }
 
@@ -223,17 +273,36 @@ class AppDatabase {
 
   static int startOfTodayMs() {
     final n = DateTime.now();
-    return DateTime(n.year, n.month, n.day).millisecondsSinceEpoch;
+
+    return DateTime(
+      n.year,
+      n.month,
+      n.day,
+    ).millisecondsSinceEpoch;
   }
 
   static int endOfTodayMs() {
     final n = DateTime.now();
-    return DateTime(n.year, n.month, n.day, 23, 59, 59, 999).millisecondsSinceEpoch;
+
+    return DateTime(
+      n.year,
+      n.month,
+      n.day,
+      23,
+      59,
+      59,
+      999,
+    ).millisecondsSinceEpoch;
   }
 
   static int endOfDayMs(DateTime d) =>
-      DateTime(d.year, d.month, d.day).millisecondsSinceEpoch +
-      const Duration(days: 1).inMilliseconds - 1;
+      DateTime(
+        d.year,
+        d.month,
+        d.day,
+      ).millisecondsSinceEpoch +
+      const Duration(days: 1).inMilliseconds -
+      1;
 
   static String newId() => _uuid.v4();
 }
