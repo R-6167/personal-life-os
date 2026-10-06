@@ -32,6 +32,8 @@ class DayPlanner {
   final AppDatabase _db;
 
   Future<List<PlanItem>> buildPlan({int limit = 8}) async {
+      /// Back-compat used by PlanningScreen.
+  Future<List<PlanItem>> rankForToday({int limit = 8}) => buildPlan(limit: limit);
     return QueryCache.instance.getOrLoad(
       'day_plan_$limit',
       () => _build(limit),
