@@ -1,5 +1,6 @@
 import '../domain/enums.dart';
 import '../domain/models.dart';
+import 'atomic_write.dart';
 import 'database.dart';
 
 class ProjectRepository {
@@ -47,23 +48,20 @@ class ProjectRepository {
       createdAt: now,
       updatedAt: now,
     );
-    await _db.txn((txn) async {
-      final map = project.toInsertMap();
-      if (description != null && description.trim().isNotEmpty) {
-        map['description'] = description.trim();
-      }
-      await txn.insert('projects', map);
-      await txn.insert('activity_events', {
-        'id': AppDatabase.newId(),
-        'owner_id': ownerId,
-        'event_type': 'PROJECT_CREATED',
-        'entity_type': 'PROJECT',
-        'entity_id': project.id,
-        'occurred_at': now,
-        'recorded_at': now,
-        'source': EventSource.user,
-      });
-    });
+    await AtomicWrite.run(
+      db: _db,
+      state: (txn) async {
+        final map = project.toInsertMap();
+        if (description != null && description.trim().isNotEmpty) {
+          map['description'] = description.trim();
+        }
+        await txn.insert('projects', map);
+      },
+      eventType: 'PROJECT_CREATED',
+      entityType: 'PROJECT',
+      entityId: project.id,
+      occurredAt: now,
+    );
     return project;
   }
 
@@ -124,25 +122,21 @@ class ProjectRepository {
   }
 
   Future<void> complete(String id) async {
-    final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
-    await _db.txn((txn) async {
-      await txn.update(
-        'projects',
-        {'status': EntityStatus.completed, 'updated_at': now},
-        where: 'id = ?',
-        whereArgs: [id],
-      );
-      await txn.insert('activity_events', {
-        'id': AppDatabase.newId(),
-        'owner_id': ownerId,
-        'event_type': 'PROJECT_COMPLETED',
-        'entity_type': 'PROJECT',
-        'entity_id': id,
-        'occurred_at': now,
-        'recorded_at': now,
-        'source': EventSource.user,
-      });
-    });
+    await AtomicWrite.run(
+      db: _db,
+      state: (txn) async {
+        await txn.update(
+          'projects',
+          {'status': EntityStatus.completed, 'updated_at': now},
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+      },
+      eventType: 'PROJECT_COMPLETED',
+      entityType: 'PROJECT',
+      entityId: id,
+      occurredAt: now,
+    );
   }
 }
