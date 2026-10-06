@@ -53,7 +53,7 @@ class TaskRepository {
       'tasks',
       where:
           'scheduled_start IS NOT NULL AND scheduled_start <= ? AND '
-          '(scheduled_end IS NULL OR scheduled_end >= ?) AND '
+          '(scheduled_end IS NULL OR scheduled_end > ?) AND '
           'status NOT IN (?, ?) AND archived_at IS NULL',
       whereArgs: [end, start, EntityStatus.completed, EntityStatus.cancelled],
       orderBy: 'scheduled_start ASC',
@@ -249,14 +249,9 @@ class TaskRepository {
     await setRecurrenceRule(taskId: taskId, rule: rule);
   }
 
-  Future<void> setRecurrenceRule({
-    required String taskId,
-    required RecurrenceRule rule,
-  }) async {
-    final now = AppDatabase.nowMs();
-    final db = await _db.database;
+  Map<String, Object?> _recurrencePayload(RecurrenceRule rule, int now) {
     final daysCsv = rule.byWeekDays.isEmpty ? null : rule.byWeekDays.join(',');
-    final payload = <String, Object?>{
+    return {
       'frequency': rule.frequency.wire,
       'interval': rule.safeInterval,
       'interval_n': rule.safeInterval,
@@ -269,6 +264,15 @@ class TaskRepository {
       'enabled': 1,
       'updated_at': now,
     };
+  }
+
+  Future<void> setRecurrenceRule({
+    required String taskId,
+    required RecurrenceRule rule,
+  }) async {
+    final now = AppDatabase.nowMs();
+    final db = await _db.database;
+    final payload = _recurrencePayload(rule, now);
     final existing =
         await db.query('task_recurrences', where: 'task_id = ?', whereArgs: [taskId], limit: 1);
     if (existing.isNotEmpty) {
@@ -299,28 +303,84 @@ class TaskRepository {
     return DomainRecurrence.ruleFromScheduleMap(row);
   }
 
+  /// Creates the next occurrence inside an existing [txn] (no nested transaction).
+  Future<Task?> _spawnNextInTxn(
+    dynamic txn, {
+    required String completedTaskId,
+    required Task src,
+    required RecurrenceRule rule,
+    required String ownerId,
+    required int now,
+    String? description,
+  }) async {
+    final base = src.dueAt != null
+        ? DateTime.fromMillisecondsSinceEpoch(src.dueAt!)
+        : DateTime.fromMillisecondsSinceEpoch(now);
+    final next = rule.generator().nextAfter(base);
+    if (next == null) return null;
+
+    final created = Task(
+      id: AppDatabase.newId(),
+      ownerId: ownerId,
+      projectId: src.projectId,
+      goalId: src.goalId,
+      title: src.title,
+      status: EntityStatus.planned,
+      priority: src.priority,
+      dueAt: DateTime(next.year, next.month, next.day, 23, 59).millisecondsSinceEpoch,
+      createdAt: now,
+      updatedAt: now,
+    );
+    final map = created.toInsertMap();
+    if (description != null && description.isNotEmpty) {
+      map['description'] = description;
+    }
+    map['parent_task_id'] = completedTaskId;
+    await txn.insert('tasks', map);
+
+    final payload = _recurrencePayload(rule, now);
+    await txn.insert('task_recurrences', {
+      'id': AppDatabase.newId(),
+      'task_id': created.id,
+      'created_at': now,
+      ...payload,
+    });
+
+    await txn.insert('activity_events', {
+      'id': AppDatabase.newId(),
+      'owner_id': ownerId,
+      'event_type': 'TASK_OCCURRENCE_SPAWNED',
+      'entity_type': 'TASK',
+      'entity_id': created.id,
+      'occurred_at': now,
+      'recorded_at': now,
+      'source': EventSource.system,
+      'metadata':
+          '{"parentTaskId":"$completedTaskId","dueAt":${created.dueAt}}',
+    });
+    return created;
+  }
+
+  /// Standalone spawn (e.g. repair). Prefer [complete] for the lifecycle path.
   Future<Task?> spawnNextOccurrence(String completedTaskId) async {
     final rule = await getRecurrenceRule(completedTaskId);
     if (rule == null) return null;
     final src = await getById(completedTaskId);
     if (src == null) return null;
-    final base = src.dueAt != null
-        ? DateTime.fromMillisecondsSinceEpoch(src.dueAt!)
-        : DateTime.now();
-    final next = rule.generator().nextAfter(base);
-    if (next == null) return null;
-    final created = await create(
-      title: src.title,
-      status: EntityStatus.planned,
-      dueAt: DateTime(next.year, next.month, next.day, 23, 59).millisecondsSinceEpoch,
-      priority: src.priority,
-      projectId: src.projectId,
-      goalId: src.goalId,
-      description: await descriptionOf(completedTaskId),
-      parentTaskId: completedTaskId,
-    );
-    await setRecurrenceRule(taskId: created.id, rule: rule);
-    return created;
+    final desc = await descriptionOf(completedTaskId);
+    final ownerId = await _db.requireOwnerId();
+    final now = AppDatabase.nowMs();
+    return _db.txn((txn) async {
+      return _spawnNextInTxn(
+        txn,
+        completedTaskId: completedTaskId,
+        src: src,
+        rule: rule,
+        ownerId: ownerId,
+        now: now,
+        description: desc,
+      );
+    });
   }
 
   Future<void> clearRecurrence(String taskId) async {
@@ -334,10 +394,17 @@ class TaskRepository {
     );
   }
 
-  Future<void> complete(String taskId) async {
-    await _db.txn((txn) async {
-      final now = AppDatabase.nowMs();
-      final ownerId = await _db.requireOwnerId();
+  /// Atomic lifecycle: complete + activity + (optional) next occurrence in one txn.
+  /// Returns the spawned next task when recurrence applies and a next date exists.
+  Future<Task?> complete(String taskId) async {
+    final rule = await getRecurrenceRule(taskId);
+    final src = await getById(taskId);
+    if (src == null) return null;
+    final desc = await descriptionOf(taskId);
+    final ownerId = await _db.requireOwnerId();
+    final now = AppDatabase.nowMs();
+
+    return _db.txn((txn) async {
       await txn.update(
         'tasks',
         {
@@ -357,9 +424,20 @@ class TaskRepository {
         'occurred_at': now,
         'recorded_at': now,
         'source': EventSource.user,
+        'metadata': rule == null ? null : '{"recurring":true}',
       });
+
+      if (rule == null) return null;
+      return _spawnNextInTxn(
+        txn,
+        completedTaskId: taskId,
+        src: src,
+        rule: rule,
+        ownerId: ownerId,
+        now: now,
+        description: desc,
+      );
     });
-    await spawnNextOccurrence(taskId);
   }
 
   Future<void> reopen(String taskId) async {
