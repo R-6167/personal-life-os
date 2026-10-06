@@ -14,8 +14,8 @@ class AppDatabase {
   Database? _db;
   static const _uuid = Uuid();
 
-  // Bump this whenever the database schema/migration contract changes.
-  static const schemaVersion = 22;
+  // Bump whenever the database schema/migration contract changes.
+  static const schemaVersion = 23;
 
   Future<Database> get database async {
     if (_db != null) return _db!;
@@ -54,25 +54,21 @@ class AppDatabase {
       version: schemaVersion,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
-
         try {
           await db.rawQuery('PRAGMA journal_mode = WAL');
         } catch (_) {}
-
         try {
           await db.execute('PRAGMA synchronous = NORMAL');
         } catch (_) {}
-
         try {
           await db.execute('PRAGMA temp_store = MEMORY');
         } catch (_) {}
       },
-
-      // Fresh installation.
       onCreate: (db, version) async {
         await _applySchema(db);
+        // Critical: users must exist before any FK-backed table is used.
+        await _ensureUsersTable(db);
         await _seedDefaultUser(db);
-
         await _applyV6Constraints(db);
         await _migrateToV12(db);
         await _migrateToV13(db);
@@ -85,9 +81,8 @@ class AppDatabase {
         await _migrateToV20(db);
         await _migrateToV21(db);
         await _migrateToV22(db);
+        await _migrateToV23(db);
       },
-
-      // Existing installation being upgraded.
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 6) await _migrateToV6(db);
         if (oldVersion < 7) await _migrateToV7(db);
@@ -106,37 +101,91 @@ class AppDatabase {
         if (oldVersion < 20) await _migrateToV20(db);
         if (oldVersion < 21) await _migrateToV21(db);
         if (oldVersion < 22) await _migrateToV22(db);
+        if (oldVersion < 23) await _migrateToV23(db);
+      },
+      onOpen: (db) async {
+        // Last-resort repair for partially-created or corrupt installs.
+        await _ensureUsersTable(db);
+        await _ensureDefaultUserRow(db);
       },
     );
   }
 
   /// Apply the canonical schema.
   ///
-  /// Every statement uses IF NOT EXISTS where appropriate, so this is safe
-  /// to run against both fresh and partially-created databases.
+  /// CREATE TABLE / INDEX failures are tolerated (already-exists). Other
+  /// statement failures are still swallowed to keep upgrades resilient, but
+  /// critical tables are re-asserted via [_ensureUsersTable].
   Future<void> _applySchema(Database db) async {
     final sql = await rootBundle.loadString('assets/schema.sql');
-
-    for (final stmt in sql.split(';')) {
+    for (final stmt in _splitSql(sql)) {
       final s = stmt.trim();
-
       if (s.isEmpty) continue;
-
       try {
         await db.execute(s);
       } catch (_) {
-        // Keep schema application tolerant of already-existing objects
-        // and historical migration differences.
+        // Tolerate already-existing objects / historical differences.
       }
     }
   }
 
-  Future<void> _seedDefaultUser(Database db) async {
-    final now = nowMs();
+  static List<String> _splitSql(String raw) {
+    final out = <String>[];
+    final buf = StringBuffer();
+    for (final line in raw.split('\n')) {
+      final t = line.trim();
+      if (t.startsWith('--')) continue;
+      buf.writeln(line);
+      if (t.endsWith(';')) {
+        out.add(buf.toString());
+        buf.clear();
+      }
+    }
+    final tail = buf.toString().trim();
+    if (tail.isNotEmpty) out.add(tail);
+    return out;
+  }
 
+  /// Explicit CREATE for the one table the whole app hangs on.
+  /// Never swallow failure here — rethrow so the boot error is visible.
+  Future<void> _ensureUsersTable(Database db) async {
+    await db.execute('''
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  display_name TEXT,
+  name TEXT,
+  currency TEXT,
+  week_start_day INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+)
+''');
+    // Additive columns for installs that already had a minimal users table.
+    for (final col in [
+      'ALTER TABLE users ADD COLUMN name TEXT',
+      "ALTER TABLE users ADD COLUMN currency TEXT",
+      'ALTER TABLE users ADD COLUMN week_start_day INTEGER',
+    ]) {
+      try {
+        await db.execute(col);
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _seedDefaultUser(Database db) async {
+    await _ensureDefaultUserRow(db);
+  }
+
+  Future<void> _ensureDefaultUserRow(Database db) async {
+    final rows = await db.query('users', limit: 1);
+    if (rows.isNotEmpty) return;
+    final now = nowMs();
     await db.insert('users', {
       'id': newId(),
       'display_name': 'Me',
+      'name': 'Me',
+      'currency': Defaults.currency,
+      'week_start_day': Defaults.weekStartDay,
       'created_at': now,
       'updated_at': now,
     });
@@ -212,7 +261,6 @@ class AppDatabase {
         'ON activity_events(owner_id, occurred_at DESC)',
       );
     } catch (_) {}
-
     try {
       await db.execute(
         'CREATE INDEX IF NOT EXISTS '
@@ -220,7 +268,6 @@ class AppDatabase {
         'ON activity_events(entity_type, entity_id)',
       );
     } catch (_) {}
-
     try {
       await db.execute(
         'CREATE INDEX IF NOT EXISTS '
@@ -228,7 +275,6 @@ class AppDatabase {
         'ON activity_events(event_type)',
       );
     } catch (_) {}
-
     try {
       await db.execute(
         'ALTER TABLE activity_events ADD COLUMN summary TEXT',
@@ -236,36 +282,40 @@ class AppDatabase {
     } catch (_) {}
   }
 
-  /// Repairs databases created by older builds that may be missing tables.
-  ///
-  /// schema.sql uses CREATE TABLE IF NOT EXISTS, so re-applying it is safe
-  /// and restores missing tables such as `users` without destroying data.
+  /// Repairs databases missing tables by re-applying schema.sql.
   Future<void> _migrateToV22(Database db) async {
+    await _applySchema(db);
+  }
+
+  /// Hard-ensure users + default row (fixes "no such table: users" installs).
+  Future<void> _migrateToV23(Database db) async {
+    await _ensureUsersTable(db);
+    await _ensureDefaultUserRow(db);
     await _applySchema(db);
   }
 
   Future<String> requireOwnerId() async {
     final db = await database;
+    // Never assume schema is healthy — repair first.
+    await _ensureUsersTable(db);
+    await _ensureDefaultUserRow(db);
 
-    final rows = await db.query(
-      'users',
-      limit: 1,
-    );
-
+    final rows = await db.query('users', limit: 1);
     if (rows.isEmpty) {
+      // Extremely defensive — insert again if a race wiped the row.
       final id = newId();
       final now = nowMs();
-
       await db.insert('users', {
         'id': id,
         'display_name': 'Me',
+        'name': 'Me',
+        'currency': Defaults.currency,
+        'week_start_day': Defaults.weekStartDay,
         'created_at': now,
         'updated_at': now,
       });
-
       return id;
     }
-
     return rows.first['id'] as String;
   }
 
@@ -273,34 +323,16 @@ class AppDatabase {
 
   static int startOfTodayMs() {
     final n = DateTime.now();
-
-    return DateTime(
-      n.year,
-      n.month,
-      n.day,
-    ).millisecondsSinceEpoch;
+    return DateTime(n.year, n.month, n.day).millisecondsSinceEpoch;
   }
 
   static int endOfTodayMs() {
     final n = DateTime.now();
-
-    return DateTime(
-      n.year,
-      n.month,
-      n.day,
-      23,
-      59,
-      59,
-      999,
-    ).millisecondsSinceEpoch;
+    return DateTime(n.year, n.month, n.day, 23, 59, 59, 999).millisecondsSinceEpoch;
   }
 
   static int endOfDayMs(DateTime d) =>
-      DateTime(
-        d.year,
-        d.month,
-        d.day,
-      ).millisecondsSinceEpoch +
+      DateTime(d.year, d.month, d.day).millisecondsSinceEpoch +
       const Duration(days: 1).inMilliseconds -
       1;
 
