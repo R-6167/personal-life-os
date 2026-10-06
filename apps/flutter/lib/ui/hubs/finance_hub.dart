@@ -651,7 +651,7 @@ class _FinanceHubState extends State<FinanceHub> {
               Text(
                 'Obligations ${_money(_outlook['obligations_minor'])} · '
                 'Runway ${_money(_outlook['runway_minor'])}'
-                '${(_outlook['covered'] == true) ? '' : ' · shortfall ${_money(_outlook['shortfall_minor'])}',
+                '${(_outlook['covered'] == true) ? '' : ' · shortfall ${_money(_outlook['shortfall_minor'])}'}',
                 style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.55), fontSize: 12),
               ),
               if (_outlook['covered'] != true)
