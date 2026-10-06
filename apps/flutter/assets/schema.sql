@@ -4,6 +4,9 @@
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   display_name TEXT,
+  name TEXT,
+  currency TEXT,
+  week_start_day INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
