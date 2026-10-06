@@ -66,9 +66,9 @@ class AppDatabase {
       },
       onCreate: (db, version) async {
         await _applySchema(db);
-        // Critical: users must exist before any FK-backed table is used.
         await _ensureUsersTable(db);
         await _seedDefaultUser(db);
+        await _ensureSoftColumns(db);
         await _applyV6Constraints(db);
         await _migrateToV12(db);
         await _migrateToV13(db);
@@ -104,18 +104,13 @@ class AppDatabase {
         if (oldVersion < 23) await _migrateToV23(db);
       },
       onOpen: (db) async {
-        // Last-resort repair for partially-created or corrupt installs.
         await _ensureUsersTable(db);
         await _ensureDefaultUserRow(db);
+        await _ensureSoftColumns(db);
       },
     );
   }
 
-  /// Apply the canonical schema.
-  ///
-  /// CREATE TABLE / INDEX failures are tolerated (already-exists). Other
-  /// statement failures are still swallowed to keep upgrades resilient, but
-  /// critical tables are re-asserted via [_ensureUsersTable].
   Future<void> _applySchema(Database db) async {
     final sql = await rootBundle.loadString('assets/schema.sql');
     for (final stmt in _splitSql(sql)) {
@@ -123,9 +118,7 @@ class AppDatabase {
       if (s.isEmpty) continue;
       try {
         await db.execute(s);
-      } catch (_) {
-        // Tolerate already-existing objects / historical differences.
-      }
+      } catch (_) {}
     }
   }
 
@@ -146,8 +139,6 @@ class AppDatabase {
     return out;
   }
 
-  /// Explicit CREATE for the one table the whole app hangs on.
-  /// Never swallow failure here — rethrow so the boot error is visible.
   Future<void> _ensureUsersTable(Database db) async {
     await db.execute('''
 CREATE TABLE IF NOT EXISTS users (
@@ -160,14 +151,35 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at INTEGER NOT NULL
 )
 ''');
-    // Additive columns for installs that already had a minimal users table.
     for (final col in [
       'ALTER TABLE users ADD COLUMN name TEXT',
-      "ALTER TABLE users ADD COLUMN currency TEXT",
+      'ALTER TABLE users ADD COLUMN currency TEXT',
       'ALTER TABLE users ADD COLUMN week_start_day INTEGER',
     ]) {
       try {
         await db.execute(col);
+      } catch (_) {}
+    }
+  }
+
+  /// Columns repositories expect that may be missing on older installs.
+  Future<void> _ensureSoftColumns(Database db) async {
+    for (final alter in [
+      'ALTER TABLE notes ADD COLUMN archived_at INTEGER',
+      'ALTER TABLE goals ADD COLUMN archived_at INTEGER',
+      'ALTER TABLE goals ADD COLUMN description TEXT',
+      'ALTER TABLE goals ADD COLUMN target_date INTEGER',
+      'ALTER TABLE projects ADD COLUMN archived_at INTEGER',
+      'ALTER TABLE projects ADD COLUMN description TEXT',
+      'ALTER TABLE projects ADD COLUMN target_date INTEGER',
+      'ALTER TABLE habits ADD COLUMN archived_at INTEGER',
+      'ALTER TABLE habits ADD COLUMN goal_id TEXT',
+      'ALTER TABLE milestones ADD COLUMN completed_at INTEGER',
+      'ALTER TABLE tasks ADD COLUMN description TEXT',
+      'ALTER TABLE financial_accounts ADD COLUMN status TEXT',
+    ]) {
+      try {
+        await db.execute(alter);
       } catch (_) {}
     }
   }
@@ -282,27 +294,24 @@ CREATE TABLE IF NOT EXISTS users (
     } catch (_) {}
   }
 
-  /// Repairs databases missing tables by re-applying schema.sql.
   Future<void> _migrateToV22(Database db) async {
     await _applySchema(db);
   }
 
-  /// Hard-ensure users + default row (fixes "no such table: users" installs).
   Future<void> _migrateToV23(Database db) async {
     await _ensureUsersTable(db);
     await _ensureDefaultUserRow(db);
     await _applySchema(db);
+    await _ensureSoftColumns(db);
   }
 
   Future<String> requireOwnerId() async {
     final db = await database;
-    // Never assume schema is healthy — repair first.
     await _ensureUsersTable(db);
     await _ensureDefaultUserRow(db);
 
     final rows = await db.query('users', limit: 1);
     if (rows.isEmpty) {
-      // Extremely defensive — insert again if a race wiped the row.
       final id = newId();
       final now = nowMs();
       await db.insert('users', {
