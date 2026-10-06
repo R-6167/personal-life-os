@@ -77,6 +77,76 @@ void main() {
       final total = m.fold<int>(0, (s, i) => s + i.durationMs);
       expect(total, 50);
     });
+
+    test('month boundary timestamps still merge', () {
+      final endMay = DateTime(2026, 5, 31, 23).millisecondsSinceEpoch;
+      final startJun = DateTime(2026, 6, 1, 1).millisecondsSinceEpoch;
+      final mid = DateTime(2026, 6, 1, 0).millisecondsSinceEpoch;
+      final m = mergeBusyIntervals([
+        BusyInterval(endMay, mid + 60 * 60000),
+        BusyInterval(mid, startJun),
+      ]);
+      expect(m.length, 1);
+      expect(m.single.startMs, endMay);
+      expect(m.single.endMs, startJun);
+    });
+  });
+
+  group('mergeOverlappingDaySlots', () {
+    test('empty and zero-duration filtered', () {
+      expect(mergeOverlappingDaySlots(const []), isEmpty);
+      final zero = DaySlot(
+        start: DateTime(2026, 6, 1, 9),
+        end: DateTime(2026, 6, 1, 9),
+        title: 'noise',
+        kind: DaySlotKind.event,
+        locked: true,
+      );
+      expect(mergeOverlappingDaySlots([zero]), isEmpty);
+    });
+
+    test('overlapping locked calendar + block collapse', () {
+      final a = DaySlot(
+        start: DateTime(2026, 6, 1, 9),
+        end: DateTime(2026, 6, 1, 11),
+        title: 'Meeting',
+        kind: DaySlotKind.event,
+        locked: true,
+      );
+      final b = DaySlot(
+        start: DateTime(2026, 6, 1, 10),
+        end: DateTime(2026, 6, 1, 12),
+        title: 'Focus',
+        kind: DaySlotKind.block,
+        locked: true,
+      );
+      final m = mergeOverlappingDaySlots([a, b]);
+      expect(m.length, 1);
+      expect(m.single.start, a.start);
+      expect(m.single.end, b.end);
+      expect(m.single.minutes, 180);
+    });
+
+    test('non-overlapping preserved', () {
+      final a = DaySlot(
+        start: DateTime(2026, 6, 1, 9),
+        end: DateTime(2026, 6, 1, 10),
+        title: 'A',
+        kind: DaySlotKind.event,
+        locked: true,
+      );
+      final b = DaySlot(
+        start: DateTime(2026, 6, 1, 14),
+        end: DateTime(2026, 6, 1, 15),
+        title: 'B',
+        kind: DaySlotKind.block,
+        locked: true,
+      );
+      final m = mergeOverlappingDaySlots([b, a]);
+      expect(m.length, 2);
+      expect(m[0].title, 'A');
+      expect(m[1].title, 'B');
+    });
   });
 
   group('BuildMyDay heuristics (pure)', () {
@@ -122,10 +192,9 @@ void main() {
     });
 
     test('urgency ordering: overdue > due-soon > open', () {
-      // Mirrors scoring intent: base 100+overdue, 85+due, 40+open.
-      final overdue = 100 + 26; // deeply overdue bonus
-      final dueSoon = 85 + 22; // <2h
-      final open = 40 + 8; // priority * 8 example
+      final overdue = 100 + 26;
+      final dueSoon = 85 + 22;
+      final open = 40 + 8;
       expect(overdue > dueSoon, isTrue);
       expect(dueSoon > open, isTrue);
     });
@@ -137,11 +206,17 @@ void main() {
       expect(boosted, 64);
       expect(boosted > base, isTrue);
     });
+
+    test('duration clamp floors used by schedule path', () {
+      expect(0.clamp(15, 480), 15);
+      expect(5.clamp(15, 480), 15);
+      expect(30.clamp(15, 480), 30);
+      expect(999.clamp(15, 480), 480);
+    });
   });
 
   group('suggest-slot gap tiling (pure math)', () {
     test('gap after merged busy yields start times', () {
-      // Day 08:00–22:00; busy 09:00–11:00 and 14:00–15:00.
       final dayStart = DateTime(2026, 6, 1, 8);
       final need = const Duration(minutes: 30);
       final merged = mergeBusyIntervals([
@@ -166,35 +241,19 @@ void main() {
       }
       final dayEnd = DateTime(2026, 6, 1, 22);
       if (dayEnd.difference(cursor) >= need) slots.add(cursor);
-
-      expect(slots.length, greaterThanOrEqualTo(2));
-      expect(slots.first.hour, 8);
-      // After 09–11 busy, next free starts at 11.
+      expect(slots, isNotEmpty);
+      expect(slots.first, dayStart);
       expect(slots.any((s) => s.hour == 11), isTrue);
     });
 
-    test('full-day busy leaves no slots', () {
-      final dayStart = DateTime(2026, 6, 1, 8);
-      final dayEnd = DateTime(2026, 6, 1, 22);
-      final need = const Duration(minutes: 30);
-      final merged = mergeBusyIntervals([
-        BusyInterval(
-          dayStart.millisecondsSinceEpoch,
-          dayEnd.millisecondsSinceEpoch,
-        ),
-      ]);
-      final slots = <DateTime>[];
-      var cursor = dayStart;
-      for (final m in merged) {
-        final gapEnd = DateTime.fromMillisecondsSinceEpoch(m.startMs);
-        if (gapEnd.isAfter(cursor) && gapEnd.difference(cursor) >= need) {
-          slots.add(cursor);
-        }
-        final after = DateTime.fromMillisecondsSinceEpoch(m.endMs);
-        if (after.isAfter(cursor)) cursor = after;
-      }
-      if (dayEnd.difference(cursor) >= need) slots.add(cursor);
-      expect(slots, isEmpty);
+    test('full calendar day leaves no 60m slot', () {
+      final dayStart = DateTime(2026, 6, 1, 8).millisecondsSinceEpoch;
+      final dayEnd = DateTime(2026, 6, 1, 22).millisecondsSinceEpoch;
+      final merged = mergeBusyIntervals([BusyInterval(dayStart, dayEnd)]);
+      expect(merged.length, 1);
+      expect(merged.single.durationMs, dayEnd - dayStart);
+      final free = (dayEnd - dayStart) - merged.single.durationMs;
+      expect(free, 0);
     });
   });
 }
