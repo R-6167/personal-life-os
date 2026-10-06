@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ordin/data/database.dart';
+import 'package:ordin/domain/enums.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -45,18 +46,31 @@ Future<AppDatabase> openTestDb() async {
         if (s.isEmpty) continue;
         await d.execute(s);
       }
-      await d.execute(
-        'CREATE TABLE IF NOT EXISTS work_sessions ('
-        'id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, task_id TEXT, time_block_id TEXT, '
-        "status TEXT NOT NULL DEFAULT 'RUNNING', planned_start INTEGER, planned_end INTEGER, "
-        'planned_minutes INTEGER, started_at INTEGER NOT NULL, ended_at INTEGER, paused_at INTEGER, '
-        'accumulated_ms INTEGER NOT NULL DEFAULT 0, interrupt_count INTEGER NOT NULL DEFAULT 0, '
-        'note TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)',
-      );
+      // Soft columns used by repositories but not always in minimal schema.
+      for (final alter in [
+        'ALTER TABLE notes ADD COLUMN archived_at INTEGER',
+        'ALTER TABLE goals ADD COLUMN archived_at INTEGER',
+        'ALTER TABLE projects ADD COLUMN archived_at INTEGER',
+        'ALTER TABLE habits ADD COLUMN archived_at INTEGER',
+        'ALTER TABLE habits ADD COLUMN goal_id TEXT',
+        'ALTER TABLE goals ADD COLUMN target_date INTEGER',
+        'ALTER TABLE goals ADD COLUMN description TEXT',
+        'ALTER TABLE projects ADD COLUMN description TEXT',
+        'ALTER TABLE projects ADD COLUMN target_date INTEGER',
+        'ALTER TABLE milestones ADD COLUMN completed_at INTEGER',
+        'ALTER TABLE tasks ADD COLUMN description TEXT',
+      ]) {
+        try {
+          await d.execute(alter);
+        } catch (_) {}
+      }
       final now = AppDatabase.nowMs();
       await d.insert('users', {
         'id': AppDatabase.newId(),
         'display_name': 'Me',
+        'name': 'Me',
+        'currency': Defaults.currency,
+        'week_start_day': Defaults.weekStartDay,
         'created_at': now,
         'updated_at': now,
       });
