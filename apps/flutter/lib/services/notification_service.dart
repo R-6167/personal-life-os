@@ -91,8 +91,6 @@ class NotificationService {
       await androidPlugin?.requestExactAlarmsPermission();
     } catch (_) {}
 
-    // Channel-level defaults: system default sound + vibration pattern.
-    // (Channels are immutable; id bump forces re-create on install/update.)
     await androidPlugin?.createNotificationChannel(
       AndroidNotificationChannel(
         _channelId,
@@ -306,6 +304,13 @@ class NotificationService {
     return hit;
   }
 
+  /// After recording an expense, re-check budgets (optionally scoped by category).
+  Future<List<BudgetStatus>> checkCategoryAfterExpense(String? categoryId) async {
+    final all = await BudgetRepository(AppDatabase.instance).alerts();
+    if (categoryId == null || categoryId.isEmpty) return all;
+    return all.where((s) => s.categoryId == categoryId).toList();
+  }
+
   Future<void> _schedule({
     required int id,
     required String title,
@@ -336,7 +341,6 @@ class NotificationService {
       ),
     ];
 
-    // Prefer exact alarm when permitted; fall back to inexact.
     AndroidScheduleMode mode = AndroidScheduleMode.inexactAllowWhileIdle;
     try {
       final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
@@ -361,7 +365,6 @@ class NotificationService {
           priority: high ? Priority.max : Priority.high,
           icon: '@mipmap/ic_launcher',
           actions: actions,
-          // Reminder category + ringtone usage → system default alert sound.
           category: AndroidNotificationCategory.reminder,
           audioAttributesUsage: AudioAttributesUsage.notificationRingtone,
           playSound: true,
