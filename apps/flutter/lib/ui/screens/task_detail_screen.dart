@@ -6,6 +6,7 @@ import '../../data/project_repository.dart';
 import '../../data/task_repository.dart';
 import '../../domain/enums.dart';
 import '../../domain/models.dart';
+import '../../services/feedback_service.dart';
 import '../../services/recurrence_engine.dart';
 import '../theme.dart';
 import '../widgets/glass.dart';
@@ -425,6 +426,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
                 } else if (v == 'repeat') {
                   await _editRecurrence();
                 } else if (v == 'complete') {
+                  FeedbackService.instance.success();
                   await _tasks.complete(t.id);
                   await _load();
                 } else if (v == 'reopen') {
@@ -473,7 +475,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
                 ],
                 onChanged: (v) => setState(() => _priority = v ?? 0),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 12),
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 title: Text(
@@ -491,7 +493,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
                         onPressed: () => setState(() => _due = null),
                       ),
                     IconButton(
-                      icon: const Icon(Icons.calendar_today, color: AppTheme.amber),
+                      icon: const Icon(Icons.event, color: AppTheme.amber),
                       onPressed: () async {
                         final p = await showDatePicker(
                           context: context,
@@ -505,147 +507,47 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
                   ],
                 ),
               ),
-              DropdownButtonFormField<String?>(
-                value: _projectId,
-                dropdownColor: AppTheme.metal,
-                decoration: const InputDecoration(labelText: 'Project'),
-                items: [
-                  const DropdownMenuItem(value: null, child: Text('None')),
-                  ..._projectOptions.map((p) => DropdownMenuItem(value: p.id, child: Text(p.title))),
-                ],
-                onChanged: (v) => setState(() => _projectId = v),
-              ),
               const SizedBox(height: 16),
               FilledButton(onPressed: _save, child: const Text('Save changes')),
             ] else ...[
-              GlassCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(t.title,
-                        style: const TextStyle(color: AppTheme.silver, fontSize: 20, fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 6,
-                      children: [
-                        Chip(label: Text(t.status)),
-                        Chip(label: Text(_priorityLabel(t.priority))),
-                        Chip(
-                          label: Text(_dueLabel(t)),
-                          backgroundColor: t.isOverdue ? Colors.red.withValues(alpha: 0.25) : null,
-                        ),
-                        if (_rule != null)
-                          Chip(
-                            avatar: const Icon(Icons.repeat, size: 16, color: AppTheme.amber),
-                            label: Text(_ruleSummary(_rule!)),
-                          ),
-                      ],
-                    ),
-                    if ((_description ?? '').isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      Text(_description!, style: const TextStyle(color: AppTheme.silver, height: 1.4)),
-                    ],
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
+              Text(t.title,
+                  style: const TextStyle(
+                      color: AppTheme.silver, fontSize: 22, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              Text(_dueLabel(t),
+                  style: TextStyle(
+                      color: t.isOverdue ? Colors.orangeAccent : AppTheme.silver.withValues(alpha: 0.55))),
+              Text('${_priorityLabel(t.priority)} · ${t.status}',
+                  style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45), fontSize: 13)),
+              if ((_description ?? '').isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(_description!,
+                    style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.8), height: 1.4)),
+              ],
+              const SizedBox(height: 16),
               GlassCard(
                 onTap: _editRecurrence,
-                child: Row(
-                  children: [
-                    Icon(Icons.repeat, color: _rule != null ? AppTheme.amber : AppTheme.silverMuted),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('Repeat',
-                              style: TextStyle(color: AppTheme.silver, fontWeight: FontWeight.w600)),
-                          Text(
-                            _rule == null ? 'Does not repeat — tap to set' : _ruleSummary(_rule!),
-                            style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.55), fontSize: 12),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const Icon(Icons.chevron_right, color: AppTheme.silverMuted),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              if (!done) ...[
-                WorkSessionPanel(
-                  taskId: widget.taskId,
-                  plannedMinutes: t.estimatedMinutes,
-                  onChanged: () {
-                    _load();
-                  },
-                ),
-                const SizedBox(height: 16),
-              ],
-              Row(
-                children: [
-                  if (!done)
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: () async {
-                          await _tasks.complete(t.id);
-                          await _load();
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  _rule != null
-                                      ? 'Completed — next occurrence created'
-                                      : 'Task completed',
-                                ),
-                              ),
-                            );
-                          }
-                        },
-                        icon: const Icon(Icons.check),
-                        label: const Text('Complete'),
-                      ),
-                    )
-                  else
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () async {
-                          await _tasks.reopen(t.id);
-                          await _load();
-                        },
-                        icon: const Icon(Icons.undo),
-                        label: const Text('Reopen'),
-                      ),
-                    ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () => _scheduleSession(t),
-                      icon: const Icon(Icons.schedule),
-                      label: const Text('Schedule'),
-                    ),
+                child: ListTile(
+                  title: const Text('Repeat', style: TextStyle(color: AppTheme.silver)),
+                  subtitle: Text(
+                    _rule == null ? 'Does not repeat · tap to set' : _ruleSummary(_rule!),
+                    style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.5), fontSize: 12),
                   ),
-                ],
+                  trailing: const Icon(Icons.repeat, color: AppTheme.amber),
+                ),
               ),
-              const SizedBox(height: 8),
-              TextButton(onPressed: _reschedule, child: const Text('Change due date')),
               if (_deps.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                const Text('Dependencies',
+                const SizedBox(height: 12),
+                const Text('Blocked by',
                     style: TextStyle(color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
-                const SizedBox(height: 8),
                 ..._deps.map((d) => Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: GlassCard(
-                        child: Text(
-                          'Blocked by: ${d['depends_on_title'] ?? d['depends_on_task_id']}',
-                          style: const TextStyle(color: AppTheme.silver),
-                        ),
-                      ),
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text('• ${d['depends_on_title'] ?? d['depends_on_task_id']}',
+                          style: const TextStyle(color: AppTheme.silver)),
                     )),
               ],
+              const SizedBox(height: 16),
+              WorkSessionPanel(taskId: t.id),
             ],
           ],
         ),
