@@ -141,3 +141,7 @@ class DayPlanner {
     return buf.toString();
   }
 }
+
+/// Back-compat aliases used by PlanningScreen.
+typedef DayPlannerService = DayPlanner;
+typedef PrioritizedItem = PlanItem;
