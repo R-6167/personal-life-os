@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/ai/ai.dart';
+import '../services/feedback_service.dart';
 import '../services/ordin_operator.dart';
 import 'theme.dart';
 import 'widgets/glass.dart';
@@ -69,7 +70,6 @@ class _AssistantScreenState extends State<AssistantScreen> {
     _scrollToEnd();
 
     try {
-      // Structured reply preserves action proposals (Approve / Dismiss).
       final result = await _ai.reply(text);
       if (!mounted) return;
       setState(() {
@@ -107,6 +107,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
   }
 
   Future<void> _approve(int msgIndex, OrdinActionProposal proposal) async {
+    FeedbackService.instance.success();
     setState(() => _busy = true);
     final op = OrdinOperator();
     final result = await op.execute(proposal);
@@ -134,6 +135,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
 
   void _dismissProposal(int msgIndex) {
     if (msgIndex < 0 || msgIndex >= _messages.length) return;
+    FeedbackService.instance.light();
     setState(() {
       final m = _messages[msgIndex];
       _messages[msgIndex] = _Msg(
