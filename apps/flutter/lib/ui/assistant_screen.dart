@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/ai/ai.dart';
+import '../services/ordin_operator.dart';
 import 'theme.dart';
 import 'widgets/glass.dart';
 
@@ -68,65 +69,29 @@ class _AssistantScreenState extends State<AssistantScreen> {
     _scrollToEnd();
 
     try {
-      final settings = await AiSettingsStore.instance.load();
-      final onDevice = settings.mode == AiMode.onDeviceLlm ||
-          settings.mode == AiMode.onDeviceWithFallback;
-
-      if (onDevice && settings.localModelConfigured) {
-        final buf = StringBuffer();
-        await for (final token in _ai.replyStream(text)) {
-          buf.write(token);
-          if (!mounted) return;
-          setState(() {
-            _streamBuffer = buf.toString();
-            final i = _messages.length - 1;
-            if (i >= 0 && _messages[i].streaming) {
-              _messages[i] = _Msg(
-                role: 'assistant',
-                text: _stripSpecial(buf.toString()),
-                streaming: true,
-                source: 'onDevice',
-              );
-            }
-          });
-          _scrollToEnd();
+      // Structured reply preserves action proposals (Approve / Dismiss).
+      final result = await _ai.reply(text);
+      if (!mounted) return;
+      setState(() {
+        final i = _messages.length - 1;
+        if (i >= 0 && _messages[i].streaming) {
+          _messages[i] = _Msg(
+            role: 'assistant',
+            text: result.text,
+            source: result.source.name,
+            proposals: List<OrdinActionProposal>.from(result.proposals),
+          );
+        } else {
+          _messages.add(_Msg(
+            role: 'assistant',
+            text: result.text,
+            source: result.source.name,
+            proposals: List<OrdinActionProposal>.from(result.proposals),
+          ));
         }
-        if (!mounted) return;
-        setState(() {
-          final i = _messages.length - 1;
-          if (i >= 0) {
-            final cleaned = _stripSpecial(buf.toString());
-            _messages[i] = _Msg(
-              role: 'assistant',
-              text: cleaned.isEmpty ? '…' : cleaned,
-              source: 'onDevice',
-            );
-          }
-          _busy = false;
-          _streamBuffer = null;
-        });
-      } else {
-        final result = await _ai.reply(text);
-        if (!mounted) return;
-        setState(() {
-          final i = _messages.length - 1;
-          if (i >= 0 && _messages[i].streaming) {
-            _messages[i] = _Msg(
-              role: 'assistant',
-              text: result.text,
-              source: result.source.name,
-            );
-          } else {
-            _messages.add(_Msg(
-              role: 'assistant',
-              text: result.text,
-              source: result.source.name,
-            ));
-          }
-          _busy = false;
-          _streamBuffer = null;
-        });
-      }
+        _busy = false;
+        _streamBuffer = null;
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -138,6 +103,52 @@ class _AssistantScreenState extends State<AssistantScreen> {
         _streamBuffer = null;
       });
     }
+    _scrollToEnd();
+  }
+
+  Future<void> _approve(int msgIndex, OrdinActionProposal proposal) async {
+    setState(() => _busy = true);
+    final op = OrdinOperator();
+    final result = await op.execute(proposal);
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      if (msgIndex >= 0 && msgIndex < _messages.length) {
+        final m = _messages[msgIndex];
+        _messages[msgIndex] = _Msg(
+          role: m.role,
+          text: m.text,
+          source: m.source,
+          proposals: m.proposals,
+          resolved: true,
+        );
+      }
+      _messages.add(_Msg(
+        role: 'assistant',
+        text: result.ok ? '✓ ${result.message}' : '✗ ${result.message}',
+        source: 'local',
+      ));
+    });
+    _scrollToEnd();
+  }
+
+  void _dismissProposal(int msgIndex) {
+    if (msgIndex < 0 || msgIndex >= _messages.length) return;
+    setState(() {
+      final m = _messages[msgIndex];
+      _messages[msgIndex] = _Msg(
+        role: m.role,
+        text: m.text,
+        source: m.source,
+        proposals: const [],
+        resolved: true,
+      );
+      _messages.add(_Msg(
+        role: 'assistant',
+        text: 'Okay — no changes made.',
+        source: 'local',
+      ));
+    });
     _scrollToEnd();
   }
 
@@ -156,20 +167,6 @@ class _AssistantScreenState extends State<AssistantScreen> {
         );
       }
     });
-  }
-
-  String _stripSpecial(String text) {
-    var t = text;
-    for (final s in [
-      '<|im_end|>',
-      '<|im_start|>',
-      '<|end|>',
-      '<|endoftext|>',
-      '</s>',
-    ]) {
-      t = t.replaceAll(s, '');
-    }
-    return t.trim();
   }
 
   void _scrollToEnd() {
@@ -194,7 +191,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Intelligence'),
-              Text('Personal Context · on-device LLM',
+              Text('Personal Context · action loop',
                   style: TextStyle(fontSize: 11, color: Colors.white54)),
             ],
           ),
@@ -260,6 +257,65 @@ class _AssistantScreenState extends State<AssistantScreen> {
                                   height: 1.35,
                                 ),
                               ),
+                              if (m.proposals.isNotEmpty && !m.resolved) ...[
+                                const SizedBox(height: 10),
+                                for (final p in m.proposals)
+                                  if (p.isActionable)
+                                    Padding(
+                                      padding: const EdgeInsets.only(bottom: 8),
+                                      child: Container(
+                                        width: double.infinity,
+                                        padding: const EdgeInsets.all(10),
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.seed.withValues(alpha: 0.18),
+                                          borderRadius: BorderRadius.circular(12),
+                                          border: Border.all(
+                                            color: AppTheme.amber.withValues(alpha: 0.35),
+                                          ),
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(p.title,
+                                                style: const TextStyle(
+                                                    color: AppTheme.amber,
+                                                    fontWeight: FontWeight.w700,
+                                                    fontSize: 13)),
+                                            const SizedBox(height: 4),
+                                            Text(p.rationale,
+                                                style: TextStyle(
+                                                    color: Colors.white.withValues(alpha: 0.7),
+                                                    fontSize: 12,
+                                                    height: 1.3)),
+                                            const SizedBox(height: 4),
+                                            Text(p.preview,
+                                                style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 12,
+                                                    fontWeight: FontWeight.w500)),
+                                            const SizedBox(height: 8),
+                                            Row(
+                                              children: [
+                                                FilledButton(
+                                                  onPressed: _busy
+                                                      ? null
+                                                      : () => _approve(i, p),
+                                                  child: const Text('Approve'),
+                                                ),
+                                                const SizedBox(width: 8),
+                                                TextButton(
+                                                  onPressed: _busy
+                                                      ? null
+                                                      : () => _dismissProposal(i),
+                                                  child: const Text('Dismiss'),
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                              ],
                             ],
                           ),
                         ),
@@ -308,7 +364,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
                       enabled: !_busy,
                       style: const TextStyle(color: Colors.white),
                       decoration: const InputDecoration(
-                        hintText: 'Ask your on-device model…',
+                        hintText: 'Try: complete “laundry” · add task buy milk',
                       ),
                       onSubmitted: (_) => _send(),
                     ),
@@ -334,9 +390,13 @@ class _Msg {
     required this.text,
     this.streaming = false,
     this.source,
+    this.proposals = const [],
+    this.resolved = false,
   });
   final String role;
   final String text;
   final bool streaming;
   final String? source;
+  final List<OrdinActionProposal> proposals;
+  final bool resolved;
 }
