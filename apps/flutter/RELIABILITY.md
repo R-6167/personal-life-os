@@ -22,19 +22,37 @@ Do **not** insert into `activity_events` outside the same transaction as the sta
 
 | Path | Pattern |
 |------|---------|
-| Task create / complete / status | `txn` or `AtomicWrite` |
+| Task create / reopen / delete | `AtomicWrite.run` |
+| Task complete (+ optional spawn) | `_db.txn` multi-event |
 | Work session start / complete | single SQLite `transaction` |
-| Expense create | `AtomicWrite.run` |
-| Income create (+ optional balance credit) | `AtomicWrite.run` |
+| Expense / income create | `AtomicWrite.run` |
+| Account create / balance adjust | `AtomicWrite.run` |
+| Goal / project create & complete | `AtomicWrite.run` |
+| Note create / update / delete | `AtomicWrite.run` |
+| Milestone complete | `AtomicWrite.run` |
 | Bill create / payOccurrence | `_db.txn` (multi-table + multi-event) |
 | Note auto-link / task extract audit | `AtomicWrite.run` |
+| Smart reminder series | `_db.txn` |
 
-Work sessions: `start` / `complete` use a single SQLite `transaction` for session row + task stamp + activity event.
+## UI reload (scoped, not global)
+
+`HomeShell._reload` accepts `Set<ReloadDomain>`:
+
+- `tasks` / `life` / `finance` / `today`
+- Tab switch changes index only (no fetch)
+- `IndexedStack` keeps off-screen tabs alive
+- Cache invalidation is prefix-scoped via `QueryCache.invalidate(prefix)`
+
+## Schema repair (v23)
+
+- Hard-ensure `users` table + default row on open
+- Soft columns: `notes.archived_at`, goals/projects descriptions, etc.
+- If boot still shows `no such table: users`, clear app data once
 
 ## CI gates (must stay green)
 
-1. `flutter analyze --no-fatal-infos --no-fatal-warnings`
-2. `flutter test`
+1. `flutter test` (runs first)
+2. `flutter analyze --no-fatal-infos --no-fatal-warnings`
 3. (APK workflow) `flutter build apk --release`
 
 ## Smoke coverage (pure, no device)
