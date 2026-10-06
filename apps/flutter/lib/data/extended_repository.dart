@@ -108,6 +108,8 @@ class ExtendedRepository {
     );
   }
 
+  Future<void> deleteReminder(String id) => cancelReminder(id);
+
   Future<void> snoozeReminder(String id, {int minutes = 15}) async {
     final db = await _db.database;
     final now = AppDatabase.nowMs();
