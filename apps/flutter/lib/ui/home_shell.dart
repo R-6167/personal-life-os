@@ -36,6 +36,14 @@ import 'widgets/offline_badge.dart';
 import 'widgets/pay_bill_dialog.dart';
 import 'widgets/section_header.dart';
 
+/// What slice of shell state to refresh. Avoids "recalculate everything".
+enum ReloadDomain {
+  tasks,
+  life,
+  finance,
+  today,
+}
+
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
 
@@ -87,14 +95,28 @@ class _HomeShellState extends State<HomeShell> {
   Future<void> _boot() async {
     try {
       await AppDatabase.instance.database;
+      // Ensure owner exists before any repository hits FK tables.
+      await AppDatabase.instance.requireOwnerId();
       try {
         await NotificationService.instance.init();
       } catch (_) {}
-      await _reload(runMaintenance: true);
-      setState(() => _ready = true);
+      await _reload(
+        domains: {
+          ReloadDomain.tasks,
+          ReloadDomain.life,
+          ReloadDomain.finance,
+          ReloadDomain.today,
+        },
+        runMaintenance: true,
+      );
+      setState(() {
+        _error = null;
+        _ready = true;
+      });
       LocalAnalytics.instance.screenView('today');
     } catch (e, st) {
-      await ErrorLogService.instance.log(message: 'boot: $e', stack: st.toString(), level: 'BOOT');
+      await ErrorLogService.instance
+          .log(message: 'boot: $e', stack: st.toString(), level: 'BOOT');
       setState(() {
         _error = e.toString();
         _ready = true;
@@ -102,8 +124,28 @@ class _HomeShellState extends State<HomeShell> {
     }
   }
 
-  Future<void> _reload({bool runMaintenance = false}) async {
-    QueryCache.instance.invalidate();
+  /// Scoped reload — only fetch domains that changed.
+  ///
+  /// Pass null [domains] for a full refresh (pull-to-refresh / first boot).
+  Future<void> _reload({
+    Set<ReloadDomain>? domains,
+    bool runMaintenance = false,
+  }) async {
+    final all = domains == null || domains.isEmpty;
+    final wantTasks = all || domains!.contains(ReloadDomain.tasks);
+    final wantLife = all || domains!.contains(ReloadDomain.life);
+    final wantFinance = all || domains!.contains(ReloadDomain.finance);
+    final wantToday = all || domains!.contains(ReloadDomain.today);
+
+    // Scoped cache invalidation — not a full wipe on every keystroke-adjacent action.
+    if (all) {
+      QueryCache.instance.invalidate();
+    } else {
+      if (wantTasks) QueryCache.instance.invalidate('tasks');
+      if (wantLife) QueryCache.instance.invalidate('life');
+      if (wantFinance) QueryCache.instance.invalidate('finance');
+      if (wantToday) QueryCache.instance.invalidate('today');
+    }
 
     if (runMaintenance) {
       await softRun(() async {
@@ -112,55 +154,103 @@ class _HomeShellState extends State<HomeShell> {
           softRun(() => _routines.ensureAllTodayOccurrences(), label: 'routine.ensure'),
         ]);
         await Future.wait([
-          softRun(() async {
-            await _habits.markMissedBeforeToday();
-          }, label: 'habit.missed'),
-          softRun(() async {
-            await _routines.markMissedBeforeToday();
-          }, label: 'routine.missed'),
+          softRun(() => _habits.markMissedBeforeToday(), label: 'habit.missed'),
+          softRun(() => _routines.markMissedBeforeToday(), label: 'routine.missed'),
         ]);
       }, label: 'maintenance');
     }
 
-    final taskList =
-        await softFuture(_tasks.listOpen, fallback: <Task>[], label: 'tasks.open') ?? <Task>[];
-    final overdue =
-        await softFuture(_tasks.listOverdue, fallback: <Task>[], label: 'tasks.overdue') ?? <Task>[];
-    final habitList =
-        await softFuture(_habits.listActive, fallback: <Habit>[], label: 'habits') ?? <Habit>[];
-    final goalList =
-        await softFuture(_goals.listActive, fallback: <Goal>[], label: 'goals') ?? <Goal>[];
-    final noteList =
-        await softFuture(_notes.list, fallback: <Note>[], label: 'notes') ?? <Note>[];
-    final projectList =
-        await softFuture(_projects.listActive, fallback: <Project>[], label: 'projects') ?? <Project>[];
-    final expenseList =
-        await softFuture(_expenses.listRecent, fallback: <Expense>[], label: 'expenses') ?? <Expense>[];
-    final monthSpend =
-        await softFuture(_expenses.totalMinorThisMonth, fallback: 0, label: 'spend') ?? 0;
-    final billOcc = await softFuture(_bills.listOpenOccurrences,
-            fallback: <BillOccurrence>[], label: 'bills') ??
-        <BillOccurrence>[];
-    final routineList =
-        await softFuture(_routines.listActive, fallback: <Routine>[], label: 'routines') ??
-            <Routine>[];
-    final incomeList =
-        await softFuture(_income.listRecent, fallback: <Income>[], label: 'income') ?? <Income>[];
-    final eventsToday = await softFuture(_ext.listEventsToday,
-            fallback: <Map<String, Object?>>[], label: 'events') ??
-        <Map<String, Object?>>[];
-    final plan = await softFuture(() => DayPlanner().buildPlan(limit: 6),
-            fallback: <PlanItem>[], label: 'plan') ??
-        <PlanItem>[];
-    final scheduled = await softFuture(() => _tasks.listScheduledOnDay(DateTime.now()),
-            fallback: <Task>[], label: 'scheduled') ??
-        <Task>[];
-    final freeMin = await softFuture(
-          () => PlanningRepository(AppDatabase.instance).availableMinutes(day: DateTime.now()),
-          fallback: 0,
-          label: 'freeMin',
-        ) ??
-        0;
+    // Parallel fetch only the slices we need.
+    final futures = <Future<void>>[];
+
+    List<Task>? taskList;
+    List<Task>? overdue;
+    List<Task>? scheduled;
+    List<Habit>? habitList;
+    List<Goal>? goalList;
+    List<Note>? noteList;
+    List<Project>? projectList;
+    List<Expense>? expenseList;
+    int? monthSpend;
+    List<BillOccurrence>? billOcc;
+    List<Routine>? routineList;
+    List<Income>? incomeList;
+    List<Map<String, Object?>>? eventsToday;
+    List<PlanItem>? plan;
+    int? freeMin;
+
+    if (wantTasks || wantToday) {
+      futures.add(() async {
+        taskList = await softFuture(_tasks.listOpen, fallback: <Task>[], label: 'tasks.open') ??
+            <Task>[];
+        overdue =
+            await softFuture(_tasks.listOverdue, fallback: <Task>[], label: 'tasks.overdue') ??
+                <Task>[];
+      }());
+    }
+    if (wantToday) {
+      futures.add(() async {
+        scheduled = await softFuture(() => _tasks.listScheduledOnDay(DateTime.now()),
+                fallback: <Task>[], label: 'scheduled') ??
+            <Task>[];
+        plan = await softFuture(() => DayPlanner().buildPlan(limit: 6),
+                fallback: <PlanItem>[], label: 'plan') ??
+            <PlanItem>[];
+        freeMin = await softFuture(
+              () => PlanningRepository(AppDatabase.instance)
+                  .availableMinutes(day: DateTime.now()),
+              fallback: 0,
+              label: 'freeMin',
+            ) ??
+            0;
+        eventsToday = await softFuture(_ext.listEventsToday,
+                fallback: <Map<String, Object?>>[], label: 'events') ??
+            <Map<String, Object?>>[];
+      }());
+    }
+    if (wantLife || wantToday) {
+      futures.add(() async {
+        habitList =
+            await softFuture(_habits.listActive, fallback: <Habit>[], label: 'habits') ??
+                <Habit>[];
+        if (wantLife) {
+          goalList =
+              await softFuture(_goals.listActive, fallback: <Goal>[], label: 'goals') ??
+                  <Goal>[];
+          noteList =
+              await softFuture(_notes.list, fallback: <Note>[], label: 'notes') ?? <Note>[];
+          projectList =
+              await softFuture(_projects.listActive, fallback: <Project>[], label: 'projects') ??
+                  <Project>[];
+          routineList =
+              await softFuture(_routines.listActive, fallback: <Routine>[], label: 'routines') ??
+                  <Routine>[];
+        }
+      }());
+    }
+    if (wantFinance || wantToday) {
+      futures.add(() async {
+        billOcc = await softFuture(_bills.listOpenOccurrences,
+                fallback: <BillOccurrence>[], label: 'bills') ??
+            <BillOccurrence>[];
+        if (wantFinance) {
+          expenseList =
+              await softFuture(_expenses.listRecent, fallback: <Expense>[], label: 'expenses') ??
+                  <Expense>[];
+          monthSpend =
+              await softFuture(_expenses.totalMinorThisMonth, fallback: 0, label: 'spend') ?? 0;
+          incomeList =
+              await softFuture(_income.listRecent, fallback: <Income>[], label: 'income') ??
+                  <Income>[];
+        } else if (wantToday) {
+          // Today header shows month spend.
+          monthSpend =
+              await softFuture(_expenses.totalMinorThisMonth, fallback: 0, label: 'spend') ?? 0;
+        }
+      }());
+    }
+
+    await Future.wait(futures);
 
     if (!_notifsSynced) {
       await softRun(() async {
@@ -171,40 +261,55 @@ class _HomeShellState extends State<HomeShell> {
 
     if (!mounted) return;
     setState(() {
-      _taskList = taskList;
-      _overdue = overdue;
-      _habitList = habitList;
-      _goalList = goalList;
-      _noteList = noteList;
-      _projectList = projectList;
-      _expenseList = expenseList;
-      _monthSpendMinor = monthSpend;
-      _billOcc = billOcc;
-      _routineList = routineList;
-      _incomeList = incomeList;
-      _eventsToday = eventsToday;
-      _plan = plan;
-      _scheduledToday = scheduled;
-      _freeMinutes = freeMin;
+      if (taskList != null) _taskList = taskList!;
+      if (overdue != null) _overdue = overdue!;
+      if (scheduled != null) _scheduledToday = scheduled!;
+      if (habitList != null) _habitList = habitList!;
+      if (goalList != null) _goalList = goalList!;
+      if (noteList != null) _noteList = noteList!;
+      if (projectList != null) _projectList = projectList!;
+      if (expenseList != null) _expenseList = expenseList!;
+      if (monthSpend != null) _monthSpendMinor = monthSpend!;
+      if (billOcc != null) _billOcc = billOcc!;
+      if (routineList != null) _routineList = routineList!;
+      if (incomeList != null) _incomeList = incomeList!;
+      if (eventsToday != null) _eventsToday = eventsToday!;
+      if (plan != null) _plan = plan!;
+      if (freeMin != null) _freeMinutes = freeMin!;
     });
   }
+
+  Future<void> _reloadTasks() => _reload(domains: {ReloadDomain.tasks, ReloadDomain.today});
+  Future<void> _reloadLife() => _reload(domains: {ReloadDomain.life, ReloadDomain.today});
+  Future<void> _reloadFinance() =>
+      _reload(domains: {ReloadDomain.finance, ReloadDomain.today});
 
   Future<void> _openTask(Task t) async {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => TaskDetailScreen(taskId: t.id)),
     );
-    await _reload();
+    await _reloadTasks();
   }
 
   Future<void> _add() async {
     final ok = await showUniversalAdd(context);
     if (ok) {
       HapticFeedback.lightImpact();
-      await _reload();
+      // Unknown kind from universal add — full scoped set is still cheaper than
+      // old behaviour only if we pass all domains explicitly once.
+      await _reload(
+        domains: {
+          ReloadDomain.tasks,
+          ReloadDomain.life,
+          ReloadDomain.finance,
+          ReloadDomain.today,
+        },
+      );
     }
   }
 
   void _onTab(int i) {
+    // Tab switch = setState on index only. No data reload.
     setState(() => _tab = i);
     LocalAnalytics.instance.screenView(_titles[i].toLowerCase());
   }
@@ -225,7 +330,8 @@ class _HomeShellState extends State<HomeShell> {
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(_titles[_tab], style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+              Text(_titles[_tab],
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
               Text(
                 _tab == 0 ? _greeting : 'On-device · no account needed',
                 style: TextStyle(fontSize: 11, color: AppTheme.silver.withValues(alpha: 0.5)),
@@ -276,7 +382,16 @@ class _HomeShellState extends State<HomeShell> {
                             const SizedBox(height: 12),
                             Text(_error!, style: const TextStyle(color: Colors.redAccent)),
                             const SizedBox(height: 12),
-                            FilledButton(onPressed: _boot, child: const Text('Retry')),
+                            FilledButton(
+                              onPressed: () {
+                                setState(() {
+                                  _ready = false;
+                                  _error = null;
+                                });
+                                _boot();
+                              },
+                              child: const Text('Retry'),
+                            ),
                           ],
                         ),
                       ),
@@ -287,9 +402,18 @@ class _HomeShellState extends State<HomeShell> {
           selectedIndex: _tab,
           onDestinationSelected: _onTab,
           destinations: const [
-            NavigationDestination(icon: Icon(Icons.today_outlined), selectedIcon: Icon(Icons.today), label: 'Today'),
-            NavigationDestination(icon: Icon(Icons.check_box_outlined), selectedIcon: Icon(Icons.check_box), label: 'Tasks'),
-            NavigationDestination(icon: Icon(Icons.favorite_outline), selectedIcon: Icon(Icons.favorite), label: 'Life'),
+            NavigationDestination(
+                icon: Icon(Icons.today_outlined),
+                selectedIcon: Icon(Icons.today),
+                label: 'Today'),
+            NavigationDestination(
+                icon: Icon(Icons.check_box_outlined),
+                selectedIcon: Icon(Icons.check_box),
+                label: 'Tasks'),
+            NavigationDestination(
+                icon: Icon(Icons.favorite_outline),
+                selectedIcon: Icon(Icons.favorite),
+                label: 'Life'),
             NavigationDestination(
                 icon: Icon(Icons.account_balance_wallet_outlined),
                 selectedIcon: Icon(Icons.account_balance_wallet),
@@ -302,37 +426,35 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   Widget _body() {
-    switch (_tab) {
-      case 0:
-        return _today();
-      case 1:
-        return _tasksView();
-      case 2:
-        return LifeHub(
+    // IndexedStack keeps off-screen tabs alive so switching tabs does not
+    // rebuild GlassCards from scratch (scroll position + subtree preserved).
+    return IndexedStack(
+      index: _tab,
+      children: [
+        _today(),
+        _tasksView(),
+        LifeHub(
           goals: _goalList,
           habits: _habitList,
           notes: _noteList,
           projects: _projectList,
           routines: _routineList,
-          onChanged: _reload,
-        );
-      case 3:
-        return FinanceHub(
+          onChanged: _reloadLife,
+        ),
+        FinanceHub(
           expenses: _expenseList,
           income: _incomeList,
           billOcc: _billOcc,
           monthSpendMinor: _monthSpendMinor,
-          onChanged: _reload,
+          onChanged: _reloadFinance,
           onPayBill: (o) async {
             await promptAndPayBill(context, o);
-            await _reload();
+            await _reloadFinance();
           },
-        );
-      case 4:
-        return MoreHub(onChanged: _reload);
-      default:
-        return const SizedBox.shrink();
-    }
+        ),
+        MoreHub(onChanged: () => _reload(domains: {ReloadDomain.life, ReloadDomain.finance})),
+      ],
+    );
   }
 
   Widget _today() {
@@ -348,10 +470,12 @@ class _HomeShellState extends State<HomeShell> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(_greeting, style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.55), fontSize: 13)),
+                Text(_greeting,
+                    style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.55), fontSize: 13)),
                 const SizedBox(height: 4),
                 const Text('What needs attention',
-                    style: TextStyle(color: AppTheme.silver, fontSize: 20, fontWeight: FontWeight.w700)),
+                    style:
+                        TextStyle(color: AppTheme.silver, fontSize: 20, fontWeight: FontWeight.w700)),
                 const SizedBox(height: 4),
                 Text(
                   'Pull to refresh · ~${_freeMinutes ~/ 60}h free · ${Defaults.currency} $spend spent',
@@ -388,7 +512,9 @@ class _HomeShellState extends State<HomeShell> {
             ..._plan.map((p) => Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: GlassCard(
-                    child: Text(p.title, style: const TextStyle(color: AppTheme.silver, fontWeight: FontWeight.w600)),
+                    child: Text(p.title,
+                        style:
+                            const TextStyle(color: AppTheme.silver, fontWeight: FontWeight.w600)),
                   ),
                 )),
           ],
@@ -417,7 +543,7 @@ class _HomeShellState extends State<HomeShell> {
                         onPressed: () async {
                           await _habits.markDoneToday(h.id);
                           HapticFeedback.selectionClick();
-                          await _reload();
+                          await _reloadLife();
                         },
                       ),
                     ),
@@ -432,11 +558,12 @@ class _HomeShellState extends State<HomeShell> {
                   child: GlassCard(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                     child: ListTile(
-                      title: Text(o.billName ?? 'Bill', style: const TextStyle(color: AppTheme.silver)),
+                      title: Text(o.billName ?? 'Bill',
+                          style: const TextStyle(color: AppTheme.silver)),
                       trailing: FilledButton(
                         onPressed: () async {
                           final paid = await promptAndPayBill(context, o);
-                          if (paid) await _reload();
+                          if (paid) await _reloadFinance();
                         },
                         child: const Text('Pay'),
                       ),
@@ -452,7 +579,7 @@ class _HomeShellState extends State<HomeShell> {
                       Navigator.of(context)
                           .push(MaterialPageRoute(
                               builder: (_) => ProjectDetailScreen(projectId: p.id)))
-                          .then((_) => _reload());
+                          .then((_) => _reloadLife());
                     },
                     child: Text(p.title, style: const TextStyle(color: AppTheme.silver)),
                   ),
@@ -478,7 +605,7 @@ class _HomeShellState extends State<HomeShell> {
               TextButton(
                 onPressed: () async {
                   final ok = await showCreateForm(context, AddKind.task);
-                  if (ok) await _reload();
+                  if (ok) await _reloadTasks();
                 },
                 child: const Text('New task'),
               ),
@@ -517,7 +644,7 @@ class _HomeShellState extends State<HomeShell> {
               icon: const Icon(Icons.check_circle_outline, color: AppTheme.amber),
               onPressed: () async {
                 await _tasks.complete(t.id);
-                await _reload();
+                await _reloadTasks();
               },
             ),
           ),
