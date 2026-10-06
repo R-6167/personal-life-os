@@ -160,6 +160,7 @@ CREATE TABLE IF NOT EXISTS bills (
   id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, name TEXT NOT NULL,
   expected_amount_minor INTEGER, currency TEXT, next_due_at INTEGER,
   frequency TEXT, interval INTEGER, status TEXT,
+  default_account_id TEXT,
   created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
   FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
 );
@@ -294,9 +295,17 @@ CREATE TABLE IF NOT EXISTS work_sessions (
   id TEXT PRIMARY KEY,
   owner_id TEXT NOT NULL,
   task_id TEXT,
+  time_block_id TEXT,
+  status TEXT NOT NULL DEFAULT 'RUNNING',
+  planned_start INTEGER,
+  planned_end INTEGER,
+  planned_minutes INTEGER,
   started_at INTEGER NOT NULL,
   ended_at INTEGER,
-  status TEXT,
+  paused_at INTEGER,
+  accumulated_ms INTEGER NOT NULL DEFAULT 0,
+  interrupt_count INTEGER NOT NULL DEFAULT 0,
+  note TEXT,
   notes TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL

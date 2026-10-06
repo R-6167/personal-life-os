@@ -20,7 +20,7 @@ void main() {
         frequency: 'WEEKLY',
         interval: 1,
         dtStart: DateTime(2026, 1, 5), // Monday
-        weekDays: 'MO,WE,FR',
+        daysOfWeekCsv: 'MON,WED,FRI',
       );
       final gen = rule.generator();
       final afterMon = gen.nextAfter(DateTime(2026, 1, 5, 12));
