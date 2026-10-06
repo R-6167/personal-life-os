@@ -1,5 +1,6 @@
 import '../domain/enums.dart';
 import '../services/domain_recurrence.dart';
+import '../services/smart_reminder_service.dart';
 import 'database.dart';
 
 /// People, calendar, debt, savings, practical, shopping, search.
@@ -11,7 +12,7 @@ class ExtendedRepository {
     return (await _db.database).query('people', orderBy: 'name ASC');
   }
 
-  Future<void> addPerson(String name, {String? phone, String? email}) async {
+  Future<void> addPerson(String name, {String? phone}) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
     await (await _db.database).insert('people', {
@@ -19,7 +20,34 @@ class ExtendedRepository {
       'owner_id': ownerId,
       'name': name,
       'phone': phone,
-      'email': email,
+      'created_at': now,
+      'updated_at': now,
+    });
+  }
+
+  Future<List<Map<String, Object?>>> listEventsToday() async {
+    final start = AppDatabase.startOfTodayMs();
+    final end = AppDatabase.endOfTodayMs();
+    return (await _db.database).query(
+      'calendar_events',
+      where: 'start_at >= ? AND start_at <= ?',
+      whereArgs: [start, end],
+      orderBy: 'start_at ASC',
+    );
+  }
+
+  Future<void> addEvent({required String title, int? startAt, int? endAt}) async {
+    final ownerId = await _db.requireOwnerId();
+    final now = AppDatabase.nowMs();
+    final start = startAt ?? now + const Duration(hours: 2).inMilliseconds;
+    final end = endAt ?? start + const Duration(hours: 1).inMilliseconds;
+    await (await _db.database).insert('calendar_events', {
+      'id': AppDatabase.newId(),
+      'owner_id': ownerId,
+      'title': title,
+      'start_at': start,
+      'end_at': end,
+      'status': 'CONFIRMED',
       'created_at': now,
       'updated_at': now,
     });
@@ -50,48 +78,21 @@ class ExtendedRepository {
   }
 
   Future<void> completeReminder(String id) async {
-    final now = AppDatabase.nowMs();
     await (await _db.database).update(
       'reminders',
-      {'status': 'DONE', 'updated_at': now},
+      {'status': 'DONE', 'updated_at': AppDatabase.nowMs()},
       where: 'id = ?',
       whereArgs: [id],
     );
   }
 
   Future<void> cancelReminder(String id) async {
-    final now = AppDatabase.nowMs();
     await (await _db.database).update(
       'reminders',
-      {'status': 'CANCELLED', 'updated_at': now},
+      {'status': 'CANCELLED', 'updated_at': AppDatabase.nowMs()},
       where: 'id = ?',
       whereArgs: [id],
     );
-  }
-
-  Future<List<Map<String, Object?>>> listEvents() async {
-    return (await _db.database).query(
-      'calendar_events',
-      where: "status IS NULL OR status != 'CANCELLED'",
-      orderBy: 'start_at ASC',
-    );
-  }
-
-  Future<void> addEvent({required String title, int? startAt, int? endAt}) async {
-    final ownerId = await _db.requireOwnerId();
-    final now = AppDatabase.nowMs();
-    final start = startAt ?? now + const Duration(hours: 2).inMilliseconds;
-    final end = endAt ?? start + const Duration(hours: 1).inMilliseconds;
-    await (await _db.database).insert('calendar_events', {
-      'id': AppDatabase.newId(),
-      'owner_id': ownerId,
-      'title': title,
-      'start_at': start,
-      'end_at': end,
-      'status': 'CONFIRMED',
-      'created_at': now,
-      'updated_at': now,
-    });
   }
 
   Future<List<Map<String, Object?>>> listSubscriptions({bool includePaused = true}) async {
@@ -227,6 +228,47 @@ class ExtendedRepository {
     });
   }
 
+  Future<void> payDebt(String debtId, double amountMajor, {String? accountId}) async {
+    final now = AppDatabase.nowMs();
+    final minor = (amountMajor * 100).round();
+    final db = await _db.database;
+    final rows = await db.query('debts', where: 'id = ?', whereArgs: [debtId], limit: 1);
+    if (rows.isEmpty) return;
+    final prev = (rows.first['remaining_amount_minor'] as int?) ?? 0;
+    final next = (prev - minor).clamp(0, 1 << 30);
+    final ownerId = await _db.requireOwnerId();
+    await _db.txn((txn) async {
+      await txn.update(
+        'debts',
+        {
+          'remaining_amount_minor': next,
+          'status': next == 0 ? 'PAID' : 'OPEN',
+          'updated_at': now,
+        },
+        where: 'id = ?',
+        whereArgs: [debtId],
+      );
+      await txn.insert('debt_payments', {
+        'id': AppDatabase.newId(),
+        'debt_id': debtId,
+        'amount_minor': minor,
+        'occurred_at': now,
+        'account_id': accountId,
+        'created_at': now,
+      });
+      await txn.insert('activity_events', {
+        'id': AppDatabase.newId(),
+        'owner_id': ownerId,
+        'event_type': 'DEBT_PAYMENT_RECORDED',
+        'entity_type': 'DEBT',
+        'entity_id': debtId,
+        'occurred_at': now,
+        'recorded_at': now,
+        'source': EventSource.user,
+      });
+    });
+  }
+
   Future<List<Map<String, Object?>>> listSavings() async {
     return (await _db.database).query(
       'savings_goals',
@@ -248,6 +290,48 @@ class ExtendedRepository {
       'status': 'ACTIVE',
       'created_at': now,
       'updated_at': now,
+    });
+  }
+
+  Future<void> contributeSavings(String goalId, double amountMajor, {String? accountId}) async {
+    final now = AppDatabase.nowMs();
+    final minor = (amountMajor * 100).round();
+    final db = await _db.database;
+    final rows = await db.query('savings_goals', where: 'id = ?', whereArgs: [goalId], limit: 1);
+    if (rows.isEmpty) return;
+    final current = ((rows.first['current_amount_minor'] as int?) ?? 0) + minor;
+    final target = (rows.first['target_amount_minor'] as int?) ?? 0;
+    final reached = target > 0 && current >= target;
+    final ownerId = await _db.requireOwnerId();
+    await _db.txn((txn) async {
+      await txn.update(
+        'savings_goals',
+        {
+          'current_amount_minor': current,
+          if (reached) 'status': 'REACHED',
+          'updated_at': now,
+        },
+        where: 'id = ?',
+        whereArgs: [goalId],
+      );
+      await txn.insert('savings_contributions', {
+        'id': AppDatabase.newId(),
+        'goal_id': goalId,
+        'amount_minor': minor,
+        'occurred_at': now,
+        'account_id': accountId,
+        'created_at': now,
+      });
+      await txn.insert('activity_events', {
+        'id': AppDatabase.newId(),
+        'owner_id': ownerId,
+        'event_type': reached ? 'SAVINGS_GOAL_REACHED' : 'SAVINGS_CONTRIBUTION_RECORDED',
+        'entity_type': 'SAVINGS_GOAL',
+        'entity_id': goalId,
+        'occurred_at': now,
+        'recorded_at': now,
+        'source': EventSource.user,
+      });
     });
   }
 
