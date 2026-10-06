@@ -14,7 +14,7 @@ class AppDatabase {
   Database? _db;
   static const _uuid = Uuid();
 
-  static const schemaVersion = 20;
+  static const schemaVersion = 21;
 
   Future<Database> get database async {
     if (_db != null) return _db!;
@@ -69,6 +69,7 @@ class AppDatabase {
         await _migrateToV18(db);
         await _migrateToV19(db);
         await _migrateToV20(db);
+        await _migrateToV21(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 6) await _migrateToV6(db);
@@ -86,6 +87,7 @@ class AppDatabase {
         if (oldVersion < 18) await _migrateToV18(db);
         if (oldVersion < 19) await _migrateToV19(db);
         if (oldVersion < 20) await _migrateToV20(db);
+        if (oldVersion < 21) await _migrateToV21(db);
       },
     );
   }
@@ -93,7 +95,6 @@ class AppDatabase {
   Future<void> _migrateToV6(Database db) async {
     await _applySchema(db);
     await _applyV6Constraints(db);
-    await _seedDefaultUser(db);
   }
 
   Future<void> _migrateToV7(Database db) async {
@@ -106,7 +107,6 @@ class AppDatabase {
 
   Future<void> _migrateToV9(Database db) async {
     await _applySchema(db);
-    await _tryAlter(db, 'ALTER TABLE budgets ADD COLUMN category_id TEXT');
   }
 
   Future<void> _migrateToV10(Database db) async {
@@ -119,69 +119,35 @@ class AppDatabase {
 
   Future<void> _migrateToV12(Database db) async {
     await _applySchema(db);
-    await _tryAlter(db, 'ALTER TABLE tasks ADD COLUMN description TEXT');
-    await _tryAlter(db, 'ALTER TABLE tasks ADD COLUMN milestone_id TEXT');
-    await _tryAlter(db, 'ALTER TABLE tasks ADD COLUMN scheduled_start INTEGER');
-    await _tryAlter(db, 'ALTER TABLE tasks ADD COLUMN scheduled_end INTEGER');
-    await _tryAlter(db, 'ALTER TABLE tasks ADD COLUMN estimated_minutes INTEGER');
-    await _tryAlter(db, 'ALTER TABLE tasks ADD COLUMN completed_at INTEGER');
-    await _tryAlter(db, 'ALTER TABLE tasks ADD COLUMN archived_at INTEGER');
-    await _tryAlter(db, 'ALTER TABLE habits ADD COLUMN description TEXT');
-    await _tryAlter(db, 'ALTER TABLE habits ADD COLUMN archived_at INTEGER');
-    await _tryAlter(db, 'ALTER TABLE routines ADD COLUMN archived_at INTEGER');
-    await _tryAlter(db, 'ALTER TABLE expenses ADD COLUMN account_id TEXT');
-    await _tryAlter(db, 'ALTER TABLE expenses ADD COLUMN category_id TEXT');
-    await _tryAlter(db, 'ALTER TABLE income ADD COLUMN account_id TEXT');
-    await _tryAlter(db, 'ALTER TABLE income ADD COLUMN category_id TEXT');
-    await _tryAlter(db, 'ALTER TABLE bills ADD COLUMN default_account_id TEXT');
-    await _tryAlter(db, 'ALTER TABLE bills ADD COLUMN archived_at INTEGER');
-    await _tryAlter(db, 'ALTER TABLE bill_occurrences ADD COLUMN paid_at INTEGER');
-    await _tryAlter(db, 'ALTER TABLE bill_occurrences ADD COLUMN actual_amount_minor INTEGER');
-    await _tryAlter(db, 'ALTER TABLE bill_occurrences ADD COLUMN expense_id TEXT');
-    await _tryAlter(db, 'ALTER TABLE notes ADD COLUMN archived_at INTEGER');
-    await _tryAlter(db, 'ALTER TABLE people ADD COLUMN phone TEXT');
-    await _tryAlter(db, 'ALTER TABLE people ADD COLUMN archived_at INTEGER');
-    await _tryAlter(db, 'ALTER TABLE budgets ADD COLUMN category_id TEXT');
-    await _tryAlter(db, 'ALTER TABLE reminders ADD COLUMN message TEXT');
-    await _tryAlter(db, 'ALTER TABLE reminders ADD COLUMN source_type TEXT');
-    await _tryAlter(db, 'ALTER TABLE reminders ADD COLUMN source_id TEXT');
-    await _tryAlter(db, 'CREATE UNIQUE INDEX IF NOT EXISTS uq_habit_occ_day ON habit_occurrences(habit_id, scheduled_date)');
     await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)');
-    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_expenses_occurred ON expenses(occurred_at)');
+    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_at)');
+    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id)');
     await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_activity_occurred ON activity_events(occurred_at)');
-    try {
-      await db.execute("UPDATE debts SET status = 'OPEN' WHERE status = 'ACTIVE'");
-    } catch (_) {}
   }
 
   Future<void> _migrateToV13(Database db) async {
     await _applySchema(db);
-    await _tryAlter(db, 'ALTER TABLE tasks ADD COLUMN parent_task_id TEXT');
-    await _tryAlter(db, 'ALTER TABLE projects ADD COLUMN target_date INTEGER');
-    await _tryAlter(db, 'ALTER TABLE projects ADD COLUMN description TEXT');
-    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id)');
-    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id)');
   }
 
   Future<void> _migrateToV14(Database db) async {
     await _applySchema(db);
-    await _tryAlter(db, 'ALTER TABLE habits ADD COLUMN goal_id TEXT');
-    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_habits_goal ON habits(goal_id)');
   }
 
   Future<void> _migrateToV15(Database db) async {
     await _applySchema(db);
-    await db.execute(
-      'CREATE TABLE IF NOT EXISTS work_sessions ('
-      'id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, task_id TEXT, time_block_id TEXT, '
-      "status TEXT NOT NULL DEFAULT 'RUNNING', planned_start INTEGER, planned_end INTEGER, "
-      'planned_minutes INTEGER, started_at INTEGER NOT NULL, ended_at INTEGER, paused_at INTEGER, '
-      'accumulated_ms INTEGER NOT NULL DEFAULT 0, interrupt_count INTEGER NOT NULL DEFAULT 0, '
-      'note TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)',
-    );
-    await _tryAlter(db, 'ALTER TABLE time_blocks ADD COLUMN status TEXT');
-    await _tryAlter(db, 'ALTER TABLE time_blocks ADD COLUMN actual_minutes INTEGER');
-    await _tryAlter(db, 'ALTER TABLE time_blocks ADD COLUMN type TEXT');
+    await _tryAlter(db, '''
+      CREATE TABLE IF NOT EXISTS work_sessions (
+        id TEXT PRIMARY KEY,
+        owner_id TEXT NOT NULL,
+        task_id TEXT,
+        started_at INTEGER NOT NULL,
+        ended_at INTEGER,
+        status TEXT,
+        notes TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    ''');
     await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_work_sessions_task ON work_sessions(task_id)');
     await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_work_sessions_status ON work_sessions(status)');
   }
@@ -191,24 +157,14 @@ class AppDatabase {
     await _tryAlter(db, 'ALTER TABLE subscriptions ADD COLUMN frequency TEXT');
     await _tryAlter(db, 'ALTER TABLE subscriptions ADD COLUMN next_renewal_at INTEGER');
     await _tryAlter(db, 'ALTER TABLE subscriptions ADD COLUMN default_account_id TEXT');
-    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_subs_renewal ON subscriptions(next_renewal_at)');
   }
 
   Future<void> _migrateToV17(Database db) async {
     await _applySchema(db);
-    await _tryAlter(db, 'ALTER TABLE practical_items ADD COLUMN due_at INTEGER');
-    await _tryAlter(db, 'ALTER TABLE practical_items ADD COLUMN priority INTEGER');
-    await _tryAlter(db, 'ALTER TABLE documents ADD COLUMN kind TEXT');
-    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_practical_due ON practical_items(due_at)');
-    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_documents_expires ON documents(expires_at)');
   }
 
   Future<void> _migrateToV18(Database db) async {
     await _applySchema(db);
-    await _tryAlter(db, 'ALTER TABLE notes ADD COLUMN title TEXT');
-    await _tryAlter(db, 'ALTER TABLE notes ADD COLUMN archived_at INTEGER');
-    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_entity_links_from ON entity_links(from_type, from_id)');
-    await _tryAlter(db, 'CREATE INDEX IF NOT EXISTS idx_entity_links_to ON entity_links(to_type, to_id)');
   }
 
   Future<void> _migrateToV19(Database db) async {
@@ -250,6 +206,28 @@ class AppDatabase {
     await _tryAlter(db, 'ALTER TABLE habit_schedules ADD COLUMN interval INTEGER');
     await _tryAlter(db, 'ALTER TABLE routine_schedules ADD COLUMN interval INTEGER');
     await _tryAlter(db, 'ALTER TABLE bills ADD COLUMN interval INTEGER');
+  }
+
+  /// Activity history: durable indexes for life timeline + entity trails.
+  Future<void> _migrateToV21(Database db) async {
+    await _applySchema(db);
+    await _tryAlter(
+      db,
+      'CREATE INDEX IF NOT EXISTS idx_activity_owner_occurred ON activity_events(owner_id, occurred_at DESC)',
+    );
+    await _tryAlter(
+      db,
+      'CREATE INDEX IF NOT EXISTS idx_activity_occurred ON activity_events(occurred_at DESC)',
+    );
+    await _tryAlter(
+      db,
+      'CREATE INDEX IF NOT EXISTS idx_activity_entity ON activity_events(entity_type, entity_id, occurred_at DESC)',
+    );
+    await _tryAlter(
+      db,
+      'CREATE INDEX IF NOT EXISTS idx_activity_event_type ON activity_events(event_type, occurred_at DESC)',
+    );
+    await _tryAlter(db, 'ALTER TABLE activity_events ADD COLUMN summary TEXT');
   }
 
   Future<void> _tryAlter(Database db, String sql) async {
@@ -301,13 +279,9 @@ class AppDatabase {
     final existing = await db.query('users', limit: 1);
     if (existing.isNotEmpty) return;
     final now = nowMs();
-    final id = newId();
     await db.insert('users', {
-      'id': id,
+      'id': newId(),
       'display_name': 'Me',
-      'name': 'Me',
-      'currency': Defaults.currency,
-      'week_start_day': Defaults.weekStartDay,
       'created_at': now,
       'updated_at': now,
     });
@@ -324,12 +298,6 @@ class AppDatabase {
     return rows.first['id'] as String;
   }
 
-  Future<T> txn<T>(Future<T> Function(Transaction txn) action) async {
-    final db = await database;
-    return db.transaction(action);
-  }
-
-  static String newId() => _uuid.v4();
   static int nowMs() => DateTime.now().millisecondsSinceEpoch;
 
   static int startOfTodayMs() {
@@ -337,8 +305,8 @@ class AppDatabase {
     return DateTime(n.year, n.month, n.day).millisecondsSinceEpoch;
   }
 
-  static int endOfTodayMs() {
-    final n = DateTime.now();
-    return DateTime(n.year, n.month, n.day, 23, 59, 59, 999).millisecondsSinceEpoch;
-  }
+  static int endOfTodayMs() =>
+      startOfTodayMs() + const Duration(days: 1).inMilliseconds - 1;
+
+  static String newId() => _uuid.v4();
 }
