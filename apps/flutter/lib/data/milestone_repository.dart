@@ -1,5 +1,6 @@
 import '../domain/enums.dart';
 import '../domain/models.dart';
+import 'atomic_write.dart';
 import 'database.dart';
 
 class MilestoneRepository {
@@ -41,25 +42,25 @@ class MilestoneRepository {
   }
 
   Future<void> complete(String id) async {
-    final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
-    await _db.txn((txn) async {
-      await txn.update(
-        'milestones',
-        {'status': MilestoneStatus.completed, 'completed_at': now, 'updated_at': now},
-        where: 'id = ?',
-        whereArgs: [id],
-      );
-      await txn.insert('activity_events', {
-        'id': AppDatabase.newId(),
-        'owner_id': ownerId,
-        'event_type': 'MILESTONE_COMPLETED',
-        'entity_type': 'MILESTONE',
-        'entity_id': id,
-        'occurred_at': now,
-        'recorded_at': now,
-        'source': EventSource.user,
-      });
-    });
+    await AtomicWrite.run(
+      db: _db,
+      state: (txn) async {
+        await txn.update(
+          'milestones',
+          {
+            'status': MilestoneStatus.completed,
+            'completed_at': now,
+            'updated_at': now,
+          },
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+      },
+      eventType: 'MILESTONE_COMPLETED',
+      entityType: 'MILESTONE',
+      entityId: id,
+      occurredAt: now,
+    );
   }
 }
