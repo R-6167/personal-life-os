@@ -54,6 +54,40 @@ class DaySlot {
   }
 }
 
+/// Merge overlapping / adjacent locked day slots so gap math is not double-busy.
+List<DaySlot> mergeOverlappingDaySlots(List<DaySlot> slots) {
+  if (slots.isEmpty) return const [];
+  final sorted = [
+    for (final s in slots)
+      if (s.end.isAfter(s.start)) s,
+  ]..sort((a, b) => a.start.compareTo(b.start));
+  if (sorted.isEmpty) return const [];
+  final out = <DaySlot>[];
+  var cur = sorted.first;
+  for (var i = 1; i < sorted.length; i++) {
+    final n = sorted[i];
+    if (!n.start.isAfter(cur.end)) {
+      final end = n.end.isAfter(cur.end) ? n.end : cur.end;
+      final preferCur = cur.minutes >= n.minutes;
+      cur = DaySlot(
+        start: cur.start,
+        end: end,
+        title: preferCur ? cur.title : n.title,
+        kind: preferCur ? cur.kind : n.kind,
+        entityId: preferCur ? cur.entityId : n.entityId,
+        reason: preferCur ? cur.reason : n.reason,
+        locked: cur.locked || n.locked,
+        priority: cur.priority > n.priority ? cur.priority : n.priority,
+      );
+    } else {
+      out.add(cur);
+      cur = n;
+    }
+  }
+  out.add(cur);
+  return out;
+}
+
 class FlexibleCandidate {
   final String id;
   final String title;
@@ -134,7 +168,8 @@ class BuildMyDayEngine {
       if (m >= 60) workStart = workStart.add(const Duration(hours: 1));
     }
 
-    final locked = await _collectLocked(d, dayStart, dayEnd);
+    final lockedRaw = await _collectLocked(d, dayStart, dayEnd);
+    var locked = mergeOverlappingDaySlots(lockedRaw);
     final candidates = await _collectFlexible(d, locked, maxFlexible);
 
     if (includeLunchBreak) {
@@ -155,7 +190,7 @@ class BuildMyDayEngine {
       }
     }
 
-    locked.sort((a, b) => a.start.compareTo(b.start));
+    locked = mergeOverlappingDaySlots(locked);
     final gaps = _freeGaps(workStart, dayEnd, locked);
 
     final placed = <DaySlot>[...locked];
@@ -165,6 +200,17 @@ class BuildMyDayEngine {
 
     for (final c in candidates) {
       if (usedIds.contains(c.id)) continue;
+      if (c.durationMin < 10) {
+        unplaced.add(FlexibleCandidate(
+          id: c.id,
+          title: c.title,
+          kind: c.kind,
+          durationMin: c.durationMin,
+          score: c.score,
+          reason: 'Duration too short to schedule',
+        ));
+        continue;
+      }
       if (blockedReasons.containsKey(c.id)) {
         final blockers = blockedReasons[c.id]!;
         final label = blockers.take(2).join(', ');
@@ -208,7 +254,8 @@ class BuildMyDayEngine {
         priority: c.score,
       ));
       usedIds.add(c.id);
-      final bufferedEnd = fit.end.add(const Duration(minutes: 5));
+      final pad = c.score >= 90 ? 10 : (c.score >= 70 ? 7 : 5);
+      final bufferedEnd = fit.end.add(Duration(minutes: pad));
       _consumeGap(gaps, fit.start, bufferedEnd.isAfter(dayEnd) ? dayEnd : bufferedEnd);
     }
 
@@ -259,7 +306,6 @@ class BuildMyDayEngine {
       if (s.kind == DaySlotKind.task && s.entityId != null) {
         if (blocked.contains(s.entityId)) continue;
         final mins = s.minutes.clamp(15, 180);
-        // Ignore this task's own prior schedule so reschedule is not self-blocked.
         if (await _plan.conflictsWithLocked(
           start: s.start,
           durationMinutes: mins,
@@ -381,7 +427,7 @@ class BuildMyDayEngine {
       ));
     }
 
-    return out;
+    return mergeOverlappingDaySlots(out);
   }
 
   Future<List<FlexibleCandidate>> _collectFlexible(
@@ -412,17 +458,15 @@ class BuildMyDayEngine {
       if (candidates.any((c) => c.id == t.id)) return;
       if (t.scheduledStart != null) return;
       final dur = (t.estimatedMinutes ?? _defaultTaskMinutes(t)).clamp(15, 180);
-      // Priority weight + project/goal linkage.
       var score = base + t.priority * 8;
       if (t.projectId != null) score += 10;
       if (t.goalId != null) score += 7;
       score += dependentsBoost[t.id] ?? 0;
-      // Deadline urgency curve (tighter near due, deeper for overdue).
       if (t.dueAt != null) {
         final hours =
             (t.dueAt! - DateTime.now().millisecondsSinceEpoch) / 3600000.0;
         if (hours < -24) {
-          score += 32; // deeply overdue
+          score += 32;
         } else if (hours < 0) {
           score += 26;
         } else if (hours < 2) {
@@ -437,7 +481,6 @@ class BuildMyDayEngine {
           score += 4;
         }
       }
-      // Duration realism: long blocks harder to place; short pack better.
       if (dur >= 120) {
         score -= 8;
       } else if (dur >= 90) {
@@ -556,7 +599,6 @@ class BuildMyDayEngine {
   }
 
   int _preferredHour(FlexibleCandidate c) {
-    // Energy-aware defaults: deep/high-score work mornings; light/afternoon later.
     if (c.kind == DaySlotKind.habit) return 7;
     if (c.kind == DaySlotKind.routine) {
       final n = c.title.toLowerCase();
@@ -564,7 +606,7 @@ class BuildMyDayEngine {
       if (n.contains('morning')) return 7;
       return 8;
     }
-    if (c.durationMin >= 90) return 9; // deep work early
+    if (c.durationMin >= 90) return 9;
     if (c.score >= 90) return 9;
     if (c.score >= 70) return 10;
     if (c.score >= 50) return 11;
@@ -573,14 +615,13 @@ class BuildMyDayEngine {
 
   _Gap? _placeInGaps(List<_Gap> gaps, int minutes, {int? preferredHour}) {
     _Gap? bestExact;
-    var bestScore = 1 << 30; // lower is better
+    var bestScore = 1 << 30;
     _Gap? bestFit;
     var bestFitAvail = 0;
 
     for (final g in gaps) {
       final avail = g.minutes;
       if (avail < minutes) {
-        // Partial fit: allow shrink for long tasks into ≥20m residual gaps.
         if (avail >= 20 && minutes > 20 && avail > bestFitAvail) {
           bestFitAvail = avail;
           bestFit = _Gap(
@@ -604,37 +645,36 @@ class BuildMyDayEngine {
         start = g.start;
         end = start.add(Duration(minutes: minutes));
       }
-      // Prefer preferred hour, then tight leftover (less fragmentation).
       final hourDist = preferredHour == null
           ? 0
           : (start.hour - preferredHour).abs() * 60 + start.minute;
       final leftover = avail - minutes;
-      final score = hourDist * 10 + leftover; // hour match dominates
+      final score = hourDist * 10 + leftover;
       if (score < bestScore) {
         bestScore = score;
         bestExact = _Gap(start, end);
       }
     }
 
-    if (bestExact != null) return bestExact;
-    if (minutes > 20 && bestFit != null) return bestFit;
-    return null;
+    return bestExact ?? bestFit;
   }
 
   void _consumeGap(List<_Gap> gaps, DateTime start, DateTime end) {
-    for (var i = 0; i < gaps.length; i++) {
-      final g = gaps[i];
-      if (!start.isBefore(g.end) || !end.isAfter(g.start)) continue;
-      final before = start.isAfter(g.start) ? _Gap(g.start, start) : null;
-      final after = end.isBefore(g.end) ? _Gap(end, g.end) : null;
-      gaps.removeAt(i);
-      if (after != null && after.minutes >= 10) {
-        gaps.insert(i, after);
+    final next = <_Gap>[];
+    for (final g in gaps) {
+      if (!end.isAfter(g.start) || !start.isBefore(g.end)) {
+        next.add(g);
+        continue;
       }
-      if (before != null && before.minutes >= 10) {
-        gaps.insert(i, before);
+      if (start.isAfter(g.start)) {
+        next.add(_Gap(g.start, start));
       }
-      return;
+      if (end.isBefore(g.end)) {
+        next.add(_Gap(end, g.end));
+      }
     }
+    gaps
+      ..clear()
+      ..addAll(next.where((g) => g.minutes >= 10));
   }
 }
