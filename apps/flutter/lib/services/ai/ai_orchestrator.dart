@@ -1,3 +1,4 @@
+import '../ordin_operator.dart';
 import '../personal_context_engine.dart';
 import 'ai_provider.dart';
 import 'ai_settings_store.dart';
@@ -35,6 +36,34 @@ class AiOrchestrator {
     final settings = await AiSettingsStore.instance.load();
     final situation = await _engine.build();
     final hist = List<({String role, String text})>.of(_history);
+
+    // Action loop: if the user is asking Ordin to *do* something, propose first.
+    final operator = OrdinOperator();
+    final proposals = await operator.propose(userMessage);
+    final actionable = proposals.where((p) => p.isActionable).toList();
+    if (actionable.isNotEmpty) {
+      for (final p in actionable) {
+        await operator.recordProposalShown(p);
+      }
+      final buf = StringBuffer();
+      buf.writeln('I can do this for you — review and approve:');
+      for (final p in actionable) {
+        buf.writeln('');
+        buf.writeln('• ${p.title}');
+        buf.writeln('  Why: ${p.rationale}');
+        buf.writeln('  Action: ${p.preview}');
+      }
+      buf.writeln('');
+      buf.writeln('Tap Approve to apply, or dismiss.');
+      final result = AiReply(
+        text: buf.toString().trim(),
+        source: AiSource.local,
+        usedSituation: true,
+        proposals: actionable,
+      );
+      _record(userMessage, result.text);
+      return result;
+    }
 
     AiReply result;
     switch (settings.mode) {
@@ -151,6 +180,16 @@ class AiOrchestrator {
   }
 
   Stream<String> replyStream(String userMessage) async* {
+    // Prefer structured action proposals over token streams.
+    final operator = OrdinOperator();
+    final proposals = await operator.propose(userMessage);
+    final actionable = proposals.where((p) => p.isActionable).toList();
+    if (actionable.isNotEmpty) {
+      final result = await reply(userMessage);
+      yield result.text;
+      return;
+    }
+
     final settings = await AiSettingsStore.instance.load();
     final situation = await _engine.build();
     final hist = List<({String role, String text})>.of(_history);
