@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ordin/data/database.dart';
-import 'package:ordin/domain/enums.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -58,9 +57,6 @@ Future<AppDatabase> openTestDb() async {
       await d.insert('users', {
         'id': AppDatabase.newId(),
         'display_name': 'Me',
-        'name': 'Me',
-        'currency': Defaults.currency,
-        'week_start_day': Defaults.weekStartDay,
         'created_at': now,
         'updated_at': now,
       });
