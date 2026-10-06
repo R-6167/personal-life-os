@@ -22,6 +22,10 @@ String formatMoneyMajor(double major, {String? currency}) {
 }
 
 class MoneyText extends StatelessWidget {
+  /// Convenience for call sites that used MoneyText.formatMinor.
+  static String formatMinor(Object? minor, {String? currency}) =>
+      formatMoneyMinor(minor, currency: currency);
+
   const MoneyText(
     this.minor, {
     super.key,
