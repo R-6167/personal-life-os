@@ -31,7 +31,6 @@ class _DragPayload {
   });
 }
 
-/// Build My Day — timed schedule with manual drag-and-drop.
 class PlanningScreen extends StatefulWidget {
   const PlanningScreen({super.key});
 
@@ -41,22 +40,20 @@ class PlanningScreen extends StatefulWidget {
 
 class _PlanningScreenState extends State<PlanningScreen> {
   final _plan = PlanningRepository(AppDatabase.instance);
-  final _tasks = TaskRepository(AppDatabase.instance);
   final _engine = BuildMyDayEngine();
+  BuiltDay? _undoBuilt;
+  List<Task>? _undoUnscheduled;
+  String? _undoLabel;
+  final _tasks = TaskRepository(AppDatabase.instance);
+  final _dayPlanner = DayPlannerService();
 
   DateTime _day = DateTime.now();
+  BuiltDay? _built;
+  List<Task> _unscheduled = [];
+  List<PrioritizedItem> _ranked = [];
+  int _freeMin = 0;
   bool _loading = true;
   bool _building = false;
-  bool _applying = false;
-
-  BuiltDay? _built;
-  int _freeMin = 0;
-  List<PlanItem> _ranked = [];
-  List<Task> _unscheduled = [];
-  int? _hoverHour; // which drop hour is highlighted
-
-  static const _dayStartHour = 8;
-  static const _dayEndHour = 22;
 
   @override
   void initState() {
@@ -66,72 +63,64 @@ class _PlanningScreenState extends State<PlanningScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
+    final built = await _engine.build(day: _day);
     final free = await _plan.availableMinutes(day: _day);
     final open = await _tasks.listOpen();
-    final unscheduled =
-        open.where((t) => t.scheduledStart == null).take(12).toList();
-    final ranked = await DayPlanner().buildPlan(limit: 6);
-    final built = await _engine.build(day: _day);
+    final scheduledIds = built.timeline
+        .where((s) => s.kind == DaySlotKind.task && s.entityId != null)
+        .map((s) => s.entityId!)
+        .toSet();
+    final unscheduled = open.where((t) => !scheduledIds.contains(t.id)).toList();
+    final ranked = await _dayPlanner.rankForToday();
     if (!mounted) return;
     setState(() {
+      _built = built;
       _freeMin = free;
       _unscheduled = unscheduled;
       _ranked = ranked;
-      _built = built;
       _loading = false;
-      _hoverHour = null;
     });
   }
 
   Future<void> _rebuild() async {
     setState(() => _building = true);
     final built = await _engine.build(day: _day);
-    if (!mounted) return;
-    setState(() {
-      _built = built;
-      _building = false;
-    });
-    HapticFeedback.mediumImpact();
-  }
-
-  Future<void> _apply() async {
-    final built = _built;
-    if (built == null) return;
-    setState(() => _applying = true);
     final n = await _engine.apply(built);
+    await _load();
     if (!mounted) return;
-    setState(() => _applying = false);
+    setState(() => _building = false);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-          content: Text(
-              n == 0 ? 'Nothing new to apply' : 'Scheduled $n blocks onto your day')),
+        content: Text(
+          n == 0
+              ? 'No new sessions applied (day may already be full or blocked)'
+              : 'Applied $n timed session${n == 1 ? '' : 's'}',
+        ),
+      ),
     );
-    await _load();
   }
 
-  Future<void> _shiftDay(int delta) async {
-    setState(() => _day = _day.add(Duration(days: delta)));
-    await _load();
+  void _shiftDay(int delta) {
+    setState(() {
+      _day = _day.add(Duration(days: delta));
+    });
+    _load();
   }
 
-  DateTime _atHour(int hour, {int minute = 0}) =>
-      DateTime(_day.year, _day.month, _day.day, hour, minute);
-
-  /// Snap drop to :00 or :30 within the hour row.
   DateTime _snapDrop(int hour, Offset? local, double rowHeight) {
     var minute = 0;
     if (local != null && rowHeight > 0) {
       final frac = (local.dy / rowHeight).clamp(0.0, 0.99);
-      minute = frac < 0.5 ? 0 : 30;
+      minute = ((frac * 60) / 15).floor() * 15;
     }
-    return _atHour(hour, minute: minute);
+    return DateTime(_day.year, _day.month, _day.day, hour, minute);
   }
 
-    Future<void> _onDrop(_DragPayload payload, int hour, {Offset? local, double rowHeight = 56}) async {
+  Future<void> _onDrop(_DragPayload payload, int hour,
+      {Offset? local, double rowHeight = 56}) async {
     final start = _snapDrop(hour, local, rowHeight);
     final duration = payload.durationMin.clamp(15, 180);
 
-    // Warn when dropping onto a busy slot (calendar / block / other task).
     final conflict = await _plan.conflictsWithLocked(
       start: start,
       durationMinutes: duration,
@@ -144,69 +133,56 @@ class _PlanningScreenState extends State<PlanningScreen> {
         builder: (ctx) => AlertDialog(
           title: const Text('Slot overlap'),
           content: Text(
-            '${payload.title} overlaps something already on your day '
-            '(${start.hour.toString().padLeft(2, '0')}:'
-            '${start.minute.toString().padLeft(2, '0')}, ${duration}m).\n\n'
-            'Place it anyway?',
+            '${payload.title} overlaps something already on the calendar. Place anyway?',
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Place anyway'),
-            ),
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Place')),
           ],
         ),
       );
       if (ok != true) return;
     }
 
-    // Optimistic local reorder for built timeline
     _optimisticMove(payload, start, duration);
 
     try {
-      if (payload.fromUnscheduled || payload.kind == DaySlotKind.task) {
-        if (payload.fromUnscheduled) {
-          await _plan.dropTaskOntoDay(
-            taskId: payload.id,
-            start: start,
-            durationMinutes: duration,
-            title: payload.title,
-          );
-        } else {
-          await _plan.rescheduleTaskSession(
-            taskId: payload.id,
-            start: start,
-            durationMinutes: duration,
-          );
-        }
-      } else if (payload.kind == DaySlotKind.block ||
-          payload.kind == DaySlotKind.habit ||
-          payload.kind == DaySlotKind.routine) {
-        final blockId = payload.existing?.entityId;
-        if (payload.kind == DaySlotKind.block &&
-            blockId != null &&
-            payload.existing?.locked == true) {
+      if (payload.kind == DaySlotKind.block && payload.existing != null) {
+        final blockId = payload.existing!.entityId;
+        if (blockId != null) {
           await _plan.moveBlock(
             blockId: blockId,
             start: start,
             durationMinutes: duration,
           );
-        } else {
-          await _plan.addFocusBlock(
+        }
+      } else if (payload.kind == DaySlotKind.task) {
+        if (payload.existing != null || !payload.fromUnscheduled) {
+          await _plan.rescheduleTaskSession(
+            taskId: payload.id,
             start: start,
             durationMinutes: duration,
-            title: payload.kind == DaySlotKind.habit
-                ? 'Habit: ${payload.title}'
-                : payload.kind == DaySlotKind.routine
-                    ? 'Routine: ${payload.title}'
-                    : payload.title,
+          );
+        } else {
+          await _plan.scheduleTaskSession(
+            taskId: payload.id,
+            start: start,
+            durationMinutes: duration,
+            title: payload.title,
           );
         }
+      } else {
+        await _plan.addFocusBlock(
+          start: start,
+          durationMinutes: duration,
+          title: payload.kind == DaySlotKind.habit
+              ? 'Habit: ${payload.title}'
+              : payload.kind == DaySlotKind.routine
+                  ? 'Routine: ${payload.title}'
+                  : payload.title,
+        );
       }
+      _offerUndo(payload.title);
       HapticFeedback.selectionClick();
     } catch (e) {
       if (mounted) {
@@ -218,9 +194,48 @@ class _PlanningScreenState extends State<PlanningScreen> {
     await _load();
   }
 
+  void _offerUndo(String title) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Scheduled: $title'),
+        action: _undoBuilt == null
+            ? null
+            : SnackBarAction(
+                label: 'Undo',
+                onPressed: _undoLastDrop,
+              ),
+        duration: const Duration(seconds: 5),
+      ),
+    );
+  }
+
+  Future<void> _undoLastDrop() async {
+    final snap = _undoBuilt;
+    final unsched = _undoUnscheduled;
+    if (snap == null) return;
+    setState(() {
+      _built = snap;
+      if (unsched != null) _unscheduled = unsched;
+      _undoBuilt = null;
+      _undoUnscheduled = null;
+      _undoLabel = null;
+    });
+    await _load();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Reloaded day — re-run Build My Day if needed')),
+      );
+    }
+  }
+
   void _optimisticMove(_DragPayload payload, DateTime start, int duration) {
     final built = _built;
     if (built == null) return;
+    _undoBuilt = built;
+    _undoUnscheduled = List<Task>.from(_unscheduled);
+    _undoLabel = payload.title;
     final end = start.add(Duration(minutes: duration));
     final slots = List<DaySlot>.from(built.slots);
     slots.removeWhere((s) => s.entityId == payload.id && s.kind == payload.kind);
@@ -279,41 +294,30 @@ class _PlanningScreenState extends State<PlanningScreen> {
       case DaySlotKind.habit:
         return const Color(0xFF7CB8FF);
       case DaySlotKind.routine:
-        return const Color(0xFFB8A0FF);
-      case DaySlotKind.breakSlot:
-        return AppTheme.silverMuted;
+        return const Color(0xFF9B8CFF);
       case DaySlotKind.block:
-        return AppTheme.amber;
+        return AppTheme.silverMuted;
+      case DaySlotKind.breakSlot:
+        return AppTheme.wood;
       case DaySlotKind.free:
         return AppTheme.silverMuted;
     }
   }
 
-  bool _canDrag(DaySlot s) {
-    // Calendar events stay fixed; everything else can be moved.
-    return s.kind != DaySlotKind.event;
-  }
-
   Widget _draggableSlot(DaySlot s) {
-    final payload = _DragPayload(
-      id: s.entityId ?? s.title,
-      title: s.title,
-      kind: s.kind,
-      durationMin: s.minutes.clamp(15, 180),
-      existing: s,
-    );
     final card = _slotCard(s);
-    if (!_canDrag(s)) return card;
-
+    if (s.locked && s.kind == DaySlotKind.event) return card;
     return LongPressDraggable<_DragPayload>(
-      data: payload,
-      hapticFeedbackOnStart: true,
+      data: _DragPayload(
+        id: s.entityId ?? s.title,
+        title: s.title,
+        kind: s.kind,
+        durationMin: s.minutes.clamp(15, 180),
+        existing: s,
+      ),
       feedback: Material(
         color: Colors.transparent,
-        child: SizedBox(
-          width: MediaQuery.of(context).size.width - 48,
-          child: Opacity(opacity: 0.92, child: card),
-        ),
+        child: SizedBox(width: 220, child: Opacity(opacity: 0.9, child: card)),
       ),
       childWhenDragging: Opacity(opacity: 0.35, child: card),
       child: card,
@@ -321,38 +325,13 @@ class _PlanningScreenState extends State<PlanningScreen> {
   }
 
   Widget _slotCard(DaySlot s) {
+    final color = _colorFor(s.kind);
     return GlassCard(
-      onTap: s.kind == DaySlotKind.task && s.entityId != null
-          ? () {
-              Navigator.of(context)
-                  .push(MaterialPageRoute(
-                      builder: (_) => TaskDetailScreen(taskId: s.entityId!)))
-                  .then((_) => _load());
-            }
-          : null,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 48,
-            child: Text(
-              '${s.start.hour.toString().padLeft(2, '0')}:${s.start.minute.toString().padLeft(2, '0')}',
-              style: TextStyle(
-                color: _colorFor(s.kind),
-                fontWeight: FontWeight.w700,
-                fontSize: 13,
-              ),
-            ),
-          ),
-          Container(
-            width: 3,
-            height: 40,
-            margin: const EdgeInsets.only(right: 10),
-            decoration: BoxDecoration(
-              color: _colorFor(s.kind),
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
+          Icon(_iconFor(s.kind), size: 18, color: color),
+          const SizedBox(width: 8),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -362,98 +341,73 @@ class _PlanningScreenState extends State<PlanningScreen> {
                   style: const TextStyle(
                     color: AppTheme.silver,
                     fontWeight: FontWeight.w600,
-                    fontSize: 14,
+                    fontSize: 13,
                   ),
                 ),
                 Text(
-                  [
-                    '${s.minutes}m',
-                    if (s.reason.isNotEmpty) s.reason,
-                    if (s.kind == DaySlotKind.event) 'fixed',
-                    if (_canDrag(s)) 'hold to drag',
-                  ].join(' · '),
+                  '${s.timeLabel}${s.reason.isNotEmpty ? ' · ${s.reason}' : ''}',
                   style: TextStyle(
-                    color: AppTheme.silver.withValues(alpha: 0.45),
+                    color: AppTheme.silver.withValues(alpha: 0.5),
                     fontSize: 11,
                   ),
                 ),
               ],
             ),
           ),
-          Icon(_iconFor(s.kind), color: _colorFor(s.kind), size: 18),
+          if (s.locked)
+            Icon(Icons.lock, size: 14, color: AppTheme.silver.withValues(alpha: 0.35)),
         ],
       ),
     );
   }
 
   Widget _hourRow(int hour, List<DaySlot> slotsHere) {
+    final label =
+        '${hour.toString().padLeft(2, '0')}:00';
     const rowHeight = 56.0;
-    final isHover = _hoverHour == hour;
-
     return DragTarget<_DragPayload>(
-      onWillAcceptWithDetails: (details) {
-        setState(() => _hoverHour = hour);
-        return details.data.kind != DaySlotKind.event;
-      },
-      onLeave: (_) {
-        if (_hoverHour == hour) setState(() => _hoverHour = null);
-      },
+      onWillAcceptWithDetails: (_) => true,
       onAcceptWithDetails: (details) {
-        final local = details.offset; // global — approximate mid-row
-        setState(() => _hoverHour = null);
         _onDrop(details.data, hour, local: Offset(0, rowHeight / 3), rowHeight: rowHeight);
       },
       builder: (context, candidate, rejected) {
-        final active = candidate.isNotEmpty || isHover;
-        return AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-          margin: const EdgeInsets.only(bottom: 4),
-          padding: const EdgeInsets.symmetric(vertical: 4),
+        final highlight = candidate.isNotEmpty;
+        return Container(
+          constraints: const BoxConstraints(minHeight: rowHeight),
           decoration: BoxDecoration(
-            color: active
-                ? AppTheme.amber.withValues(alpha: 0.12)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: active
-                  ? AppTheme.amber.withValues(alpha: 0.45)
-                  : AppTheme.silver.withValues(alpha: 0.08),
+            border: Border(
+              top: BorderSide(color: AppTheme.silver.withValues(alpha: 0.08)),
             ),
+            color: highlight ? AppTheme.amber.withValues(alpha: 0.08) : null,
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                child: Text(
-                  '${hour.toString().padLeft(2, '0')}:00',
-                  style: TextStyle(
-                    color: active
-                        ? AppTheme.amber
-                        : AppTheme.silver.withValues(alpha: 0.35),
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
+              SizedBox(
+                width: 48,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      color: AppTheme.silver.withValues(alpha: 0.4),
+                      fontSize: 11,
+                    ),
                   ),
                 ),
               ),
-              if (slotsHere.isEmpty)
-                SizedBox(
-                  height: 28,
-                  child: Center(
-                    child: Text(
-                      active ? 'Drop here' : '',
-                      style: TextStyle(
-                        color: AppTheme.amber.withValues(alpha: 0.7),
-                        fontSize: 11,
+              Expanded(
+                child: slotsHere.isEmpty
+                    ? const SizedBox(height: rowHeight)
+                    : Column(
+                        children: [
+                          ...slotsHere.map((s) => Padding(
+                                padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
+                                child: _draggableSlot(s),
+                              )),
+                        ],
                       ),
-                    ),
-                  ),
-                )
-              else
-                ...slotsHere.map((s) => Padding(
-                      padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
-                      child: _draggableSlot(s),
-                    )),
+              ),
             ],
           ),
         );
@@ -467,11 +421,13 @@ class _PlanningScreenState extends State<PlanningScreen> {
     final built = _built;
     final timeline = built?.timeline ?? [];
 
-    // Group slots by start hour
     final byHour = <int, List<DaySlot>>{};
     for (final s in timeline) {
       byHour.putIfAbsent(s.start.hour, () => []).add(s);
     }
+
+    final startH = built?.dayStartHour ?? 8;
+    final endH = built?.dayEndHour ?? 22;
 
     return GlassBackground(
       child: Scaffold(
@@ -512,6 +468,79 @@ class _PlanningScreenState extends State<PlanningScreen> {
                       style: TextStyle(
                           color: AppTheme.silver.withValues(alpha: 0.5), fontSize: 13),
                     ),
+                    if (built != null &&
+                        built.timeline.isEmpty &&
+                        _unscheduled.isEmpty) ...[
+                      const SizedBox(height: 8),
+                      GlassCard(
+                        child: Text(
+                          'Nothing planned for this day yet.\n'
+                          'Add tasks or tap Build My Day when you have work to place.',
+                          style: TextStyle(
+                            color: AppTheme.silver.withValues(alpha: 0.7),
+                            height: 1.35,
+                          ),
+                        ),
+                      ),
+                    ],
+                    if (built != null && built.unplaced.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Could not place',
+                        style: TextStyle(
+                          color: AppTheme.woodLight,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      ...built.unplaced.take(6).map(
+                            (u) => Padding(
+                              padding: const EdgeInsets.only(bottom: 6),
+                              child: GlassCard(
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      u.reason.startsWith('Blocked')
+                                          ? Icons.link_off
+                                          : Icons.event_busy,
+                                      size: 18,
+                                      color: u.reason.startsWith('Blocked')
+                                          ? Colors.redAccent
+                                          : AppTheme.silverMuted,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(u.title,
+                                              style: const TextStyle(
+                                                  color: AppTheme.silver,
+                                                  fontWeight: FontWeight.w600)),
+                                          Text(
+                                            u.reason,
+                                            style: TextStyle(
+                                              color: AppTheme.silver
+                                                  .withValues(alpha: 0.55),
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Text(
+                                      '${u.durationMin}m',
+                                      style: TextStyle(
+                                        color: AppTheme.silver.withValues(alpha: 0.4),
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                    ],
                     const SizedBox(height: 12),
                     Row(
                       children: [
@@ -525,125 +554,39 @@ class _PlanningScreenState extends State<PlanningScreen> {
                                     child: CircularProgressIndicator(strokeWidth: 2),
                                   )
                                 : const Icon(Icons.auto_awesome),
-                            label: const Text('Build my day'),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: (_applying || built == null) ? null : _apply,
-                            icon: _applying
-                                ? const SizedBox(
-                                    width: 16,
-                                    height: 16,
-                                    child: CircularProgressIndicator(strokeWidth: 2),
-                                  )
-                                : const Icon(Icons.event_available),
-                            label: const Text('Apply'),
+                            label: Text(_building ? 'Building…' : 'Build My Day'),
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Long-press a block and drop it on an hour. Drag tasks from below onto the day.',
-                      style: TextStyle(
-                          color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 12),
-                    ),
-
                     const SizedBox(height: 16),
-                    const Text('Timeline',
-                        style: TextStyle(
-                            color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 8),
-
-                    // Hour grid with drop targets
-                    for (var h = _dayStartHour; h < _dayEndHour; h++)
+                    for (var h = startH; h < endH; h++)
                       _hourRow(h, byHour[h] ?? const []),
-
-                    if (built != null && built.unplaced.isNotEmpty) ...[
-                      const SizedBox(height: 16),
-                      const Text('Could not fit today',
-                          style: TextStyle(
-                              color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 8),
-                      ...built.unplaced.map((c) {
-                        final payload = _DragPayload(
-                          id: c.id,
-                          title: c.title,
-                          kind: c.kind,
-                          durationMin: c.durationMin,
-                          fromUnscheduled: c.kind == DaySlotKind.task,
-                        );
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 6),
-                          child: LongPressDraggable<_DragPayload>(
-                            data: payload,
-                            feedback: Material(
-                              color: Colors.transparent,
-                              child: SizedBox(
-                                width: MediaQuery.of(context).size.width - 48,
-                                child: GlassCard(
-                                  child: Text(c.title,
-                                      style: const TextStyle(color: AppTheme.silver)),
-                                ),
-                              ),
-                            ),
-                            childWhenDragging: Opacity(
-                              opacity: 0.3,
-                              child: GlassCard(
-                                child: Text('${c.title} · ${c.durationMin}m',
-                                    style: const TextStyle(color: AppTheme.silver)),
-                              ),
-                            ),
-                            child: GlassCard(
-                              child: Text(
-                                '${c.title} · ${c.durationMin}m · ${c.reason} · hold to drag',
-                                style: TextStyle(
-                                    color: AppTheme.silver.withValues(alpha: 0.7)),
-                              ),
-                            ),
-                          ),
-                        );
-                      }),
-                    ],
-
                     if (_unscheduled.isNotEmpty) ...[
                       const SizedBox(height: 16),
-                      const Text('Unscheduled — drag onto an hour',
+                      const Text('Unscheduled',
                           style: TextStyle(
                               color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
                       const SizedBox(height: 8),
-                      ..._unscheduled.map((t) {
-                        final payload = _DragPayload(
-                          id: t.id,
-                          title: t.title,
-                          kind: DaySlotKind.task,
-                          durationMin: (t.estimatedMinutes ?? 30).clamp(15, 120),
-                          fromUnscheduled: true,
-                        );
+                      ..._unscheduled.take(12).map((t) {
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 6),
                           child: LongPressDraggable<_DragPayload>(
-                            data: payload,
-                            hapticFeedbackOnStart: true,
+                            data: _DragPayload(
+                              id: t.id,
+                              title: t.title,
+                              kind: DaySlotKind.task,
+                              durationMin: (t.estimatedMinutes ?? 30).clamp(15, 180),
+                              fromUnscheduled: true,
+                            ),
                             feedback: Material(
                               color: Colors.transparent,
                               child: SizedBox(
-                                width: MediaQuery.of(context).size.width - 48,
+                                width: 240,
                                 child: GlassCard(
                                   child: Text(t.title,
-                                      style: const TextStyle(
-                                          color: AppTheme.silver,
-                                          fontWeight: FontWeight.w600)),
+                                      style: const TextStyle(color: AppTheme.silver)),
                                 ),
-                              ),
-                            ),
-                            childWhenDragging: Opacity(
-                              opacity: 0.3,
-                              child: GlassCard(
-                                child: Text(t.title,
-                                    style: const TextStyle(color: AppTheme.silver)),
                               ),
                             ),
                             child: GlassCard(
@@ -675,7 +618,6 @@ class _PlanningScreenState extends State<PlanningScreen> {
                         );
                       }),
                     ],
-
                     if (_ranked.isNotEmpty) ...[
                       const SizedBox(height: 16),
                       const Text('If you only have a moment',
