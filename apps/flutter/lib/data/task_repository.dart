@@ -2,6 +2,7 @@ import '../domain/enums.dart';
 import '../domain/models.dart';
 import '../services/domain_recurrence.dart';
 import '../services/recurrence_engine.dart';
+import 'atomic_write.dart';
 import 'database.dart';
 import 'planning_repository.dart';
 
@@ -25,7 +26,8 @@ class TaskRepository {
     final db = await _db.database;
     final rows = await db.query(
       'tasks',
-      where: 'due_at IS NOT NULL AND due_at < ? AND status NOT IN (?, ?) AND archived_at IS NULL',
+      where:
+          'due_at IS NOT NULL AND due_at < ? AND status NOT IN (?, ?) AND archived_at IS NULL',
       whereArgs: [now, EntityStatus.completed, EntityStatus.cancelled],
       orderBy: 'due_at ASC',
     );
@@ -104,7 +106,8 @@ class TaskRepository {
   }
 
   Future<Task?> getById(String id) async {
-    final rows = await (await _db.database).query('tasks', where: 'id = ?', whereArgs: [id], limit: 1);
+    final rows =
+        await (await _db.database).query('tasks', where: 'id = ?', whereArgs: [id], limit: 1);
     if (rows.isEmpty) return null;
     return Task.fromMap(rows.first);
   }
@@ -166,23 +169,20 @@ class TaskRepository {
       createdAt: now,
       updatedAt: now,
     );
-    await _db.txn((txn) async {
-      final map = task.toInsertMap();
-      if (description != null && description.isNotEmpty) map['description'] = description;
-      if (milestoneId != null) map['milestone_id'] = milestoneId;
-      if (parentTaskId != null) map['parent_task_id'] = parentTaskId;
-      await txn.insert('tasks', map);
-      await txn.insert('activity_events', {
-        'id': AppDatabase.newId(),
-        'owner_id': ownerId,
-        'event_type': 'TASK_CREATED',
-        'entity_type': 'TASK',
-        'entity_id': task.id,
-        'occurred_at': now,
-        'recorded_at': now,
-        'source': EventSource.user,
-      });
-    });
+    await AtomicWrite.run(
+      db: _db,
+      state: (txn) async {
+        final map = task.toInsertMap();
+        if (description != null && description.isNotEmpty) map['description'] = description;
+        if (milestoneId != null) map['milestone_id'] = milestoneId;
+        if (parentTaskId != null) map['parent_task_id'] = parentTaskId;
+        await txn.insert('tasks', map);
+      },
+      eventType: 'TASK_CREATED',
+      entityType: 'TASK',
+      entityId: task.id,
+      occurredAt: now,
+    );
     return task;
   }
 
@@ -369,8 +369,7 @@ class TaskRepository {
       'occurred_at': now,
       'recorded_at': now,
       'source': EventSource.system,
-      'metadata':
-          '{\"parentTaskId\":\"$completedTaskId\",\"dueAt\":${created.dueAt}}',
+      'metadata': '{"parentTaskId":"$completedTaskId","dueAt":${created.dueAt}}',
     });
     return created;
   }
@@ -407,6 +406,7 @@ class TaskRepository {
     );
   }
 
+  /// Multi-event lifecycle: complete + optional next occurrence in one txn.
   Future<Task?> complete(String taskId) async {
     final rule = await getRecurrenceRule(taskId);
     final src = await getById(taskId);
@@ -435,7 +435,7 @@ class TaskRepository {
         'occurred_at': now,
         'recorded_at': now,
         'source': EventSource.user,
-        'metadata': rule == null ? null : '{\"recurring\":true}',
+        'metadata': rule == null ? null : '{"recurring":true}',
       });
 
       if (rule == null) return null;
@@ -452,56 +452,48 @@ class TaskRepository {
   }
 
   Future<void> reopen(String taskId) async {
-    await _db.txn((txn) async {
-      final now = AppDatabase.nowMs();
-      final ownerId = await _db.requireOwnerId();
-      await txn.update(
-        'tasks',
-        {
-          'status': EntityStatus.inbox,
-          'completed_at': null,
-          'updated_at': now,
-        },
-        where: 'id = ?',
-        whereArgs: [taskId],
-      );
-      await txn.insert('activity_events', {
-        'id': AppDatabase.newId(),
-        'owner_id': ownerId,
-        'event_type': 'TASK_REOPENED',
-        'entity_type': 'TASK',
-        'entity_id': taskId,
-        'occurred_at': now,
-        'recorded_at': now,
-        'source': EventSource.user,
-      });
-    });
+    final now = AppDatabase.nowMs();
+    await AtomicWrite.run(
+      db: _db,
+      state: (txn) async {
+        await txn.update(
+          'tasks',
+          {
+            'status': EntityStatus.inbox,
+            'completed_at': null,
+            'updated_at': now,
+          },
+          where: 'id = ?',
+          whereArgs: [taskId],
+        );
+      },
+      eventType: 'TASK_REOPENED',
+      entityType: 'TASK',
+      entityId: taskId,
+      occurredAt: now,
+    );
   }
 
   Future<void> delete(String taskId) async {
-    await _db.txn((txn) async {
-      final now = AppDatabase.nowMs();
-      final ownerId = await _db.requireOwnerId();
-      await txn.update(
-        'tasks',
-        {
-          'status': EntityStatus.cancelled,
-          'archived_at': now,
-          'updated_at': now,
-        },
-        where: 'id = ?',
-        whereArgs: [taskId],
-      );
-      await txn.insert('activity_events', {
-        'id': AppDatabase.newId(),
-        'owner_id': ownerId,
-        'event_type': 'TASK_CANCELLED',
-        'entity_type': 'TASK',
-        'entity_id': taskId,
-        'occurred_at': now,
-        'recorded_at': now,
-        'source': EventSource.user,
-      });
-    });
+    final now = AppDatabase.nowMs();
+    await AtomicWrite.run(
+      db: _db,
+      state: (txn) async {
+        await txn.update(
+          'tasks',
+          {
+            'status': EntityStatus.cancelled,
+            'archived_at': now,
+            'updated_at': now,
+          },
+          where: 'id = ?',
+          whereArgs: [taskId],
+        );
+      },
+      eventType: 'TASK_CANCELLED',
+      entityType: 'TASK',
+      entityId: taskId,
+      occurredAt: now,
+    );
   }
 }
