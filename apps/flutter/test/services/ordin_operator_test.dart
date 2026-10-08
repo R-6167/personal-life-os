@@ -7,7 +7,7 @@ import 'package:ordin/services/ordin_operator.dart';
 import '../helpers/test_db.dart';
 
 void main() {
-  late final AppDatabase db;
+  late AppDatabase db;
 
   setUp(() async {
     db = await openTestDb();
