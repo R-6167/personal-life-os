@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ordin/data/database.dart';
 import 'package:ordin/domain/enums.dart';
 import 'package:ordin/domain/models.dart';
 import 'package:ordin/services/ordin_operator.dart';
@@ -6,7 +7,7 @@ import 'package:ordin/services/ordin_operator.dart';
 import '../helpers/test_db.dart';
 
 void main() {
-  late final dynamic db;
+  late final AppDatabase db;
 
   setUp(() async {
     db = await openTestDb();
@@ -35,14 +36,13 @@ void main() {
 
     expect(result.ok, isTrue);
 
-    final row = (await db.database).query(
+    final rows = await (await db.database).query(
       'tasks',
       columns: ['due_at'],
       where: 'id = ?',
       whereArgs: [task.id],
       limit: 1,
     );
-    final rows = await row;
     expect(rows.single['due_at'], DateTime(2030, 1, 15, 23, 59).millisecondsSinceEpoch);
 
     final events = await (await db.database).query(
