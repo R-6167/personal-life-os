@@ -399,90 +399,6 @@ class OrdinOperator {
   }
 
 
-/// Central approval/execution boundary for assistant actions.
-///
-/// It validates ownership and required identifiers before execution. The
-/// operator's direct SQL mutations use AtomicWrite, so their assistant audit
-/// event commits with the state change.
-class OrdinActionExecutor {
-  OrdinActionExecutor({required AppDatabase db, required OrdinOperator operator})
-      : _db = db,
-        _operator = operator;
-
-  final AppDatabase _db;
-  final OrdinOperator _operator;
-
-  Future<OrdinActionResult> execute(OrdinActionProposal proposal) async {
-    final validation = await _validate(proposal);
-    if (validation != null) return validation;
-    try {
-      return await _operator._executeInternal(proposal);
-    } catch (e) {
-      return OrdinActionResult(ok: false, message: 'Failed: $e');
-    }
-  }
-
-  Future<OrdinActionResult?> _validate(OrdinActionProposal proposal) async {
-    if (!proposal.isActionable) {
-      return OrdinActionResult(ok: false, message: 'Nothing to execute.');
-    }
-    final ownerId = await _db.requireOwnerId();
-    switch (proposal.kind) {
-      case OrdinIntentKind.completeTask:
-      case OrdinIntentKind.rescheduleTaskToday:
-      case OrdinIntentKind.rescheduleTaskTomorrow:
-        return _requireOwned(proposal.entityId, 'tasks', ownerId, 'Task');
-      case OrdinIntentKind.completeHabit:
-        return _requireOwned(proposal.entityId, 'habits', ownerId, 'Habit');
-      case OrdinIntentKind.payBill:
-      case OrdinIntentKind.deferBill:
-      case OrdinIntentKind.cancelBillOccurrence:
-        final id = proposal.entityId;
-        if (id == null) return OrdinActionResult(ok: false, message: 'Missing bill occurrence.');
-        final rows = await (await _db.database).rawQuery(
-          'SELECT o.id FROM bill_occurrences o JOIN bills b ON b.id = o.bill_id WHERE o.id = ? AND b.owner_id = ? LIMIT 1',
-          [id, ownerId],
-        );
-        return rows.isEmpty
-            ? OrdinActionResult(ok: false, message: 'Bill occurrence is missing or not owned by the current user.')
-            : null;
-      case OrdinIntentKind.paySubscription:
-      case OrdinIntentKind.pauseSubscription:
-      case OrdinIntentKind.resumeSubscription:
-      case OrdinIntentKind.cancelSubscription:
-        return _requireOwned(proposal.entityId, 'subscriptions', ownerId, 'Subscription');
-      case OrdinIntentKind.addNote:
-      case OrdinIntentKind.createTask:
-      case OrdinIntentKind.createReminder:
-      case OrdinIntentKind.createBill:
-      case OrdinIntentKind.createSubscription:
-      case OrdinIntentKind.focusNext:
-      case OrdinIntentKind.none:
-        return null;
-    }
-  }
-
-  Future<OrdinActionResult?> _requireOwned(
-    String? id,
-    String table,
-    String ownerId,
-    String label,
-  ) async {
-    if (id == null || id.isEmpty) {
-      return OrdinActionResult(ok: false, message: 'Missing $label id.');
-    }
-    final rows = await (await _db.database).query(
-      table,
-      columns: ['id'],
-      where: 'id = ? AND owner_id = ?',
-      whereArgs: [id, ownerId],
-      limit: 1,
-    );
-    return rows.isEmpty
-        ? OrdinActionResult(ok: false, message: '$label is missing or not owned by the current user.')
-        : null;
-  }
-
   Future<void> recordProposalShown(OrdinActionProposal p) async {
     if (!p.isActionable) return;
     final ownerId = await _db.requireOwnerId();
@@ -584,3 +500,87 @@ class OrdinActionExecutor {
     return s.replaceFirst(RegExp(r'^[:\-\s]+'), '');
   }
 }
+
+/// Central approval/execution boundary for assistant actions.
+///
+/// It validates ownership and required identifiers before execution. The
+/// operator's direct SQL mutations use AtomicWrite, so their assistant audit
+/// event commits with the state change.
+class OrdinActionExecutor {
+  OrdinActionExecutor({required AppDatabase db, required OrdinOperator operator})
+      : _db = db,
+        _operator = operator;
+
+  final AppDatabase _db;
+  final OrdinOperator _operator;
+
+  Future<OrdinActionResult> execute(OrdinActionProposal proposal) async {
+    final validation = await _validate(proposal);
+    if (validation != null) return validation;
+    try {
+      return await _operator._executeInternal(proposal);
+    } catch (e) {
+      return OrdinActionResult(ok: false, message: 'Failed: $e');
+    }
+  }
+
+  Future<OrdinActionResult?> _validate(OrdinActionProposal proposal) async {
+    if (!proposal.isActionable) {
+      return OrdinActionResult(ok: false, message: 'Nothing to execute.');
+    }
+    final ownerId = await _db.requireOwnerId();
+    switch (proposal.kind) {
+      case OrdinIntentKind.completeTask:
+      case OrdinIntentKind.rescheduleTaskToday:
+      case OrdinIntentKind.rescheduleTaskTomorrow:
+        return _requireOwned(proposal.entityId, 'tasks', ownerId, 'Task');
+      case OrdinIntentKind.completeHabit:
+        return _requireOwned(proposal.entityId, 'habits', ownerId, 'Habit');
+      case OrdinIntentKind.payBill:
+      case OrdinIntentKind.deferBill:
+      case OrdinIntentKind.cancelBillOccurrence:
+        final id = proposal.entityId;
+        if (id == null) return OrdinActionResult(ok: false, message: 'Missing bill occurrence.');
+        final rows = await (await _db.database).rawQuery(
+          'SELECT o.id FROM bill_occurrences o JOIN bills b ON b.id = o.bill_id WHERE o.id = ? AND b.owner_id = ? LIMIT 1',
+          [id, ownerId],
+        );
+        return rows.isEmpty
+            ? OrdinActionResult(ok: false, message: 'Bill occurrence is missing or not owned by the current user.')
+            : null;
+      case OrdinIntentKind.paySubscription:
+      case OrdinIntentKind.pauseSubscription:
+      case OrdinIntentKind.resumeSubscription:
+      case OrdinIntentKind.cancelSubscription:
+        return _requireOwned(proposal.entityId, 'subscriptions', ownerId, 'Subscription');
+      case OrdinIntentKind.addNote:
+      case OrdinIntentKind.createTask:
+      case OrdinIntentKind.createReminder:
+      case OrdinIntentKind.createBill:
+      case OrdinIntentKind.createSubscription:
+      case OrdinIntentKind.focusNext:
+      case OrdinIntentKind.none:
+        return null;
+    }
+  }
+
+  Future<OrdinActionResult?> _requireOwned(
+    String? id,
+    String table,
+    String ownerId,
+    String label,
+  ) async {
+    if (id == null || id.isEmpty) {
+      return OrdinActionResult(ok: false, message: 'Missing $label id.');
+    }
+    final rows = await (await _db.database).query(
+      table,
+      columns: ['id'],
+      where: 'id = ? AND owner_id = ?',
+      whereArgs: [id, ownerId],
+      limit: 1,
+    );
+    return rows.isEmpty
+        ? OrdinActionResult(ok: false, message: '$label is missing or not owned by the current user.')
+        : null;
+  }
