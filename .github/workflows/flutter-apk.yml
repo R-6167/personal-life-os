@@ -40,56 +40,24 @@ jobs:
       - name: Flutter version
         run: flutter --version
 
-      - name: Sync Android platform files
+      - name: Verify committed Android platform
         run: |
-          set +e
-          flutter create . \
-            --project-name ordin \
-            --org com.aetherion \
-            --platforms=android
-          CREATE_CODE=$?
-          set -e
-          echo "flutter create exit=$CREATE_CODE"
-          if [ ! -f android/gradlew ]; then
-            echo "::error::android/gradlew missing after flutter create"
-            exit 1
-          fi
-          chmod +x android/gradlew
+          test -f android/settings.gradle
+          test -f android/build.gradle
+          test -f android/app/build.gradle
+          test -f android/app/src/main/AndroidManifest.xml
+          test -f android/gradle/wrapper/gradle-wrapper.properties
+          test ! -f android/gradlew
+          echo "Using the committed Android project; no flutter create regeneration is permitted."
 
-          GRADLE=android/app/build.gradle
-          if [ -f "$GRADLE" ]; then
-            sed -i 's|namespace *= *"[^"]*"|namespace = "com.aetherion.ordin"|g' "$GRADLE"
-            sed -i 's|applicationId *= *"[^"]*"|applicationId = "com.aetherion.ordin"|g' "$GRADLE"
-          fi
-          MANIFEST=android/app/src/main/AndroidManifest.xml
-          if [ -f "$MANIFEST" ]; then
-            sed -i 's|android:label="[^"]*"|android:label="Ordin"|g' "$MANIFEST"
-            if ! grep -q POST_NOTIFICATIONS "$MANIFEST"; then
-              sed -i 's|<application|<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>\n    <uses-permission android:name="android.permission.VIBRATE"/>\n    <application|' "$MANIFEST"
-            fi
-            if [ -f android/app/src/main/res/drawable/ic_launcher_ordin.xml ]; then
-              sed -i 's|android:icon="@mipmap/ic_launcher"|android:icon="@drawable/ic_launcher_ordin"|g' "$MANIFEST"
-              sed -i 's|android:icon="@android:drawable/[^"]*"|android:icon="@drawable/ic_launcher_ordin"|g' "$MANIFEST"
-              if grep -q 'android:roundIcon' "$MANIFEST"; then
-                sed -i 's|android:roundIcon="[^"]*"|android:roundIcon="@drawable/ic_launcher_ordin"|g' "$MANIFEST"
-              fi
-            fi
-            # Preserve largeHeap for on-device LLM
-            if ! grep -q 'largeHeap' "$MANIFEST"; then
-              sed -i 's|<application|<application android:largeHeap="true" |' "$MANIFEST"
-            fi
-          fi
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.3"
 
       - name: Get dependencies
         run: flutter pub get
 
-      - name: Sanitize Dart sources
-        run: |
-          find lib -name '*.dart' -exec perl -pi -e 's/\r//g' {} +
-          find lib -name '*.dart' -exec perl -pi -e 's/(?<![A-Za-z])equired /required /g' {} +
-          find lib -name '*.dart' -exec perl -pi -e 's/activeTrackColor:/activeColor:/g' {} +
-          echo "Sanitized. Remaining equired (should be empty):"
-          grep -Rn --include='*.dart' -P '(?<![A-Za-z])equired ' lib || true
 
       - name: Unit & smoke tests
         run: flutter test --reporter expanded
@@ -107,7 +75,7 @@ jobs:
           fi
 
       - name: Build release APK
-        run: flutter build apk --release --no-shrink
+        run: gradle --no-daemon -p android assembleRelease
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

@@ -82,6 +82,7 @@ class AppDatabase {
         await _migrateToV21(db);
         await _migrateToV22(db);
         await _migrateToV23(db);
+        await _verifySchemaContract(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 6) await _migrateToV6(db);
@@ -102,11 +103,13 @@ class AppDatabase {
         if (oldVersion < 21) await _migrateToV21(db);
         if (oldVersion < 22) await _migrateToV22(db);
         if (oldVersion < 23) await _migrateToV23(db);
+        await _verifySchemaContract(db);
       },
       onOpen: (db) async {
         await _ensureUsersTable(db);
         await _ensureDefaultUserRow(db);
         await _ensureSoftColumns(db);
+        await _verifySchemaContract(db);
       },
     );
   }
@@ -116,9 +119,7 @@ class AppDatabase {
     for (final stmt in _splitSql(sql)) {
       final s = stmt.trim();
       if (s.isEmpty) continue;
-      try {
-        await db.execute(s);
-      } catch (_) {}
+      await db.execute(s);
     }
   }
 
@@ -156,9 +157,7 @@ CREATE TABLE IF NOT EXISTS users (
       'ALTER TABLE users ADD COLUMN currency TEXT',
       'ALTER TABLE users ADD COLUMN week_start_day INTEGER',
     ]) {
-      try {
-        await db.execute(col);
-      } catch (_) {}
+      await _executeIgnoringDuplicateColumn(db, col);
     }
   }
 
@@ -178,9 +177,7 @@ CREATE TABLE IF NOT EXISTS users (
       'ALTER TABLE tasks ADD COLUMN description TEXT',
       'ALTER TABLE financial_accounts ADD COLUMN status TEXT',
     ]) {
-      try {
-        await db.execute(alter);
-      } catch (_) {}
+      await _executeIgnoringDuplicateColumn(db, alter);
     }
   }
 
@@ -266,34 +263,26 @@ CREATE TABLE IF NOT EXISTS users (
   }
 
   Future<void> _migrateToV21(Database db) async {
-    try {
-      await db.execute(
-        'CREATE INDEX IF NOT EXISTS '
-        'idx_activity_owner_occurred '
-        'ON activity_events(owner_id, occurred_at DESC)',
-      );
-    } catch (_) {}
-    try {
-      await db.execute(
-        'CREATE INDEX IF NOT EXISTS '
-        'idx_activity_entity '
-        'ON activity_events(entity_type, entity_id)',
-      );
-    } catch (_) {}
-    try {
-      await db.execute(
-        'CREATE INDEX IF NOT EXISTS '
-        'idx_activity_event_type '
-        'ON activity_events(event_type)',
-      );
-    } catch (_) {}
-    try {
-      await db.execute(
-        'ALTER TABLE activity_events ADD COLUMN summary TEXT',
-      );
-    } catch (_) {}
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS '
+      'idx_activity_owner_occurred '
+      'ON activity_events(owner_id, occurred_at DESC)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS '
+      'idx_activity_entity '
+      'ON activity_events(entity_type, entity_id)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS '
+      'idx_activity_event_type '
+      'ON activity_events(event_type)',
+    );
+    await _executeIgnoringDuplicateColumn(
+      db,
+      'ALTER TABLE activity_events ADD COLUMN summary TEXT',
+    );
   }
-
   Future<void> _migrateToV22(Database db) async {
     await _applySchema(db);
   }
@@ -303,6 +292,47 @@ CREATE TABLE IF NOT EXISTS users (
     await _ensureDefaultUserRow(db);
     await _applySchema(db);
     await _ensureSoftColumns(db);
+  }
+
+  Future<void> _executeIgnoringDuplicateColumn(Database db, String sql) async {
+    try {
+      await db.execute(sql);
+    } on DatabaseException catch (e) {
+      final message = e.toString().toLowerCase();
+      if (!message.contains('duplicate column name')) rethrow;
+    }
+  }
+
+  Future<void> _verifySchemaContract(Database db) async {
+    const requiredTables = <String>[
+      'users', 'goals', 'projects', 'tasks', 'activity_events',
+      'error_logs', 'work_sessions',
+    ];
+    for (final table in requiredTables) {
+      final rows = await db.rawQuery(
+        'SELECT name FROM sqlite_master WHERE type = ? AND name = ?',
+        ['table', table],
+      );
+      if (rows.isEmpty) {
+        throw StateError('Database schema verification failed: missing table ' + table);
+      }
+    }
+
+    const requiredColumns = <String, List<String>>{
+      'users': ['id', 'display_name', 'currency', 'week_start_day'],
+      'tasks': ['id', 'owner_id', 'title', 'description', 'status', 'due_at'],
+      'activity_events': ['id', 'owner_id', 'event_type', 'entity_type', 'entity_id', 'summary'],
+      'work_sessions': ['id', 'owner_id', 'status', 'started_at', 'accumulated_ms'],
+    };
+    for (final entry in requiredColumns.entries) {
+      final columns = await db.rawQuery('PRAGMA table_info(' + entry.key + ')');
+      final names = columns.map((row) => row['name'] as String).toSet();
+      for (final column in entry.value) {
+        if (!names.contains(column)) {
+          throw StateError('Database schema verification failed: missing ' + entry.key + '.' + column);
+        }
+      }
+    }
   }
 
   Future<String> requireOwnerId() async {

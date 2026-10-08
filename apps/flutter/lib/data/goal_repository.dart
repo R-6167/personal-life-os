@@ -31,7 +31,7 @@ class GoalRepository {
     return rows.isEmpty ? null : rows.first;
   }
 
-  Future<Goal> create({equired String title, String? description, int? targetDate, int priority = 0}) async {
+  Future<Goal> create({required String title, String? description, int? targetDate, int priority = 0}) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
     final goal = Goal(

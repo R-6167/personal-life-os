@@ -281,7 +281,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45), fontSize: 12),
                     ),
                     value: NotificationService.instance.enabled,
-                    activeTrackColor: AppTheme.amber,
+                    activeColor: AppTheme.amber,
                     onChanged: (v) async {
                       NotificationService.instance.enabled = v;
                       try {
@@ -321,7 +321,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45), fontSize: 12),
                           ),
                           value: _lockEnabled && SecurityService.instance.hasPin,
-                          activeTrackColor: AppTheme.amber,
+                          activeColor: AppTheme.amber,
                           onChanged: (v) async {
                             try {
                               if (v && !SecurityService.instance.hasPin) {
@@ -397,7 +397,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           contentPadding: EdgeInsets.zero,
                           title: const Text('Hide balances in UI', style: TextStyle(color: AppTheme.silver)),
                           value: _hideBalances,
-                          activeTrackColor: AppTheme.amber,
+                          activeColor: AppTheme.amber,
                           onChanged: (v) async {
                             await SecurityService.instance.setHideBalances(v);
                             await _load();
