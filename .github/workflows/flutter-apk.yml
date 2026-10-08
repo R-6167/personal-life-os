@@ -83,13 +83,6 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
-      - name: Sanitize Dart sources
-        run: |
-          find lib -name '*.dart' -exec perl -pi -e 's/\r//g' {} +
-          find lib -name '*.dart' -exec perl -pi -e 's/(?<![A-Za-z])equired /required /g' {} +
-          find lib -name '*.dart' -exec perl -pi -e 's/activeTrackColor:/activeColor:/g' {} +
-          echo "Sanitized. Remaining equired (should be empty):"
-          grep -Rn --include='*.dart' -P '(?<![A-Za-z])equired ' lib || true
 
       - name: Unit & smoke tests
         run: flutter test --reporter expanded
