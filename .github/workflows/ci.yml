@@ -35,11 +35,6 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
-      - name: Sanitize sources
-        run: |
-          find lib -name '*.dart' -exec perl -pi -e 's/\r//g' {} +
-          find lib -name '*.dart' -exec perl -pi -e 's/(?<![A-Za-z])equired /required /g' {} +
-          find lib -name '*.dart' -exec perl -pi -e 's/activeTrackColor:/activeColor:/g' {} +
 
       - name: Unit, smoke & integration tests
         run: flutter test --reporter expanded
