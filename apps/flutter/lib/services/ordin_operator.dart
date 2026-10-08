@@ -310,15 +310,25 @@ class OrdinOperator {
         case OrdinIntentKind.cancelSubscription:
           final sid = proposal.entityId;
           if (sid == null) return OrdinActionResult(ok: false, message: 'Missing subscription.');
-          final ext = ExtendedRepository(_db);
-          if (proposal.kind == OrdinIntentKind.pauseSubscription) {
-            await ext.pauseSubscription(sid);
-          } else if (proposal.kind == OrdinIntentKind.resumeSubscription) {
-            await ext.resumeSubscription(sid);
-          } else {
-            await ext.cancelSubscription(sid);
-          }
-          await _record(ownerId, now, eventType: 'ASSISTANT_ACTION_EXECUTED', entityType: 'SUBSCRIPTION', entityId: sid, metadata: '{"action":"${proposal.kind.name}"}', summary: proposal.preview);
+          final action = proposal.kind.name;
+          await AtomicWrite.run(
+            db: _db,
+            state: (txn) async {
+              final status = proposal.kind == OrdinIntentKind.pauseSubscription
+                  ? 'PAUSED'
+                  : proposal.kind == OrdinIntentKind.resumeSubscription
+                      ? 'ACTIVE'
+                      : 'CANCELLED';
+              final changed = await txn.update('subscriptions', {'status': status, 'updated_at': now}, where: 'id = ? AND owner_id = ?', whereArgs: [sid, ownerId]);
+              if (changed != 1) throw StateError('Subscription is missing or not owned by the current user.');
+            },
+            eventType: 'ASSISTANT_ACTION_EXECUTED',
+            entityType: 'SUBSCRIPTION',
+            entityId: sid,
+            source: EventSource.system,
+            metadata: '{"action":"' + action + '"}',
+            occurredAt: now,
+          );
           return OrdinActionResult(ok: true, message: proposal.preview, entityType: 'SUBSCRIPTION', entityId: sid);
 
         case OrdinIntentKind.createBill:
@@ -341,20 +351,42 @@ class OrdinOperator {
           final occId = proposal.entityId;
           final newDue = proposal.payload['newDueAt'] as int?;
           if (occId == null || newDue == null) return OrdinActionResult(ok: false, message: 'Missing defer data.');
-          final db = await _db.database;
-          await db.update('bill_occurrences', {'due_at': newDue, 'status': 'UPCOMING', 'updated_at': now}, where: 'id = ?', whereArgs: [occId]);
           final billId = '${proposal.payload['billId'] ?? ''}';
-          if (billId.isNotEmpty) {
-            await db.update('bills', {'next_due_at': newDue, 'updated_at': now}, where: 'id = ?', whereArgs: [billId]);
-          }
-          await _record(ownerId, now, eventType: 'ASSISTANT_ACTION_EXECUTED', entityType: 'BILL_OCCURRENCE', entityId: occId, metadata: '{"action":"deferBill"}', summary: proposal.preview);
+          await AtomicWrite.run(
+            db: _db,
+            state: (txn) async {
+              final changed = await txn.update('bill_occurrences', {'due_at': newDue, 'status': 'UPCOMING', 'updated_at': now}, where: 'id = ?', whereArgs: [occId]);
+              if (changed != 1) throw StateError('Bill occurrence not found.');
+              if (billId.isNotEmpty) {
+                final billChanged = await txn.update('bills', {'next_due_at': newDue, 'updated_at': now}, where: 'id = ? AND owner_id = ?', whereArgs: [billId, ownerId]);
+                if (billChanged != 1) throw StateError('Bill is missing or not owned by the current user.');
+              }
+            },
+            eventType: 'ASSISTANT_ACTION_EXECUTED',
+            entityType: 'BILL_OCCURRENCE',
+            entityId: occId,
+            source: EventSource.system,
+            metadata: '{"action":"deferBill"}',
+            occurredAt: now,
+          );
           return OrdinActionResult(ok: true, message: proposal.preview, entityType: 'BILL_OCCURRENCE', entityId: occId);
 
         case OrdinIntentKind.cancelBillOccurrence:
           final occId = proposal.entityId;
           if (occId == null) return OrdinActionResult(ok: false, message: 'Missing occurrence.');
-          await (await _db.database).update('bill_occurrences', {'status': 'CANCELLED', 'updated_at': now}, where: 'id = ?', whereArgs: [occId]);
-          await _record(ownerId, now, eventType: 'ASSISTANT_ACTION_EXECUTED', entityType: 'BILL_OCCURRENCE', entityId: occId, metadata: '{"action":"cancelBillOccurrence"}', summary: proposal.preview);
+          await AtomicWrite.run(
+            db: _db,
+            state: (txn) async {
+              final changed = await txn.update('bill_occurrences', {'status': 'CANCELLED', 'updated_at': now}, where: 'id = ?', whereArgs: [occId]);
+              if (changed != 1) throw StateError('Bill occurrence not found.');
+            },
+            eventType: 'ASSISTANT_ACTION_EXECUTED',
+            entityType: 'BILL_OCCURRENCE',
+            entityId: occId,
+            source: EventSource.system,
+            metadata: '{"action":"cancelBillOccurrence"}',
+            occurredAt: now,
+          );
           return OrdinActionResult(ok: true, message: proposal.preview, entityType: 'BILL_OCCURRENCE', entityId: occId);
 
         case OrdinIntentKind.focusNext:
