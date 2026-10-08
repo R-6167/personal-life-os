@@ -360,7 +360,7 @@ class ProjectWorkspaceService {
     await _insertLink(db, ownerId: ownerId, fromType: 'PROJECT', fromId: projectId, toType: 'NOTE', toId: noteId);
   }
 
-  Future<void> attachResource({equired String projectId, required String title, String? notes}) async {
+  Future<void> attachResource({required String projectId, required String title, String? notes}) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
     final docId = AppDatabase.newId();
