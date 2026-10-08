@@ -398,7 +398,6 @@ class OrdinOperator {
     }
   }
 
-}
 
 /// Central approval/execution boundary for assistant actions.
 ///
