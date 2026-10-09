@@ -3,6 +3,7 @@ import '../data/database.dart';
 import '../data/extended_repository.dart';
 import '../data/task_repository.dart';
 import '../domain/enums.dart';
+import 'notification_diagnostics.dart';
 import 'notification_payload.dart';
 
 /// Create → Schedule: materialize pending reminders from life entities.
@@ -52,7 +53,9 @@ class ReminderGeneratorService {
           );
         }
       }
-    } catch (_) {}
+    } catch (error, stackTrace) {
+      await NotificationDiagnostics.record('generate_tasks', error, stackTrace: stackTrace);
+    }
     return n;
   }
 
@@ -83,7 +86,9 @@ class ReminderGeneratorService {
           );
         }
       }
-    } catch (_) {}
+    } catch (error, stackTrace) {
+      await NotificationDiagnostics.record('generate_bills', error, stackTrace: stackTrace);
+    }
     return n;
   }
 
@@ -104,7 +109,9 @@ class ReminderGeneratorService {
           tag: 'sub_renew',
         );
       }
-    } catch (_) {}
+    } catch (error, stackTrace) {
+      await NotificationDiagnostics.record('generate_subscriptions', error, stackTrace: stackTrace);
+    }
     return n;
   }
 
@@ -130,7 +137,9 @@ class ReminderGeneratorService {
           );
         }
       }
-    } catch (_) {}
+    } catch (error, stackTrace) {
+      await NotificationDiagnostics.record('generate_documents', error, stackTrace: stackTrace);
+    }
     return n;
   }
 
@@ -151,7 +160,9 @@ class ReminderGeneratorService {
           tag: 'prac_due',
         );
       }
-    } catch (_) {}
+    } catch (error, stackTrace) {
+      await NotificationDiagnostics.record('generate_practical_items', error, stackTrace: stackTrace);
+    }
     return n;
   }
 
@@ -186,7 +197,9 @@ class ReminderGeneratorService {
           );
         }
       }
-    } catch (_) {}
+    } catch (error, stackTrace) {
+      await NotificationDiagnostics.record('generate_events', error, stackTrace: stackTrace);
+    }
     return n;
   }
 
@@ -225,7 +238,9 @@ class ReminderGeneratorService {
           tag: 'habit_$todayStart',
         );
       }
-    } catch (_) {}
+    } catch (error, stackTrace) {
+      await NotificationDiagnostics.record('generate_habits_today', error, stackTrace: stackTrace);
+    }
     return n;
   }
 
@@ -250,7 +265,9 @@ class ReminderGeneratorService {
           tag: 'routine_$todayStart',
         );
       }
-    } catch (_) {}
+    } catch (error, stackTrace) {
+      await NotificationDiagnostics.record('generate_routines_today', error, stackTrace: stackTrace);
+    }
     return n;
   }
 
@@ -290,7 +307,9 @@ class ReminderGeneratorService {
           tag: 'goal_deadline',
         );
       }
-    } catch (_) {}
+    } catch (error, stackTrace) {
+      await NotificationDiagnostics.record('generate_deadlines', error, stackTrace: stackTrace);
+    }
     return n;
   }
 
