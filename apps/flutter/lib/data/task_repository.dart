@@ -215,7 +215,9 @@ class TaskRepository {
         throw StateError('A subtask must belong to the same project as its parent task.');
       }
       final parentGoalId = dbStrOrNull(parent['goal_id']);
-      if (parentGoalId != null && resolvedGoalId != parentGoalId) {
+      if (parentGoalId != null &&
+          resolvedGoalId != null &&
+          resolvedGoalId != parentGoalId) {
         throw StateError('A subtask must belong to the same goal as its parent task.');
       }
       if (resolvedGoalId == null) resolvedGoalId = parentGoalId;
