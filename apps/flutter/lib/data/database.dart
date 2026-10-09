@@ -175,6 +175,7 @@ CREATE TABLE IF NOT EXISTS users (
       'ALTER TABLE habits ADD COLUMN goal_id TEXT',
       'ALTER TABLE milestones ADD COLUMN completed_at INTEGER',
       'ALTER TABLE milestones ADD COLUMN position INTEGER DEFAULT 0',
+      "ALTER TABLE entity_links ADD COLUMN relation TEXT DEFAULT 'RELATED'",
       'ALTER TABLE tasks ADD COLUMN description TEXT',
       'ALTER TABLE financial_accounts ADD COLUMN status TEXT',
     ]) {
@@ -323,6 +324,7 @@ CREATE TABLE IF NOT EXISTS users (
       'users': ['id', 'display_name', 'currency', 'week_start_day'],
       'tasks': ['id', 'owner_id', 'title', 'description', 'status', 'due_at'],
       'milestones': ['id', 'owner_id', 'project_id', 'title', 'status', 'position'],
+      'entity_links': ['id', 'owner_id', 'from_type', 'from_id', 'to_type', 'to_id', 'relation'],
       'activity_events': ['id', 'owner_id', 'event_type', 'entity_type', 'entity_id', 'summary'],
       'work_sessions': ['id', 'owner_id', 'status', 'started_at', 'accumulated_ms'],
     };
