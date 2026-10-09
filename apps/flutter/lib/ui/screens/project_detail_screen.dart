@@ -498,7 +498,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                             [
                               dbStr(task['status']),
                               if (dbStrOrNull(task['milestone_id']) != null)
-                                'Milestone: ${ws.milestones.where((m) => dbStr(m['id']) == dbStr(task['milestone_id'])).map((m) => dbStr(m['title'])).firstOrNull ?? 'Unknown'}',
+                                'Milestone: ${ws.milestones.firstWhere((m) => dbStr(m['id']) == dbStr(task['milestone_id']))['title']}',
                               if (task['scheduled_start'] != null)
                                 'sched ${_fmtTime(task['scheduled_start'] as int?)}',
                             ].join(' · '),
