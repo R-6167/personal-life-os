@@ -26,6 +26,7 @@ class AtomicWrite {
     String source = EventSource.user,
     String? metadata,
     int? occurredAt,
+    List<AtomicEvent> additionalEvents = const [],
     AppDatabase? db,
   }) async {
     final database = db ?? AppDatabase.instance;
@@ -45,6 +46,14 @@ class AtomicWrite {
         'source': source,
         if (metadata != null) 'metadata': metadata,
       });
+      for (final event in additionalEvents) {
+        await txn.insert('activity_events', {
+          'id': AppDatabase.newId(), 'owner_id': ownerId,
+          'event_type': event.eventType, 'entity_type': event.entityType, 'entity_id': event.entityId,
+          'occurred_at': event.occurredAt ?? now, 'recorded_at': AppDatabase.nowMs(), 'source': event.source,
+          if (event.metadata != null) 'metadata': event.metadata,
+        });
+      }
       return result;
     });
   }
