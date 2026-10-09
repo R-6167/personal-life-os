@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:sqflite/sqflite.dart';
 
-import '../services/error_log_service.dart';
 import '../services/integrity_service.dart';
 import 'database.dart';
 
@@ -73,16 +72,23 @@ class ExportService {
       try {
         final rows = await db.query(t);
         data[t] = rows.map(_camel).toList();
-      } catch (e, st) {
-        await ErrorLogService.instance.log(
-          message: 'export table $t: $e',
-          stack: st.toString(),
-          level: 'EXPORT',
-        );
-        data[t] = [];
+      } catch (e) {
+        // An export with a silently empty table is a corrupt/incomplete backup.
+        // Abort rather than presenting a partial archive as a valid backup.
+        throw StateError('Backup export failed for table "$t": $e');
       }
     }
-    return const JsonEncoder.withIndent('  ').convert(data);
+    final json = const JsonEncoder.withIndent('  ').convert(data);
+    if (json.length > maxRawChars) {
+      throw StateError(
+        'Backup exceeds size limit (${(json.length / 1024).toStringAsFixed(0)} KB).',
+      );
+    }
+    final verification = await IntegrityService(db: _db).verifyBackupJson(json);
+    if (!verification.ok) {
+      throw StateError('Backup export verification failed: ${verification.summary}');
+    }
+    return json;
   }
 
   Future<ImportResult> importBackupJson(String raw, {bool replaceUsers = false}) async {
