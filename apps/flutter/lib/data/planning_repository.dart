@@ -55,6 +55,7 @@ class PlanningRepository {
     String? title,
   }) async {
     durationMinutes = durationMinutes.clamp(15, 8 * 60);
+    final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
     final startMs = start.millisecondsSinceEpoch;
     final endMs = start.add(Duration(minutes: durationMinutes)).millisecondsSinceEpoch;
@@ -172,7 +173,6 @@ class PlanningRepository {
     minutes ??= (taskRows.first['estimated_minutes'] as int?) ?? 30;
     minutes = minutes.clamp(15, 8 * 60);
 
-    final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
     final startMs = start.millisecondsSinceEpoch;
     final endMs = start.add(Duration(minutes: minutes)).millisecondsSinceEpoch;
