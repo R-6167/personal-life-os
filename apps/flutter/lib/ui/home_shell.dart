@@ -285,10 +285,6 @@ class _HomeShellState extends State<HomeShell> {
 
   Future<void> _reloadTasks() =>
       _reload(domains: {DataDomain.tasks, DataDomain.today});
-  Future<void> _reloadLife() =>
-      _reload(domains: {DataDomain.life, DataDomain.today});
-  Future<void> _reloadFinance() =>
-      _reload(domains: {DataDomain.finance, DataDomain.today});
 
   Future<void> _openTask(Task t) async {
     await Navigator.of(context).push(
@@ -446,8 +442,9 @@ class _HomeShellState extends State<HomeShell> {
           projects: _projectList,
           routines: _routineList,
           onChanged: () async {
+            // The data bus is the single refresh path; don't also run the same
+            // repository reads directly from this callback.
             AppDataBus.instance.lifeChanged();
-            await _reloadLife();
           },
         ),
         FinanceHub(
@@ -457,17 +454,21 @@ class _HomeShellState extends State<HomeShell> {
           monthSpendMinor: _monthSpendMinor,
           onChanged: () async {
             AppDataBus.instance.financeChanged();
-            await _reloadFinance();
           },
           onPayBill: (o) async {
             await promptAndPayBill(context, o);
             AppDataBus.instance.financeChanged();
-            await _reloadFinance();
           },
         ),
         MoreHub(onChanged: () async {
-          AppDataBus.instance.lifeChanged();
-          await _reload(domains: {DataDomain.life, DataDomain.finance});
+          // More spans multiple domains, but still needs only one bus event
+          // and one scoped HomeShell reload.
+          AppDataBus.instance.notifyDomains({
+            DataDomain.life,
+            DataDomain.finance,
+            DataDomain.today,
+            DataDomain.timeline,
+          });
         }),
       ],
     );
