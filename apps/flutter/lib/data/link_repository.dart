@@ -4,9 +4,9 @@ import 'database.dart';
 
 /// entity_links: connect notes ↔ project, goal, task, person, event, finance/practical.
 ///
-/// Supports both schema styles:
-///   from_type/from_id/to_type/to_id/relation  (schema.sql)
-///   source_type/source_id/target_type/target_id/relationship_type  (legacy)
+/// Supports the canonical from_type/from_id/to_type/to_id schema and the
+/// legacy source_type/source_id/target_type/target_id schema. Relationship
+/// labels are optional in the canonical schema, so reads default to RELATED.
 class LinkRepository {
   LinkRepository(this._db);
   final AppDatabase _db;
@@ -60,7 +60,6 @@ class LinkRepository {
           'from_id': sourceId,
           'to_type': targetType,
           'to_id': targetId,
-          'relation': relationship,
           'created_at': now,
         },
         conflictAlgorithm: ConflictAlgorithm.ignore,
