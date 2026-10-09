@@ -106,15 +106,26 @@ void main() {
       title: 'Foreign milestone',
     );
     final db = await app.database;
+    final otherOwnerId = AppDatabase.newId();
+    final now = AppDatabase.nowMs();
+    await db.insert('users', {
+      'id': otherOwnerId,
+      'display_name': 'Other',
+      'name': 'Other',
+      'currency': Defaults.currency,
+      'week_start_day': Defaults.weekStartDay,
+      'created_at': now,
+      'updated_at': now,
+    });
     await db.update(
       'tasks',
-      {'owner_id': 'another-owner'},
+      {'owner_id': otherOwnerId},
       where: 'id = ?',
       whereArgs: [task.id],
     );
     await db.update(
       'milestones',
-      {'owner_id': 'another-owner'},
+      {'owner_id': otherOwnerId},
       where: 'id = ?',
       whereArgs: [milestone.id],
     );
@@ -130,9 +141,21 @@ void main() {
   test('project workspace rejects a project owned by another user', () async {
     final app = AppDatabase.instance;
     final project = await ProjectRepository(app).create(title: 'Private project');
-    await (await app.database).update(
+    final db = await app.database;
+    final otherOwnerId = AppDatabase.newId();
+    final now = AppDatabase.nowMs();
+    await db.insert('users', {
+      'id': otherOwnerId,
+      'display_name': 'Other',
+      'name': 'Other',
+      'currency': Defaults.currency,
+      'week_start_day': Defaults.weekStartDay,
+      'created_at': now,
+      'updated_at': now,
+    });
+    await db.update(
       'projects',
-      {'owner_id': 'another-owner'},
+      {'owner_id': otherOwnerId},
       where: 'id = ?',
       whereArgs: [project.id],
     );
