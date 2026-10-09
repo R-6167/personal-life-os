@@ -4,9 +4,8 @@ import 'database.dart';
 
 /// entity_links: connect notes ↔ project, goal, task, person, event, finance/practical.
 ///
-/// Supports both schema styles:
-///   from_type/from_id/to_type/to_id/relation  (schema.sql)
-///   source_type/source_id/target_type/target_id/relationship_type  (legacy)
+/// Supports the canonical from_type/from_id/to_type/to_id/relation schema and
+/// the legacy source_type/source_id/target_type/target_id/relationship_type schema.
 class LinkRepository {
   LinkRepository(this._db);
   final AppDatabase _db;
