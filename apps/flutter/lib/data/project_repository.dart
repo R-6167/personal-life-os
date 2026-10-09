@@ -66,13 +66,38 @@ class ProjectRepository {
   }
 
   Future<void> linkGoal(String projectId, String? goalId) async {
-    final db = await _db.database;
-    await db.update(
-      'projects',
-      {'goal_id': goalId, 'updated_at': AppDatabase.nowMs()},
-      where: 'id = ?',
-      whereArgs: [projectId],
-    );
+    final ownerId = await _db.requireOwnerId();
+    final now = AppDatabase.nowMs();
+    await _db.txn((txn) async {
+      final projects = await txn.query(
+        'projects',
+        columns: ['id'],
+        where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
+        whereArgs: [projectId, ownerId],
+        limit: 1,
+      );
+      if (projects.isEmpty) {
+        throw StateError('Active project not found for the current owner: $projectId');
+      }
+      if (goalId != null) {
+        final goals = await txn.query(
+          'goals',
+          columns: ['id'],
+          where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
+          whereArgs: [goalId, ownerId],
+          limit: 1,
+        );
+        if (goals.isEmpty) {
+          throw StateError('Active goal not found for the current owner: $goalId');
+        }
+      }
+      await txn.update(
+        'projects',
+        {'goal_id': goalId, 'updated_at': now},
+        where: 'id = ? AND owner_id = ?',
+        whereArgs: [projectId, ownerId],
+      );
+    });
   }
 
   Future<void> updateMeta({
