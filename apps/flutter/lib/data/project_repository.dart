@@ -113,21 +113,24 @@ class ProjectRepository {
 
   Future<Map<String, int>> progress(String projectId) async {
     final db = await _db.database;
+    final ownerId = await _db.requireOwnerId();
     final total = await db.rawQuery(
-      "SELECT COUNT(*) AS c FROM tasks WHERE project_id = ? AND status != 'CANCELLED'",
-      [projectId],
+      "SELECT COUNT(*) AS c FROM tasks WHERE owner_id = ? AND project_id = ? "
+      "AND archived_at IS NULL AND COALESCE(status, '') != 'CANCELLED'",
+      [ownerId, projectId],
     );
     final done = await db.rawQuery(
-      "SELECT COUNT(*) AS c FROM tasks WHERE project_id = ? AND status = 'COMPLETED'",
-      [projectId],
+      "SELECT COUNT(*) AS c FROM tasks WHERE owner_id = ? AND project_id = ? "
+      "AND archived_at IS NULL AND status = 'COMPLETED'",
+      [ownerId, projectId],
     );
     final mt = await db.rawQuery(
-      'SELECT COUNT(*) AS c FROM milestones WHERE project_id = ?',
-      [projectId],
+      'SELECT COUNT(*) AS c FROM milestones WHERE owner_id = ? AND project_id = ?',
+      [ownerId, projectId],
     );
     final md = await db.rawQuery(
-      "SELECT COUNT(*) AS c FROM milestones WHERE project_id = ? AND status = 'COMPLETED'",
-      [projectId],
+      "SELECT COUNT(*) AS c FROM milestones WHERE owner_id = ? AND project_id = ? AND status = 'COMPLETED'",
+      [ownerId, projectId],
     );
     return {
       'total': (total.first['c'] as int?) ?? 0,

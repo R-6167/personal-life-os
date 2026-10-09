@@ -1,6 +1,7 @@
 import '../domain/enums.dart';
 import '../domain/models.dart';
 import 'atomic_write.dart';
+import '../services/progress_calculator.dart';
 import 'database.dart';
 
 class GoalRepository {
@@ -81,41 +82,114 @@ class GoalRepository {
 
   Future<Map<String, int>> progress(String goalId) async {
     final db = await _db.database;
+    final ownerId = await _db.requireOwnerId();
     final projects = await db.rawQuery(
-      'SELECT COUNT(*) AS c FROM projects WHERE goal_id = ? AND archived_at IS NULL',
-      [goalId],
+      'SELECT COUNT(*) AS c FROM projects '
+      'WHERE owner_id = ? AND goal_id = ? AND archived_at IS NULL',
+      [ownerId, goalId],
     );
     final projectsDone = await db.rawQuery(
-      'SELECT COUNT(*) AS c FROM projects WHERE goal_id = ? AND status = ?',
-      [goalId, EntityStatus.completed],
+      'SELECT COUNT(*) AS c FROM projects '
+      'WHERE owner_id = ? AND goal_id = ? AND archived_at IS NULL AND status = ?',
+      [ownerId, goalId, EntityStatus.completed],
     );
+    const eligibleTaskUnion = '''
+      SELECT t.id, t.status FROM tasks t
+      WHERE t.owner_id = ? AND t.goal_id = ? AND t.archived_at IS NULL
+        AND COALESCE(t.status, '') != ?
+        AND NOT EXISTS (
+          SELECT 1 FROM projects p WHERE p.id = t.project_id
+            AND p.owner_id = t.owner_id AND p.archived_at IS NOT NULL
+        )
+      UNION
+      SELECT t.id, t.status FROM tasks t
+      JOIN projects p ON p.id = t.project_id
+      WHERE p.owner_id = ? AND p.goal_id = ? AND p.archived_at IS NULL
+        AND t.owner_id = ? AND t.archived_at IS NULL
+        AND COALESCE(t.status, '') != ?
+    ''';
     final tasks = await db.rawQuery(
-      "SELECT COUNT(*) AS c FROM tasks WHERE goal_id = ? AND status != ?",
-      [goalId, EntityStatus.cancelled],
+      'SELECT COUNT(*) AS c FROM ($eligibleTaskUnion)',
+      [ownerId, goalId, EntityStatus.cancelled, ownerId, goalId, ownerId, EntityStatus.cancelled],
     );
     final tasksDone = await db.rawQuery(
-      'SELECT COUNT(*) AS c FROM tasks WHERE goal_id = ? AND status = ?',
-      [goalId, EntityStatus.completed],
+      "SELECT COUNT(*) AS c FROM ($eligibleTaskUnion) WHERE status = ?",
+      [ownerId, goalId, EntityStatus.cancelled, ownerId, goalId, ownerId, EntityStatus.cancelled, EntityStatus.completed],
+    );
+    final habits = await db.rawQuery(
+      "SELECT COUNT(*) AS c FROM habits WHERE owner_id = ? AND goal_id = ? "
+      "AND archived_at IS NULL AND (status = ? OR status IS NULL)",
+      [ownerId, goalId, EntityStatus.active],
+    );
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day).millisecondsSinceEpoch;
+    final habitsDoneToday = await db.rawQuery(
+      'SELECT COUNT(DISTINCT o.habit_id) AS c FROM habit_occurrences o '
+      'JOIN habits h ON h.id = o.habit_id '
+      "WHERE h.owner_id = ? AND h.goal_id = ? AND h.archived_at IS NULL "
+      'AND (h.status = ? OR h.status IS NULL) AND o.scheduled_date = ? AND o.status = ?',
+      [ownerId, goalId, EntityStatus.active, today, HabitOccurrenceStatus.completed],
     );
     return {
       'projectsTotal': (projects.first['c'] as int?) ?? 0,
       'projectsDone': (projectsDone.first['c'] as int?) ?? 0,
       'tasksTotal': (tasks.first['c'] as int?) ?? 0,
       'tasksDone': (tasksDone.first['c'] as int?) ?? 0,
-      'habitsTotal': 0,
-      'habitsDoneToday': 0,
+      'habitsTotal': (habits.first['c'] as int?) ?? 0,
+      'habitsDoneToday': (habitsDoneToday.first['c'] as int?) ?? 0,
     };
   }
 
   Future<double> progressRatio(String goalId) async {
-    final p = await progress(goalId);
-    final pt = p['projectsTotal'] ?? 0;
-    final pd = p['projectsDone'] ?? 0;
-    final tt = p['tasksTotal'] ?? 0;
-    final td = p['tasksDone'] ?? 0;
-    if (tt + pt == 0) return 0;
-    final score = (tt == 0 ? 0.0 : td / tt) * 0.6 + (pt == 0 ? 0.0 : pd / pt) * 0.4;
-    return score.clamp(0.0, 1.0);
+    final db = await _db.database;
+    final ownerId = await _db.requireOwnerId();
+    final projectRows = await db.query(
+      'projects',
+      columns: ['id'],
+      where: 'owner_id = ? AND goal_id = ? AND archived_at IS NULL',
+      whereArgs: [ownerId, goalId],
+      orderBy: 'created_at ASC',
+    );
+    final projectRatios = <double>[];
+    for (final project in projectRows) {
+      final projectId = project['id'] as String;
+      final taskCounts = await db.rawQuery(
+        "SELECT COUNT(*) AS total, "
+        "COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS done "
+        "FROM tasks WHERE owner_id = ? AND project_id = ? AND archived_at IS NULL "
+        "AND COALESCE(status, '') != ?",
+        [EntityStatus.completed, ownerId, projectId, EntityStatus.cancelled],
+      );
+      final milestoneCounts = await db.rawQuery(
+        "SELECT COUNT(*) AS total, "
+        "COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS done "
+        'FROM milestones WHERE owner_id = ? AND project_id = ?',
+        [EntityStatus.completed, ownerId, projectId],
+      );
+      projectRatios.add(ProgressCalculator.projectRatio(
+        tasksDone: (taskCounts.first['done'] as int?) ?? 0,
+        tasksTotal: (taskCounts.first['total'] as int?) ?? 0,
+        milestonesDone: (milestoneCounts.first['done'] as int?) ?? 0,
+        milestonesTotal: (milestoneCounts.first['total'] as int?) ?? 0,
+      ));
+    }
+
+    final directTasks = await db.rawQuery(
+      "SELECT COUNT(*) AS total, "
+      "COALESCE(SUM(CASE WHEN t.status = ? THEN 1 ELSE 0 END), 0) AS done "
+      "FROM tasks t WHERE t.owner_id = ? AND t.goal_id = ? "
+      "AND t.archived_at IS NULL AND COALESCE(t.status, '') != ? "
+      "AND (t.project_id IS NULL OR t.project_id NOT IN ("
+      "SELECT p.id FROM projects p WHERE p.owner_id = ? AND p.goal_id = ?)) "
+      "AND NOT EXISTS (SELECT 1 FROM projects p WHERE p.id = t.project_id "
+      "AND p.owner_id = t.owner_id AND p.archived_at IS NOT NULL)",
+      [EntityStatus.completed, ownerId, goalId, EntityStatus.cancelled, ownerId, goalId],
+    );
+    return ProgressCalculator.goalRatio(
+      projectRatios: projectRatios,
+      directTasksDone: (directTasks.first['done'] as int?) ?? 0,
+      directTasksTotal: (directTasks.first['total'] as int?) ?? 0,
+    );
   }
 
   Future<List<Map<String, Object?>>> listLinkedHabits(String goalId) async {

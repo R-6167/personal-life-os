@@ -1,5 +1,6 @@
 import '../data/database.dart';
 import '../domain/db_map.dart';
+import 'progress_calculator.dart';
 
 /// What is the next concrete thing I can do on this project?
 class NextAction {
@@ -141,10 +142,12 @@ class ProjectWorkspaceService {
         milestones.where((m) => dbStr(m['status']) == 'COMPLETED').length;
     final tt = allTasks.length;
     final mt = milestones.length;
-    final ratio = (tt + mt == 0)
-        ? 0.0
-        : ((tt == 0 ? 0.0 : tasksDone / tt) * 0.7 + (mt == 0 ? 0.0 : milestonesDone / mt) * 0.3)
-            .clamp(0.0, 1.0);
+    final ratio = ProgressCalculator.projectRatio(
+      tasksDone: tasksDone,
+      tasksTotal: tt,
+      milestonesDone: milestonesDone,
+      milestonesTotal: mt,
+    );
 
     final next = _computeNextAction(
       openTasks: openTasks,
