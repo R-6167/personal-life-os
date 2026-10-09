@@ -69,19 +69,38 @@ class MilestoneRepository {
 
   Future<void> complete(String id) async {
     final now = AppDatabase.nowMs();
+    final ownerId = await _db.requireOwnerId();
     await AtomicWrite.run(
       db: _db,
       state: (txn) async {
-        await txn.update(
+        final rows = await txn.query(
+          'milestones',
+          columns: ['id', 'project_id'],
+          where: 'id = ? AND owner_id = ?',
+          whereArgs: [id, ownerId],
+          limit: 1,
+        );
+        if (rows.isEmpty) {
+          throw StateError('Milestone not found or not owned by the current user: $id');
+        }
+        await RelationshipValidator.validateProject(
+          txn,
+          ownerId: ownerId,
+          projectId: rows.first['project_id'] as String,
+        );
+        final changed = await txn.update(
           'milestones',
           {
             'status': MilestoneStatus.completed,
             'completed_at': now,
             'updated_at': now,
           },
-          where: 'id = ?',
-          whereArgs: [id],
+          where: 'id = ? AND owner_id = ?',
+          whereArgs: [id, ownerId],
         );
+        if (changed != 1) {
+          throw StateError('Milestone not found or not owned by the current user: $id');
+        }
       },
       eventType: 'MILESTONE_COMPLETED',
       entityType: 'MILESTONE',
