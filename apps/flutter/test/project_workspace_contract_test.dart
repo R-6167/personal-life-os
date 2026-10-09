@@ -588,6 +588,7 @@ void main() {
       ),
       throwsA(isA<StateError>()),
     );
+    expect(await links.linksFor('PROJECT', 'owner-link-project'), isEmpty);
 
     final existing = await db.query(
       'entity_links',
