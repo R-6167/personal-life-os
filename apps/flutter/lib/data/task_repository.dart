@@ -158,15 +158,78 @@ class TaskRepository {
     String? assistantActionPreview,
   }) async {
     final ownerId = await _db.requireOwnerId();
+    final db = await _db.database;
+    final resolvedProjectId =
+        projectId == null || projectId.isEmpty ? null : projectId;
+    var resolvedGoalId = goalId;
+
+    if (resolvedProjectId != null) {
+      final projects = await db.query(
+        'projects',
+        columns: ['id', 'goal_id'],
+        where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
+        whereArgs: [resolvedProjectId, ownerId],
+        limit: 1,
+      );
+      if (projects.isEmpty) {
+        throw StateError(
+          'Active project not found for the current owner: $resolvedProjectId',
+        );
+      }
+      final projectGoalId = dbStrOrNull(projects.first['goal_id']);
+      if (resolvedGoalId == null) {
+        resolvedGoalId = projectGoalId;
+      } else if (projectGoalId != null && resolvedGoalId != projectGoalId) {
+        throw StateError('The task goal must match its project goal.');
+      }
+    }
+
+    if (resolvedGoalId != null) {
+      final goals = await db.query(
+        'goals',
+        columns: ['id'],
+        where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
+        whereArgs: [resolvedGoalId, ownerId],
+        limit: 1,
+      );
+      if (goals.isEmpty) {
+        throw StateError(
+          'Active goal not found for the current owner: $resolvedGoalId',
+        );
+      }
+    }
+
+    if (parentTaskId != null) {
+      final parents = await db.query(
+        'tasks',
+        columns: ['id', 'project_id', 'goal_id'],
+        where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
+        whereArgs: [parentTaskId, ownerId],
+        limit: 1,
+      );
+      if (parents.isEmpty) {
+        throw StateError('Parent task not found for the current owner: $parentTaskId');
+      }
+      final parent = parents.first;
+      if (dbStrOrNull(parent['project_id']) != resolvedProjectId) {
+        throw StateError('A subtask must belong to the same project as its parent task.');
+      }
+      final parentGoalId = dbStrOrNull(parent['goal_id']);
+      if (parentGoalId != null && resolvedGoalId != parentGoalId) {
+        throw StateError('A subtask must belong to the same goal as its parent task.');
+      }
+      if (resolvedGoalId == null) resolvedGoalId = parentGoalId;
+    }
+
     if (milestoneId != null) {
-      if (projectId == null || projectId.isEmpty) {
+      if (resolvedProjectId == null) {
         throw StateError('A task milestone requires a project.');
       }
-      final linked = await (await _db.database).query(
+      final linked = await db.query(
         'milestones',
         columns: ['id'],
         where: 'id = ? AND project_id = ? AND owner_id = ?',
-        whereArgs: [milestoneId, projectId, ownerId],
+        whereArgs: [milestoneId, resolvedProjectId, ownerId],
         limit: 1,
       );
       if (linked.isEmpty) {
@@ -177,8 +240,8 @@ class TaskRepository {
     final task = Task(
       id: AppDatabase.newId(),
       ownerId: ownerId,
-      projectId: projectId,
-      goalId: goalId,
+      projectId: resolvedProjectId,
+      goalId: resolvedGoalId,
       title: title,
       status: status,
       priority: priority,
