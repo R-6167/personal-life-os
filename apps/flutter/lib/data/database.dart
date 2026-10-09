@@ -174,6 +174,7 @@ CREATE TABLE IF NOT EXISTS users (
       'ALTER TABLE habits ADD COLUMN archived_at INTEGER',
       'ALTER TABLE habits ADD COLUMN goal_id TEXT',
       'ALTER TABLE milestones ADD COLUMN completed_at INTEGER',
+      'ALTER TABLE milestones ADD COLUMN position INTEGER DEFAULT 0',
       'ALTER TABLE tasks ADD COLUMN description TEXT',
       'ALTER TABLE financial_accounts ADD COLUMN status TEXT',
     ]) {
@@ -321,6 +322,7 @@ CREATE TABLE IF NOT EXISTS users (
     const requiredColumns = <String, List<String>>{
       'users': ['id', 'display_name', 'currency', 'week_start_day'],
       'tasks': ['id', 'owner_id', 'title', 'description', 'status', 'due_at'],
+      'milestones': ['id', 'owner_id', 'project_id', 'title', 'status', 'position'],
       'activity_events': ['id', 'owner_id', 'event_type', 'entity_type', 'entity_id', 'summary'],
       'work_sessions': ['id', 'owner_id', 'status', 'started_at', 'accumulated_ms'],
     };

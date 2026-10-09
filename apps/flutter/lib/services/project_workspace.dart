@@ -71,9 +71,10 @@ class ProjectWorkspaceService {
   Future<ProjectWorkspace> load(String projectId) async {
     final db = await _db.database;
     final prows = await db.query('projects', where: 'id = ?', whereArgs: [projectId], limit: 1);
-    final project = prows.isEmpty
-        ? <String, Object?>{'id': projectId, 'title': 'Project'}
-        : prows.first;
+    if (prows.isEmpty) {
+      throw StateError('Project not found: $projectId');
+    }
+    final project = prows.first;
 
     Map<String, Object?>? goal;
     final goalId = dbStrOrNull(project['goal_id']);

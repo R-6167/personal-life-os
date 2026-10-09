@@ -27,6 +27,7 @@ class ProjectDetailScreen extends StatefulWidget {
 
 class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
   ProjectWorkspace? _ws;
+  String? _loadError;
   bool _loading = true;
 
   final _projects = ProjectRepository(AppDatabase.instance);
@@ -41,12 +42,28 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
   }
 
   Future<void> _load() async {
-    final ws = await _workspace.load(widget.projectId);
-    if (!mounted) return;
-    setState(() {
-      _ws = ws;
-      _loading = false;
-    });
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _loadError = null;
+      });
+    }
+    try {
+      final ws = await _workspace.load(widget.projectId);
+      if (!mounted) return;
+      setState(() {
+        _ws = ws;
+        _loading = false;
+        _loadError = null;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _ws = null;
+        _loading = false;
+        _loadError = 'Could not load this project. Please try again.';
+      });
+    }
   }
 
   Future<void> _addTask({String? parentTaskId}) async {
@@ -198,6 +215,27 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
   Widget build(BuildContext context) {
     if (_loading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator(color: AppTheme.amber)));
+    }
+    if (_loadError != null) {
+      return Scaffold(
+        appBar: AppBar(),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.error_outline, color: AppTheme.amber, size: 32),
+                const SizedBox(height: 12),
+                Text(_loadError!, textAlign: TextAlign.center,
+                    style: const TextStyle(color: AppTheme.silver)),
+                const SizedBox(height: 12),
+                FilledButton(onPressed: _load, child: const Text('Retry')),
+              ],
+            ),
+          ),
+        ),
+      );
     }
     final ws = _ws;
     if (ws == null) {
