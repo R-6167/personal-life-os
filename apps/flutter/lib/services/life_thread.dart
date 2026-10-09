@@ -1,4 +1,5 @@
 import '../data/database.dart';
+import '../domain/enums.dart';
 import 'progress_calculator.dart';
 import '../domain/db_map.dart';
 
@@ -162,7 +163,8 @@ class LifeThreadService {
 
   Future<GoalThread> forGoal(String goalId) async {
     final db = await _db.database;
-    final goals = await db.query('goals', where: 'id = ?', whereArgs: [goalId], limit: 1);
+    final ownerId = await _db.requireOwnerId();
+    final goals = await db.query('goals', where: 'id = ? AND owner_id = ? AND archived_at IS NULL', whereArgs: [goalId, ownerId], limit: 1);
     final goal = goals.isEmpty ? <String, Object?>{'id': goalId, 'title': 'Goal'} : goals.first;
 
     final projects = await db.query(
