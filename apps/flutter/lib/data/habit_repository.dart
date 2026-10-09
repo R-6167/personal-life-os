@@ -143,7 +143,7 @@ class HabitRepository {
     }
   }
 
-  Future<void> markDoneToday(String habitId) async {
+  Future<void> markDoneToday(String habitId, {String? assistantActionPreview}) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
     final occId = await ensureTodayOccurrence(habitId);
@@ -169,6 +169,14 @@ class HabitRepository {
         'recorded_at': now,
         'source': EventSource.user,
       });
+      if (assistantActionPreview != null) {
+        await txn.insert('activity_events', {
+          'id': AppDatabase.newId(), 'owner_id': ownerId,
+          'event_type': 'ASSISTANT_ACTION_EXECUTED', 'entity_type': 'HABIT', 'entity_id': habitId,
+          'occurred_at': now, 'recorded_at': now, 'source': EventSource.system,
+          'metadata': '{"action":"completeHabit"}',
+        });
+      }
     });
   }
 
