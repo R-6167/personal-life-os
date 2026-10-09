@@ -230,4 +230,93 @@ void main() {
     expect(rows.map((r) => r['position']).toList(), [0, 1]);
   });
 
+
+  test('project notes and resources persist as visible workspace links', () async {
+    final app = AppDatabase.instance;
+    final db = await app.database;
+    final ownerId = await app.requireOwnerId();
+    const projectId = 'project-linked-records';
+    final now = AppDatabase.nowMs();
+    await db.insert('projects', {
+      'id': projectId,
+      'owner_id': ownerId,
+      'title': 'Linked records project',
+      'status': 'ACTIVE',
+      'created_at': now,
+      'updated_at': now,
+    });
+
+    final workspaceService = ProjectWorkspaceService(app);
+    await workspaceService.attachNote(
+      projectId: projectId,
+      content: 'Decision log for the project',
+    );
+    await workspaceService.attachResource(
+      projectId: projectId,
+      title: 'Project brief',
+      notes: 'Reference notes survive reload',
+    );
+
+    final workspace = await workspaceService.load(projectId);
+    expect(workspace.notes, hasLength(1));
+    expect(workspace.notes.single['content'], 'Decision log for the project');
+    expect(workspace.resources, hasLength(1));
+    expect(workspace.resources.single['title'], 'Project brief');
+    expect(workspace.resources.single['notes'], 'Reference notes survive reload');
+  });
+
+  test('cannot attach project notes to another owner or missing project', () async {
+    final service = ProjectWorkspaceService(AppDatabase.instance);
+    await expectLater(
+      service.attachNote(projectId: 'missing-project', content: 'Must not persist'),
+      throwsA(isA<StateError>()),
+    );
+    final db = await AppDatabase.instance.database;
+    expect(await db.query('notes'), isEmpty);
+    expect(await db.query('entity_links'), isEmpty);
+  });
+
+  test('generic entity links persist against the canonical schema', () async {
+    final app = AppDatabase.instance;
+    final db = await app.database;
+    final ownerId = await app.requireOwnerId();
+    final now = AppDatabase.nowMs();
+    await db.insert('projects', {
+      'id': 'generic-link-project',
+      'owner_id': ownerId,
+      'title': 'Generic link project',
+      'status': 'ACTIVE',
+      'created_at': now,
+      'updated_at': now,
+    });
+    await db.insert('notes', {
+      'id': 'generic-link-note',
+      'owner_id': ownerId,
+      'title': 'Decision',
+      'content': 'A related note',
+      'created_at': now,
+      'updated_at': now,
+    });
+
+    final links = LinkRepository(app);
+    await links.link(
+      sourceType: 'PROJECT',
+      sourceId: 'generic-link-project',
+      targetType: 'NOTE',
+      targetId: 'generic-link-note',
+    );
+
+    final rows = await db.query('entity_links');
+    expect(rows, hasLength(1));
+    expect(rows.single['from_type'], 'PROJECT');
+    expect(rows.single['to_type'], 'NOTE');
+    expect(await links.relatedWithTitles('PROJECT', 'generic-link-project'), [
+      {
+        'type': 'NOTE',
+        'id': 'generic-link-note',
+        'title': 'Decision',
+        'relation': 'RELATED',
+      },
+    ]);
+  });
 }
