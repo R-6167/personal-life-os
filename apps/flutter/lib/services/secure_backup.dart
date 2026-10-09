@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
-import 'package:crypto/crypto.dart';
+import 'package:crypto/crypto.dart' show Digest, sha256;
 import 'package:cryptography/cryptography.dart';
 import 'package:encrypt/encrypt.dart' as enc;
 
