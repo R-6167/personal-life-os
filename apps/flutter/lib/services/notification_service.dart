@@ -7,6 +7,7 @@ import 'package:timezone/timezone.dart' as tz;
 import '../data/budget_repository.dart';
 import '../data/database.dart';
 import '../data/extended_repository.dart';
+import 'notification_diagnostics.dart';
 import 'notification_payload.dart';
 import 'notification_router.dart';
 import 'reminder_generator_service.dart';
@@ -225,7 +226,9 @@ class NotificationService {
 
     try {
       await ReminderGeneratorService().generateAll();
-    } catch (_) {}
+    } catch (error, stackTrace) {
+      await NotificationDiagnostics.record('generate_reminders', error, stackTrace: stackTrace);
+    }
 
     await cancelAll();
     var n = 0;
@@ -253,15 +256,24 @@ class NotificationService {
       final body = '${r['message'] ?? 'Open Ordin to act'}'
           .replaceFirst(RegExp(r'^\[[^\]]+\]\s*'), '');
 
-      await _schedule(
-        id: _stableId('rem', remId),
-        title: '${r['title']}',
-        body: body,
-        when: when,
-        high: true,
-        payload: payload.encode(),
-      );
-      n++;
+      try {
+        await _schedule(
+          id: _stableId('rem', remId),
+          title: '${r['title']}',
+          body: body,
+          when: when,
+          high: true,
+          payload: payload.encode(),
+        );
+        n++;
+      } catch (error, stackTrace) {
+        await NotificationDiagnostics.record(
+          'schedule_reminder',
+          error,
+          stackTrace: stackTrace,
+          details: {'reminderId': remId, 'sourceType': sourceType},
+        );
+      }
     }
 
     n += await notifyBudgetAlerts(delay: const Duration(seconds: 2));
