@@ -60,6 +60,7 @@ Future<AppDatabase> openTestDb() async {
         'ALTER TABLE milestones ADD COLUMN completed_at INTEGER',
         'ALTER TABLE milestones ADD COLUMN position INTEGER DEFAULT 0',
         'ALTER TABLE tasks ADD COLUMN description TEXT',
+        'ALTER TABLE documents ADD COLUMN notes TEXT',
       ]) {
         try {
           await d.execute(alter);
