@@ -15,7 +15,7 @@ class AppDatabase {
   static const _uuid = Uuid();
 
   // Bump whenever the database schema/migration contract changes.
-  static const schemaVersion = 23;
+  static const schemaVersion = 24;
 
   Future<Database> get database async {
     if (_db != null) return _db!;
@@ -82,6 +82,7 @@ class AppDatabase {
         await _migrateToV21(db);
         await _migrateToV22(db);
         await _migrateToV23(db);
+        await _migrateToV24(db);
         await _verifySchemaContract(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
@@ -103,6 +104,7 @@ class AppDatabase {
         if (oldVersion < 21) await _migrateToV21(db);
         if (oldVersion < 22) await _migrateToV22(db);
         if (oldVersion < 23) await _migrateToV23(db);
+        if (oldVersion < 24) await _migrateToV24(db);
         await _verifySchemaContract(db);
       },
       onOpen: (db) async {
@@ -177,6 +179,8 @@ CREATE TABLE IF NOT EXISTS users (
       'ALTER TABLE milestones ADD COLUMN position INTEGER DEFAULT 0',
       'ALTER TABLE tasks ADD COLUMN description TEXT',
       'ALTER TABLE financial_accounts ADD COLUMN status TEXT',
+      'ALTER TABLE documents ADD COLUMN notes TEXT',
+      "ALTER TABLE entity_links ADD COLUMN relation TEXT DEFAULT 'RELATED'",
     ]) {
       await _executeIgnoringDuplicateColumn(db, alter);
     }
@@ -295,6 +299,11 @@ CREATE TABLE IF NOT EXISTS users (
     await _ensureSoftColumns(db);
   }
 
+  Future<void> _migrateToV24(Database db) async {
+    await _applySchema(db);
+    await _ensureSoftColumns(db);
+  }
+
   Future<void> _executeIgnoringDuplicateColumn(Database db, String sql) async {
     try {
       await db.execute(sql);
@@ -323,6 +332,8 @@ CREATE TABLE IF NOT EXISTS users (
       'users': ['id', 'display_name', 'currency', 'week_start_day'],
       'tasks': ['id', 'owner_id', 'title', 'description', 'status', 'due_at'],
       'milestones': ['id', 'owner_id', 'project_id', 'title', 'status', 'position'],
+      'entity_links': ['id', 'owner_id', 'from_type', 'from_id', 'to_type', 'to_id', 'relation'],
+      'documents': ['id', 'owner_id', 'title', 'notes'],
       'activity_events': ['id', 'owner_id', 'event_type', 'entity_type', 'entity_id', 'summary'],
       'work_sessions': ['id', 'owner_id', 'status', 'started_at', 'accumulated_ms'],
     };

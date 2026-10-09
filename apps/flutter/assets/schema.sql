@@ -134,7 +134,7 @@ CREATE TABLE IF NOT EXISTS entity_links (
   id TEXT PRIMARY KEY, owner_id TEXT NOT NULL,
   from_type TEXT NOT NULL, from_id TEXT NOT NULL,
   to_type TEXT NOT NULL, to_id TEXT NOT NULL,
-  created_at INTEGER NOT NULL
+  relation TEXT DEFAULT 'RELATED', created_at INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS financial_accounts (
@@ -218,7 +218,7 @@ CREATE TABLE IF NOT EXISTS practical_items (
 
 CREATE TABLE IF NOT EXISTS documents (
   id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, title TEXT NOT NULL,
-  expires_at INTEGER, status TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+  notes TEXT, expires_at INTEGER, status TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
   FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
