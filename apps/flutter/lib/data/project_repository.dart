@@ -2,6 +2,7 @@ import '../domain/enums.dart';
 import '../domain/models.dart';
 import 'atomic_write.dart';
 import 'database.dart';
+import 'relationship_validator.dart';
 
 class ProjectRepository {
   ProjectRepository(this._db);
@@ -51,6 +52,9 @@ class ProjectRepository {
     await AtomicWrite.run(
       db: _db,
       state: (txn) async {
+        if (goalId != null) {
+          await RelationshipValidator.validateGoal(txn, ownerId: ownerId, goalId: goalId);
+        }
         final map = project.toInsertMap();
         if (description != null && description.trim().isNotEmpty) {
           map['description'] = description.trim();
@@ -66,13 +70,27 @@ class ProjectRepository {
   }
 
   Future<void> linkGoal(String projectId, String? goalId) async {
-    final db = await _db.database;
-    await db.update(
-      'projects',
-      {'goal_id': goalId, 'updated_at': AppDatabase.nowMs()},
-      where: 'id = ?',
-      whereArgs: [projectId],
-    );
+    final ownerId = await _db.requireOwnerId();
+    await _db.txn((txn) async {
+      await RelationshipValidator.validateProject(
+        txn,
+        ownerId: ownerId,
+        projectId: projectId,
+      );
+      if (goalId != null) {
+        await RelationshipValidator.validateGoal(
+          txn,
+          ownerId: ownerId,
+          goalId: goalId,
+        );
+      }
+      await txn.update(
+        'projects',
+        {'goal_id': goalId, 'updated_at': AppDatabase.nowMs()},
+        where: 'id = ? AND owner_id = ?',
+        whereArgs: [projectId, ownerId],
+      );
+    });
   }
 
   Future<void> updateMeta({

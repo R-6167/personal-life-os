@@ -2,41 +2,65 @@ import '../domain/enums.dart';
 import '../domain/models.dart';
 import 'atomic_write.dart';
 import 'database.dart';
+import 'relationship_validator.dart';
 
 class MilestoneRepository {
   MilestoneRepository(this._db);
   final AppDatabase _db;
 
   Future<List<Milestone>> listForProject(String projectId) async {
-    final db = await _db.database;
-    final rows = await db.query(
+    final ownerId = await _db.requireOwnerId();
+    final rows = await (await _db.database).query(
       'milestones',
-      where: 'project_id = ?',
-      whereArgs: [projectId],
+      where: 'project_id = ? AND owner_id = ?',
+      whereArgs: [projectId, ownerId],
       orderBy: 'position ASC, created_at ASC',
     );
     return rows.map(Milestone.fromMap).toList();
   }
 
   Future<Milestone> create({required String projectId, required String title}) async {
-    final db = await _db.database;
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
     final id = AppDatabase.newId();
-    await db.insert('milestones', {
-      'id': id,
-      'owner_id': ownerId,
-      'project_id': projectId,
-      'title': title,
-      'status': MilestoneStatus.planned,
-      'position': 0,
-      'created_at': now,
-      'updated_at': now,
-    });
+    final cleanTitle = title.trim();
+    if (cleanTitle.isEmpty) {
+      throw ArgumentError.value(title, 'title', 'Milestone title must not be empty.');
+    }
+    await AtomicWrite.run(
+      db: _db,
+      state: (txn) async {
+        await RelationshipValidator.validateProject(
+          txn,
+          ownerId: ownerId,
+          projectId: projectId,
+        );
+        final rows = await txn.rawQuery(
+          'SELECT COALESCE(MAX(position), -1) AS max_position '
+          'FROM milestones WHERE project_id = ? AND owner_id = ?',
+          [projectId, ownerId],
+        );
+        final position = ((rows.first['max_position'] as int?) ?? -1) + 1;
+        await txn.insert('milestones', {
+          'id': id,
+          'owner_id': ownerId,
+          'project_id': projectId,
+          'title': cleanTitle,
+          'status': MilestoneStatus.planned,
+          'position': position,
+          'created_at': now,
+          'updated_at': now,
+        });
+      },
+      eventType: 'MILESTONE_CREATED',
+      entityType: 'MILESTONE',
+      entityId: id,
+      occurredAt: now,
+    );
     return Milestone(
       id: id,
       projectId: projectId,
-      title: title,
+      title: cleanTitle,
       status: MilestoneStatus.planned,
       createdAt: now,
       updatedAt: now,
