@@ -121,7 +121,7 @@ class ProjectWorkspaceService {
         FROM task_dependencies d
         JOIN tasks t ON t.id = d.depends_on_task_id AND t.owner_id = ?
         WHERE d.task_id IN ($ph) AND t.archived_at IS NULL
-      ''', [...taskIds, ownerId]);
+      ''', [ownerId, ...taskIds]);
     }
 
     final now = DateTime.now();
