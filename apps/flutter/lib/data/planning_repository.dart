@@ -354,13 +354,14 @@ class PlanningRepository {
     final startMs = dayStart.millisecondsSinceEpoch;
     final endMs = dayEnd.millisecondsSinceEpoch;
     final busy = <BusyInterval>[];
+    final ownerId = await _db.requireOwnerId();
     final db = await _db.database;
 
     try {
       final events = await db.query(
         'calendar_events',
-        where: 'start_at < ? AND end_at > ?',
-        whereArgs: [endMs, startMs],
+        where: 'owner_id = ? AND start_at < ? AND end_at > ?',
+        whereArgs: [ownerId, endMs, startMs],
       );
       for (final e in events) {
         if ('${e['status'] ?? ''}' == 'CANCELLED') continue;
@@ -381,10 +382,11 @@ class PlanningRepository {
       final tasks = await db.query(
         'tasks',
         where:
-            'scheduled_start IS NOT NULL AND scheduled_start < ? AND '
+            'owner_id = ? AND scheduled_start IS NOT NULL AND scheduled_start < ? AND '
             '(scheduled_end IS NULL OR scheduled_end > ?) AND '
             'status NOT IN (?, ?) AND archived_at IS NULL',
         whereArgs: [
+          ownerId,
           endMs,
           startMs,
           EntityStatus.completed,
@@ -416,13 +418,14 @@ class PlanningRepository {
     final end = start.add(Duration(minutes: durationMinutes));
     final startMs = start.millisecondsSinceEpoch;
     final endMs = end.millisecondsSinceEpoch;
+    final ownerId = await _db.requireOwnerId();
     final db = await _db.database;
 
     try {
       final events = await db.query(
         'calendar_events',
-        where: 'start_at < ? AND end_at > ?',
-        whereArgs: [endMs, startMs],
+        where: 'owner_id = ? AND start_at < ? AND end_at > ?',
+        whereArgs: [ownerId, endMs, startMs],
       );
       for (final e in events) {
         if ('${e['status'] ?? ''}' == 'CANCELLED') continue;
@@ -433,8 +436,8 @@ class PlanningRepository {
     final blocks = await db.query(
       'time_blocks',
       where:
-          "start_at < ? AND end_at > ? AND (status IS NULL OR status != 'CANCELLED')",
-      whereArgs: [endMs, startMs],
+          "owner_id = ? AND start_at < ? AND end_at > ? AND (status IS NULL OR status != 'CANCELLED')",
+      whereArgs: [ownerId, endMs, startMs],
     );
     for (final b in blocks) {
       final bid = b['id'] as String?;
@@ -448,10 +451,11 @@ class PlanningRepository {
       final tasks = await db.query(
         'tasks',
         where:
-            'scheduled_start IS NOT NULL AND scheduled_start < ? AND '
+            'owner_id = ? AND scheduled_start IS NOT NULL AND scheduled_start < ? AND '
             '(scheduled_end IS NULL OR scheduled_end > ?) AND '
             'status NOT IN (?, ?) AND archived_at IS NULL',
         whereArgs: [
+          ownerId,
           endMs,
           startMs,
           EntityStatus.completed,
