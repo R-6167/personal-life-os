@@ -168,10 +168,10 @@ class ProjectRepository {
 
   Future<void> complete(String id) async {
     final now = AppDatabase.nowMs();
+    final ownerId = await _db.requireOwnerId();
     await AtomicWrite.run(
       db: _db,
       state: (txn) async {
-        final ownerId = await _db.requireOwnerId();
         await RelationshipValidator.validateProject(txn, ownerId: ownerId, projectId: id);
         final changed = await txn.update(
           'projects',
