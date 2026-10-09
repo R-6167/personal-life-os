@@ -6,6 +6,7 @@ import '../services/recurrence_engine.dart';
 import 'atomic_write.dart';
 import 'database.dart';
 import 'planning_repository.dart';
+import 'relationship_validator.dart';
 
 class TaskRepository {
   TaskRepository(this._db);
@@ -158,21 +159,6 @@ class TaskRepository {
     String? assistantActionPreview,
   }) async {
     final ownerId = await _db.requireOwnerId();
-    if (milestoneId != null) {
-      if (projectId == null || projectId.isEmpty) {
-        throw StateError('A task milestone requires a project.');
-      }
-      final linked = await (await _db.database).query(
-        'milestones',
-        columns: ['id'],
-        where: 'id = ? AND project_id = ? AND owner_id = ?',
-        whereArgs: [milestoneId, projectId, ownerId],
-        limit: 1,
-      );
-      if (linked.isEmpty) {
-        throw StateError('The milestone must belong to the task project and current owner.');
-      }
-    }
     final now = AppDatabase.nowMs();
     final task = Task(
       id: AppDatabase.newId(),
@@ -189,6 +175,14 @@ class TaskRepository {
     await AtomicWrite.run(
       db: _db,
       state: (txn) async {
+        await RelationshipValidator.validateTaskLinks(
+          txn,
+          ownerId: ownerId,
+          projectId: projectId,
+          goalId: goalId,
+          milestoneId: milestoneId,
+          parentTaskId: parentTaskId,
+        );
         final map = task.toInsertMap();
         if (description != null && description.isNotEmpty) map['description'] = description;
         if (milestoneId != null) map['milestone_id'] = milestoneId;
@@ -232,68 +226,55 @@ class TaskRepository {
     if (priority != null) patch['priority'] = priority;
     if (description != null) patch['description'] = description;
     if (projectId != null) patch['project_id'] = projectId.isEmpty ? null : projectId;
-    if (goalId != null) patch['goal_id'] = goalId;
+    if (goalId != null) patch['goal_id'] = goalId.isEmpty ? null : goalId;
     if (clearMilestone) {
       patch['milestone_id'] = null;
     } else if (milestoneId != null) {
-      final db = await _db.database;
-      final currentRows = await db.query(
-        'tasks',
-        columns: ['owner_id', 'project_id'],
-        where: 'id = ?',
-        whereArgs: [id],
-        limit: 1,
-      );
-      if (currentRows.isEmpty) throw StateError('Task not found: $id');
-      final ownerId = dbStr(currentRows.first['owner_id']);
-      final targetProjectId = projectId == null
-          ? dbStrOrNull(currentRows.first['project_id'])
-          : (projectId.isEmpty ? null : projectId);
-      if (targetProjectId == null) {
-        throw StateError('A task milestone requires a project.');
-      }
-      final linked = await db.query(
-        'milestones',
-        columns: ['id'],
-        where: 'id = ? AND project_id = ? AND owner_id = ?',
-        whereArgs: [milestoneId, targetProjectId, ownerId],
-        limit: 1,
-      );
-      if (linked.isEmpty) {
-        throw StateError('The milestone must belong to the task project and owner.');
-      }
       patch['milestone_id'] = milestoneId;
-    } else if (projectId != null) {
-      final currentRows = await (await _db.database).query(
-        'tasks',
-        columns: ['milestone_id'],
-        where: 'id = ?',
-        whereArgs: [id],
-        limit: 1,
-      );
-      final existingMilestoneId = currentRows.isEmpty
-          ? null
-          : dbStrOrNull(currentRows.first['milestone_id']);
-      final targetProjectId = projectId.isEmpty ? null : projectId;
-      if (existingMilestoneId != null) {
-        final linked = targetProjectId == null
-            ? <Map<String, Object?>>[]
-            : await (await _db.database).query(
-                'milestones',
-                columns: ['id'],
-                where: 'id = ? AND project_id = ?',
-                whereArgs: [existingMilestoneId, targetProjectId],
-                limit: 1,
-              );
-        if (linked.isEmpty) {
-          throw StateError('Clear or replace the milestone before moving this task.');
-        }
-      }
     }
     if (scheduledStart != null) patch['scheduled_start'] = scheduledStart;
     if (scheduledEnd != null) patch['scheduled_end'] = scheduledEnd;
     if (estimatedMinutes != null) patch['estimated_minutes'] = estimatedMinutes;
-    await (await _db.database).update('tasks', patch, where: 'id = ?', whereArgs: [id]);
+
+    final ownerId = await _db.requireOwnerId();
+    await _db.txn((txn) async {
+      final currentRows = await txn.query(
+        'tasks',
+        columns: ['owner_id', 'project_id', 'goal_id', 'milestone_id', 'parent_task_id'],
+        where: 'id = ? AND owner_id = ?',
+        whereArgs: [id, ownerId],
+        limit: 1,
+      );
+      if (currentRows.isEmpty) {
+        throw StateError('Task not found or not owned by the current user: $id');
+      }
+      final current = currentRows.first;
+      final targetProjectId = projectId == null
+          ? current['project_id'] as String?
+          : (projectId.isEmpty ? null : projectId);
+      final targetGoalId = goalId == null
+          ? current['goal_id'] as String?
+          : (goalId.isEmpty ? null : goalId);
+      final targetMilestoneId = clearMilestone
+          ? null
+          : (milestoneId ?? current['milestone_id'] as String?);
+
+      await RelationshipValidator.validateTaskLinks(
+        txn,
+        ownerId: ownerId,
+        projectId: targetProjectId,
+        goalId: targetGoalId,
+        milestoneId: targetMilestoneId,
+        parentTaskId: current['parent_task_id'] as String?,
+        taskId: id,
+      );
+      await txn.update(
+        'tasks',
+        patch,
+        where: 'id = ? AND owner_id = ?',
+        whereArgs: [id, ownerId],
+      );
+    });
   }
 
   Future<List<Map<String, Object?>>> dependencies(String taskId) async {
