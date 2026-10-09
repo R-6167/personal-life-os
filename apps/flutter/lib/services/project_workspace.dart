@@ -290,47 +290,32 @@ class ProjectWorkspaceService {
 
   Future<List<Map<String, Object?>>> _linkedNotes(String projectId) async {
     final db = await _db.database;
-    // Support both column naming schemes used historically.
-    try {
-      return await db.rawQuery('''
-        SELECT n.* FROM notes n
-        JOIN entity_links l ON (
-          (l.from_type = 'PROJECT' AND l.from_id = ? AND l.to_type = 'NOTE' AND l.to_id = n.id)
-          OR (l.to_type = 'PROJECT' AND l.to_id = ? AND l.from_type = 'NOTE' AND l.from_id = n.id)
-          OR (l.source_type = 'PROJECT' AND l.source_id = ? AND l.target_type = 'NOTE' AND l.target_id = n.id)
-        )
-        WHERE n.archived_at IS NULL
-        ORDER BY n.updated_at DESC
-        LIMIT 20
-      ''', [projectId, projectId, projectId]);
-    } catch (_) {
-      try {
-        return await db.rawQuery('''
-          SELECT n.* FROM notes n
-          JOIN entity_links l ON l.from_type = 'PROJECT' AND l.from_id = ?
-            AND l.to_type = 'NOTE' AND l.to_id = n.id
-          ORDER BY n.updated_at DESC LIMIT 20
-        ''', [projectId]);
-      } catch (_) {
-        return [];
-      }
-    }
+    final ownerId = await _db.requireOwnerId();
+    return db.rawQuery('''
+      SELECT n.* FROM notes n
+      JOIN entity_links l ON (
+        (l.from_type = 'PROJECT' AND l.from_id = ? AND l.to_type = 'NOTE' AND l.to_id = n.id)
+        OR (l.to_type = 'PROJECT' AND l.to_id = ? AND l.from_type = 'NOTE' AND l.from_id = n.id)
+      )
+      WHERE n.owner_id = ? AND n.archived_at IS NULL
+      ORDER BY n.updated_at DESC
+      LIMIT 20
+    ''', [projectId, projectId, ownerId]);
   }
 
   Future<List<Map<String, Object?>>> _linkedResources(String projectId) async {
     final db = await _db.database;
-    try {
-      return await db.rawQuery('''
-        SELECT d.* FROM documents d
-        JOIN entity_links l ON (
-          (l.from_type = 'PROJECT' AND l.from_id = ? AND l.to_type = 'DOCUMENT' AND l.to_id = d.id)
-          OR (l.source_type = 'PROJECT' AND l.source_id = ? AND l.target_type = 'DOCUMENT' AND l.target_id = d.id)
-        )
-        ORDER BY d.updated_at DESC LIMIT 20
-      ''', [projectId, projectId]);
-    } catch (_) {
-      return [];
-    }
+    final ownerId = await _db.requireOwnerId();
+    return db.rawQuery('''
+      SELECT d.* FROM documents d
+      JOIN entity_links l ON (
+        (l.from_type = 'PROJECT' AND l.from_id = ? AND l.to_type = 'DOCUMENT' AND l.to_id = d.id)
+        OR (l.to_type = 'PROJECT' AND l.to_id = ? AND l.from_type = 'DOCUMENT' AND l.from_id = d.id)
+      )
+      WHERE d.owner_id = ?
+      ORDER BY d.updated_at DESC
+      LIMIT 20
+    ''', [projectId, projectId, ownerId]);
   }
 
   Future<List<Map<String, Object?>>> _activity(List<String> entityIds) async {
@@ -350,67 +335,90 @@ class ProjectWorkspaceService {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
     final noteId = AppDatabase.newId();
-    final db = await _db.database;
-    await db.insert('notes', {
-      'id': noteId,
-      'owner_id': ownerId,
-      'content': content,
-      'created_at': now,
-      'updated_at': now,
+
+    await _db.txn((txn) async {
+      final project = await txn.query(
+        'projects',
+        columns: ['id'],
+        where: 'id = ? AND owner_id = ?',
+        whereArgs: [projectId, ownerId],
+        limit: 1,
+      );
+      if (project.isEmpty) {
+        throw StateError('Project not found or not owned by the current user.');
+      }
+
+      await txn.insert('notes', {
+        'id': noteId,
+        'owner_id': ownerId,
+        'content': content,
+        'created_at': now,
+        'updated_at': now,
+      });
+      await _insertLink(
+        txn,
+        ownerId: ownerId,
+        fromType: 'PROJECT',
+        fromId: projectId,
+        toType: 'NOTE',
+        toId: noteId,
+      );
     });
-    await _insertLink(db, ownerId: ownerId, fromType: 'PROJECT', fromId: projectId, toType: 'NOTE', toId: noteId);
   }
 
-  Future<void> attachResource({required String projectId, required String title, String? notes}) async {
+  Future<void> attachResource({required String projectId, required String title}) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
-    final docId = AppDatabase.newId();
-    final db = await _db.database;
-    await db.insert('documents', {
-      'id': docId,
-      'owner_id': ownerId,
-      'title': title,
-      if (notes != null) 'notes': notes,
-      'created_at': now,
-      'updated_at': now,
+    final documentId = AppDatabase.newId();
+
+    await _db.txn((txn) async {
+      final project = await txn.query(
+        'projects',
+        columns: ['id'],
+        where: 'id = ? AND owner_id = ?',
+        whereArgs: [projectId, ownerId],
+        limit: 1,
+      );
+      if (project.isEmpty) {
+        throw StateError('Project not found or not owned by the current user.');
+      }
+
+      await txn.insert('documents', {
+        'id': documentId,
+        'owner_id': ownerId,
+        'title': title,
+        'status': 'ACTIVE',
+        'created_at': now,
+        'updated_at': now,
+      });
+      await _insertLink(
+        txn,
+        ownerId: ownerId,
+        fromType: 'PROJECT',
+        fromId: projectId,
+        toType: 'DOCUMENT',
+        toId: documentId,
+      );
     });
-    await _insertLink(db,
-        ownerId: ownerId, fromType: 'PROJECT', fromId: projectId, toType: 'DOCUMENT', toId: docId);
   }
 
   Future<void> _insertLink(
-    dynamic db, {
+    dynamic txn, {
     required String ownerId,
     required String fromType,
     required String fromId,
     required String toType,
     required String toId,
   }) async {
-    final now = AppDatabase.nowMs();
-    final id = AppDatabase.newId();
-    try {
-      await db.insert('entity_links', {
-        'id': id,
-        'owner_id': ownerId,
-        'from_type': fromType,
-        'from_id': fromId,
-        'to_type': toType,
-        'to_id': toId,
-        'relation': 'RELATED',
-        'created_at': now,
-      });
-    } catch (_) {
-      try {
-        await db.insert('entity_links', {
-          'id': id,
-          'source_type': fromType,
-          'source_id': fromId,
-          'target_type': toType,
-          'target_id': toId,
-          'relationship_type': 'RELATED',
-          'created_at': now,
-        });
-      } catch (_) {}
-    }
+    await txn.insert('entity_links', {
+      'id': AppDatabase.newId(),
+      'owner_id': ownerId,
+      'from_type': fromType,
+      'from_id': fromId,
+      'to_type': toType,
+      'to_id': toId,
+      'relation': 'RELATED',
+      'created_at': AppDatabase.nowMs(),
+    });
   }
 }
