@@ -15,8 +15,8 @@ void main() {
 
   testWidgets('home shell boots and exposes all primary destinations',
       (tester) async {
-    await tester.view.setPhysicalSize(const Size(1080, 1920));
-    await tester.view.setDevicePixelRatio(1);
+    tester.view.physicalSize = const Size(1080, 1920);
+    tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
@@ -48,7 +48,6 @@ void main() {
       expect(find.byType(NavigationBar), findsOneWidget);
     }
 
-    // Returning to Today should remain possible after traversing every tab.
     await tester.tap(find.text('Today').last);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
