@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:sqflite/sqflite.dart';
 
+import '../services/error_log_service.dart';
 import '../services/integrity_service.dart';
 import 'database.dart';
 
