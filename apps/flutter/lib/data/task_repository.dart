@@ -1,4 +1,5 @@
 import '../domain/enums.dart';
+import '../domain/db_map.dart';
 import '../domain/models.dart';
 import '../services/domain_recurrence.dart';
 import '../services/recurrence_engine.dart';
@@ -157,6 +158,21 @@ class TaskRepository {
     String? assistantActionPreview,
   }) async {
     final ownerId = await _db.requireOwnerId();
+    if (milestoneId != null) {
+      if (projectId == null || projectId.isEmpty) {
+        throw StateError('A task milestone requires a project.');
+      }
+      final linked = await (await _db.database).query(
+        'milestones',
+        columns: ['id'],
+        where: 'id = ? AND project_id = ? AND owner_id = ?',
+        whereArgs: [milestoneId, projectId, ownerId],
+        limit: 1,
+      );
+      if (linked.isEmpty) {
+        throw StateError('The milestone must belong to the task project and current owner.');
+      }
+    }
     final now = AppDatabase.nowMs();
     final task = Task(
       id: AppDatabase.newId(),
@@ -198,6 +214,8 @@ class TaskRepository {
     String? description,
     String? projectId,
     String? goalId,
+    String? milestoneId,
+    bool clearMilestone = false,
     int? scheduledStart,
     int? scheduledEnd,
     int? estimatedMinutes,
@@ -215,6 +233,63 @@ class TaskRepository {
     if (description != null) patch['description'] = description;
     if (projectId != null) patch['project_id'] = projectId.isEmpty ? null : projectId;
     if (goalId != null) patch['goal_id'] = goalId;
+    if (clearMilestone) {
+      patch['milestone_id'] = null;
+    } else if (milestoneId != null) {
+      final db = await _db.database;
+      final currentRows = await db.query(
+        'tasks',
+        columns: ['owner_id', 'project_id'],
+        where: 'id = ?',
+        whereArgs: [id],
+        limit: 1,
+      );
+      if (currentRows.isEmpty) throw StateError('Task not found: $id');
+      final ownerId = dbStr(currentRows.first['owner_id']);
+      final targetProjectId = projectId == null
+          ? dbStrOrNull(currentRows.first['project_id'])
+          : (projectId.isEmpty ? null : projectId);
+      if (targetProjectId == null) {
+        throw StateError('A task milestone requires a project.');
+      }
+      final linked = await db.query(
+        'milestones',
+        columns: ['id'],
+        where: 'id = ? AND project_id = ? AND owner_id = ?',
+        whereArgs: [milestoneId, targetProjectId, ownerId],
+        limit: 1,
+      );
+      if (linked.isEmpty) {
+        throw StateError('The milestone must belong to the task project and owner.');
+      }
+      patch['milestone_id'] = milestoneId;
+    } else if (projectId != null) {
+      final currentRows = await (await _db.database).query(
+        'tasks',
+        columns: ['milestone_id'],
+        where: 'id = ?',
+        whereArgs: [id],
+        limit: 1,
+      );
+      final existingMilestoneId = currentRows.isEmpty
+          ? null
+          : dbStrOrNull(currentRows.first['milestone_id']);
+      final targetProjectId = projectId.isEmpty ? null : projectId;
+      if (existingMilestoneId != null) {
+        final linked = targetProjectId == null
+            ? <Map<String, Object?>>[]
+            : await (await _db.database).query(
+                'milestones',
+                columns: ['id'],
+                where: 'id = ? AND project_id = ?',
+                whereArgs: [existingMilestoneId, targetProjectId],
+                limit: 1,
+              );
+        if (linked.isEmpty) {
+          throw StateError('Clear or replace the milestone before moving this task.');
+        }
+      }
+    }
     if (scheduledStart != null) patch['scheduled_start'] = scheduledStart;
     if (scheduledEnd != null) patch['scheduled_end'] = scheduledEnd;
     if (estimatedMinutes != null) patch['estimated_minutes'] = estimatedMinutes;

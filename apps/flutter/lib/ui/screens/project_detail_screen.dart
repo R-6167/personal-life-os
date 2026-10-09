@@ -66,7 +66,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
     }
   }
 
-  Future<void> _addTask({String? parentTaskId}) async {
+  Future<void> _addTask({String? parentTaskId, String? milestoneId}) async {
     final c = TextEditingController();
     final title = await showDialog<String>(
       context: context,
@@ -92,6 +92,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
       title: title,
       projectId: widget.projectId,
       goalId: goalId,
+      milestoneId: milestoneId,
       parentTaskId: parentTaskId,
     );
     HapticFeedback.lightImpact();
@@ -441,15 +442,27 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                         title: Text(dbStr(m['title']), style: const TextStyle(color: AppTheme.silver)),
                         subtitle: Text(dbStr(m['status']),
                             style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.4), fontSize: 11)),
-                        trailing: dbStr(m['status']) != 'COMPLETED'
-                            ? IconButton(
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              tooltip: 'Add task to milestone',
+                              icon: const Icon(Icons.add_task, color: AppTheme.silverMuted),
+                              onPressed: () => _addTask(milestoneId: dbStr(m['id'])),
+                            ),
+                            if (dbStr(m['status']) != 'COMPLETED')
+                              IconButton(
+                                tooltip: 'Complete milestone',
                                 icon: const Icon(Icons.flag, color: AppTheme.amber),
                                 onPressed: () async {
                                   await _milestonesRepo.complete(dbStr(m['id']));
                                   await _load();
                                 },
                               )
-                            : const Icon(Icons.flag, color: AppTheme.amber),
+                            else
+                              const Icon(Icons.flag, color: AppTheme.amber),
+                          ],
+                        ),
                       ),
                     ),
                   )),
@@ -484,6 +497,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                           subtitle: Text(
                             [
                               dbStr(task['status']),
+                              if (dbStrOrNull(task['milestone_id']) != null)
+                                'Milestone: ${ws.milestones.firstWhere((m) => dbStr(m['id']) == dbStr(task['milestone_id']))['title']}',
                               if (task['scheduled_start'] != null)
                                 'sched ${_fmtTime(task['scheduled_start'] as int?)}',
                             ].join(' · '),
