@@ -534,6 +534,84 @@ void main() {
     expect(ownerId, isNot(otherOwnerId));
   });
 
+  test('entity links validate both endpoint owners and scope unlink', () async {
+    final app = AppDatabase.instance;
+    final db = await app.database;
+    final ownerId = await app.requireOwnerId();
+    final now = AppDatabase.nowMs();
+    await db.insert('projects', {
+      'id': 'owner-link-project',
+      'owner_id': ownerId,
+      'title': 'Owner link project',
+      'status': 'ACTIVE',
+      'created_at': now,
+      'updated_at': now,
+    });
+    await db.insert('notes', {
+      'id': 'owner-link-note',
+      'owner_id': ownerId,
+      'title': 'Owner link note',
+      'content': 'Initially owned by current user',
+      'created_at': now,
+      'updated_at': now,
+    });
+    final links = LinkRepository(app);
+    await links.link(
+      sourceType: 'PROJECT',
+      sourceId: 'owner-link-project',
+      targetType: 'NOTE',
+      targetId: 'owner-link-note',
+    );
+
+    final otherOwnerId = AppDatabase.newId();
+    await db.insert('users', {
+      'id': otherOwnerId,
+      'display_name': 'Other',
+      'name': 'Other',
+      'currency': 'KES',
+      'week_start_day': 1,
+      'created_at': now,
+      'updated_at': now,
+    });
+    await db.update(
+      'notes',
+      {'owner_id': otherOwnerId},
+      where: 'id = ?',
+      whereArgs: ['owner-link-note'],
+    );
+    await expectLater(
+      links.link(
+        sourceType: 'PROJECT',
+        sourceId: 'owner-link-project',
+        targetType: 'NOTE',
+        targetId: 'owner-link-note',
+      ),
+      throwsA(isA<StateError>()),
+    );
+
+    final existing = await db.query(
+      'entity_links',
+      columns: ['id'],
+      where: 'from_id = ?',
+      whereArgs: ['owner-link-project'],
+      limit: 1,
+    );
+    expect(existing, hasLength(1));
+    await db.update(
+      'entity_links',
+      {'owner_id': otherOwnerId},
+      where: 'id = ?',
+      whereArgs: [existing.single['id']],
+    );
+    await links.unlink(existing.single['id'] as String);
+    final stillExists = await db.query(
+      'entity_links',
+      where: 'id = ?',
+      whereArgs: [existing.single['id']],
+    );
+    expect(stillExists, hasLength(1));
+  });
+
   test('generic entity links persist against the canonical schema', () async {
     final app = AppDatabase.instance;
     final db = await app.database;
