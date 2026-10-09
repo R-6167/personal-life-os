@@ -17,6 +17,91 @@ void main() {
     await closeTestDb();
   });
 
+  test('project repository rejects reads and mutations for another owner', () async {
+    final app = AppDatabase.instance;
+    final projects = ProjectRepository(app);
+    final project = await projects.create(title: 'Owner-scoped project');
+    final db = await app.database;
+    final otherOwnerId = AppDatabase.newId();
+    final now = AppDatabase.nowMs();
+    await db.insert('users', {
+      'id': otherOwnerId,
+      'display_name': 'Other',
+      'name': 'Other',
+      'currency': 'KES',
+      'week_start_day': 1,
+      'created_at': now,
+      'updated_at': now,
+    });
+    await db.update(
+      'projects',
+      {'owner_id': otherOwnerId},
+      where: 'id = ?',
+      whereArgs: [project.id],
+    );
+
+    expect(await projects.getById(project.id), isNull);
+    expect(await projects.listActive(), isEmpty);
+    await expectLater(
+      projects.updateMeta(id: project.id, title: 'Unauthorized edit'),
+      throwsA(isA<StateError>()),
+    );
+    await expectLater(
+      projects.complete(project.id),
+      throwsA(isA<StateError>()),
+    );
+
+    final stored = await db.query(
+      'projects',
+      columns: ['title', 'status'],
+      where: 'id = ?',
+      whereArgs: [project.id],
+      limit: 1,
+    );
+    expect(stored.single['title'], 'Owner-scoped project');
+    expect(stored.single['status'], 'ACTIVE');
+  });
+
+  test('milestone completion rejects another owner milestone', () async {
+    final app = AppDatabase.instance;
+    final project = await ProjectRepository(app).create(title: 'Milestone ownership');
+    final milestone = await MilestoneRepository(app).create(
+      projectId: project.id,
+      title: 'Protected milestone',
+    );
+    final db = await app.database;
+    final otherOwnerId = AppDatabase.newId();
+    final now = AppDatabase.nowMs();
+    await db.insert('users', {
+      'id': otherOwnerId,
+      'display_name': 'Other',
+      'name': 'Other',
+      'currency': 'KES',
+      'week_start_day': 1,
+      'created_at': now,
+      'updated_at': now,
+    });
+    await db.update(
+      'milestones',
+      {'owner_id': otherOwnerId},
+      where: 'id = ?',
+      whereArgs: [milestone.id],
+    );
+
+    await expectLater(
+      MilestoneRepository(app).complete(milestone.id),
+      throwsA(isA<StateError>()),
+    );
+    final stored = await db.query(
+      'milestones',
+      columns: ['status'],
+      where: 'id = ?',
+      whereArgs: [milestone.id],
+      limit: 1,
+    );
+    expect(stored.single['status'], isNot('COMPLETED'));
+  });
+
   test('project workspace loads and can create a milestone', () async {
     final app = AppDatabase.instance;
     final db = await app.database;
