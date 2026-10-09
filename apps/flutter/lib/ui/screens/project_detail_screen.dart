@@ -200,6 +200,17 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
     await _load();
   }
 
+  String? _milestoneTitle(ProjectWorkspace workspace, Object? milestoneId) {
+    final id = dbStrOrNull(milestoneId);
+    if (id == null) return null;
+    for (final milestone in workspace.milestones) {
+      if (dbStr(milestone['id']) == id) return dbStr(milestone['title']);
+    }
+    // Older local databases may contain a stale milestone reference. Keep the
+    // workspace usable rather than throwing from a ListTile subtitle build.
+    return null;
+  }
+
   String _fmt(int? ms) {
     if (ms == null) return '—';
     final d = DateTime.fromMillisecondsSinceEpoch(ms);
@@ -498,7 +509,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                             [
                               dbStr(task['status']),
                               if (dbStrOrNull(task['milestone_id']) != null)
-                                'Milestone: ${ws.milestones.firstWhere((m) => dbStr(m['id']) == dbStr(task['milestone_id']))['title']}',
+                                'Milestone: ${_milestoneTitle(ws, task['milestone_id']) ?? 'Unavailable'}',
                               if (task['scheduled_start'] != null)
                                 'sched ${_fmtTime(task['scheduled_start'] as int?)}',
                             ].join(' · '),
