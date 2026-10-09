@@ -1,16 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ordin/services/error_log_service.dart';
+import 'package:ordin/services/local_analytics.dart';
 import 'package:ordin/ui/home_shell.dart';
 
 import 'helpers/test_db.dart';
 
 void main() {
   setUp(() async {
+    // Widget smoke tests should exercise app navigation, not start background
+    // diagnostics/analytics writes that require platform lifecycle services.
+    ErrorLogService.instance.enabled = false;
+    LocalAnalytics.instance.enabled = false;
     await openTestDb();
   });
 
   tearDown(() async {
     await closeTestDb();
+    ErrorLogService.instance.enabled = true;
+    LocalAnalytics.instance.enabled = true;
   });
 
   testWidgets('home shell boots and exposes all primary destinations',
@@ -22,9 +30,6 @@ void main() {
 
     await tester.pumpWidget(const MaterialApp(home: HomeShell()));
 
-    // Boot includes asynchronous database setup and best-effort notification
-    // synchronization. Pump in bounded steps instead of relying on an
-    // unbounded settle while the initial loading indicator is visible.
     for (var i = 0; i < 20; i++) {
       await tester.pump(const Duration(milliseconds: 100));
     }
@@ -58,5 +63,9 @@ void main() {
       ),
       findsOneWidget,
     );
+
+    // Unmount the stateful shell so no route animation survives the test.
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 1));
   });
 }
