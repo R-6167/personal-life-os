@@ -42,16 +42,5 @@ class NotificationDiagnostics {
     }
   }
 
-  static String _encodeContext(Map<String, Object?> context) {
-    final entries = context.entries
-        .map((entry) => '"${_escape(entry.key)}":"${_escape('${entry.value ?? ''}')}"')
-        .join(',');
-    return jsonEncode(context);
-  }
-
-  static String _escape(String value) => value
-      .replaceAll(r'\\', r'\\\\')
-      .replaceAll('"', r'\"')
-      .replaceAll('\n', r'\n')
-      .replaceAll('\r', r'\r');
+  static String _encodeContext(Map<String, Object?> context) => jsonEncode(context);
 }
