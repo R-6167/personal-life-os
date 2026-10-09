@@ -20,10 +20,12 @@ class MilestoneRepository {
 
   Future<Milestone> create({required String projectId, required String title}) async {
     final db = await _db.database;
+    final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
     final id = AppDatabase.newId();
     await db.insert('milestones', {
       'id': id,
+      'owner_id': ownerId,
       'project_id': projectId,
       'title': title,
       'status': MilestoneStatus.planned,
