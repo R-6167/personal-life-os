@@ -94,6 +94,55 @@ void main() {
     expect(counts['tasksDone'], 0);
   });
 
+  test('project workspace excludes rows owned by another user', () async {
+    final app = AppDatabase.instance;
+    final project = await ProjectRepository(app).create(title: 'Owner boundary project');
+    final task = await TaskRepository(app).create(
+      title: 'Foreign task',
+      projectId: project.id,
+    );
+    final milestone = await MilestoneRepository(app).create(
+      projectId: project.id,
+      title: 'Foreign milestone',
+    );
+    final db = await app.database;
+    await db.update(
+      'tasks',
+      {'owner_id': 'another-owner'},
+      where: 'id = ?',
+      whereArgs: [task.id],
+    );
+    await db.update(
+      'milestones',
+      {'owner_id': 'another-owner'},
+      where: 'id = ?',
+      whereArgs: [milestone.id],
+    );
+
+    final workspace = await ProjectWorkspaceService(app).load(project.id);
+
+    expect(workspace.tasksTotal, 0);
+    expect(workspace.tasks, isEmpty);
+    expect(workspace.milestonesTotal, 0);
+    expect(workspace.milestones, isEmpty);
+  });
+
+  test('project workspace rejects a project owned by another user', () async {
+    final app = AppDatabase.instance;
+    final project = await ProjectRepository(app).create(title: 'Private project');
+    await (await app.database).update(
+      'projects',
+      {'owner_id': 'another-owner'},
+      where: 'id = ?',
+      whereArgs: [project.id],
+    );
+
+    await expectLater(
+      ProjectWorkspaceService(app).load(project.id),
+      throwsA(isA<StateError>()),
+    );
+  });
+
   test('goal and project workspaces agree and habit completion stays separate', () async {
     final app = AppDatabase.instance;
     final goals = GoalRepository(app);
