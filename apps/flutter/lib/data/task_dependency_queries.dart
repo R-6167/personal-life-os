@@ -7,15 +7,17 @@ class TaskDependencyQueries {
   final AppDatabase _db;
 
   Future<List<String>> listBlockerTitles(String taskId) async {
+    final ownerId = await _db.requireOwnerId();
     final db = await _db.database;
     try {
       final rows = await db.rawQuery(
         'SELECT dep.title AS title '
         'FROM task_dependencies d '
-        'INNER JOIN tasks dep ON dep.id = d.depends_on_task_id '
+        'INNER JOIN tasks source ON source.id = d.task_id AND source.owner_id = ? AND source.archived_at IS NULL '
+        'INNER JOIN tasks dep ON dep.id = d.depends_on_task_id AND dep.owner_id = ? '
         'WHERE d.task_id = ? AND dep.status NOT IN (?, ?) AND dep.archived_at IS NULL '
         'ORDER BY dep.priority DESC',
-        [taskId, EntityStatus.completed, EntityStatus.cancelled],
+        [ownerId, ownerId, taskId, EntityStatus.completed, EntityStatus.cancelled],
       );
       final titles = <String>[];
       for (final r in rows) {
@@ -29,15 +31,17 @@ class TaskDependencyQueries {
   }
 
   Future<Map<String, List<String>>> listBlockedWithReasons() async {
+    final ownerId = await _db.requireOwnerId();
     final db = await _db.database;
     final out = <String, List<String>>{};
     try {
       final rows = await db.rawQuery(
         'SELECT d.task_id AS task_id, dep.title AS title '
         'FROM task_dependencies d '
-        'INNER JOIN tasks dep ON dep.id = d.depends_on_task_id '
+        'INNER JOIN tasks source ON source.id = d.task_id AND source.owner_id = ? AND source.archived_at IS NULL '
+        'INNER JOIN tasks dep ON dep.id = d.depends_on_task_id AND dep.owner_id = ? '
         'WHERE dep.status NOT IN (?, ?) AND dep.archived_at IS NULL',
-        [EntityStatus.completed, EntityStatus.cancelled],
+        [ownerId, ownerId, EntityStatus.completed, EntityStatus.cancelled],
       );
       for (final r in rows) {
         final id = r['task_id'] as String?;
@@ -49,13 +53,15 @@ class TaskDependencyQueries {
   }
 
   Future<int> countDependentsWaiting(String taskId) async {
+    final ownerId = await _db.requireOwnerId();
     final db = await _db.database;
     try {
       final rows = await db.rawQuery(
         'SELECT COUNT(*) AS c FROM task_dependencies d '
-        'INNER JOIN tasks t ON t.id = d.task_id '
+        'INNER JOIN tasks target ON target.id = d.depends_on_task_id AND target.owner_id = ? AND target.archived_at IS NULL '
+        'INNER JOIN tasks t ON t.id = d.task_id AND t.owner_id = ? '
         'WHERE d.depends_on_task_id = ? AND t.status NOT IN (?, ?) AND t.archived_at IS NULL',
-        [taskId, EntityStatus.completed, EntityStatus.cancelled],
+        [ownerId, ownerId, taskId, EntityStatus.completed, EntityStatus.cancelled],
       );
       return (rows.first['c'] as int?) ?? 0;
     } catch (_) {

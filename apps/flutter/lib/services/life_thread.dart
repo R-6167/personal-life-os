@@ -1,4 +1,6 @@
 import '../data/database.dart';
+import '../domain/enums.dart';
+import 'progress_calculator.dart';
 import '../domain/db_map.dart';
 
 /// One coherent chain of the person's life work.
@@ -101,6 +103,7 @@ class GoalThread {
   final int milestonesDone;
   final int milestonesTotal;
   final int habitsActive;
+  final int habitsDoneToday;
 
   const GoalThread({
     required this.goal,
@@ -122,6 +125,7 @@ class GoalThread {
     required this.milestonesDone,
     required this.milestonesTotal,
     required this.habitsActive,
+    required this.habitsDoneToday,
   });
 }
 
@@ -159,13 +163,14 @@ class LifeThreadService {
 
   Future<GoalThread> forGoal(String goalId) async {
     final db = await _db.database;
-    final goals = await db.query('goals', where: 'id = ?', whereArgs: [goalId], limit: 1);
+    final ownerId = await _db.requireOwnerId();
+    final goals = await db.query('goals', where: 'id = ? AND owner_id = ? AND archived_at IS NULL', whereArgs: [goalId, ownerId], limit: 1);
     final goal = goals.isEmpty ? <String, Object?>{'id': goalId, 'title': 'Goal'} : goals.first;
 
     final projects = await db.query(
       'projects',
-      where: 'goal_id = ? AND archived_at IS NULL',
-      whereArgs: [goalId],
+      where: 'owner_id = ? AND goal_id = ? AND archived_at IS NULL',
+      whereArgs: [ownerId, goalId],
       orderBy: 'created_at DESC',
     );
     final projectIds = projects.map((p) => dbStr(p['id'])).where((id) => id.isNotEmpty).toList();
@@ -174,15 +179,17 @@ class LifeThreadService {
     if (projectIds.isNotEmpty) {
       final placeholders = List.filled(projectIds.length, '?').join(',');
       milestones = await db.rawQuery(
-        'SELECT * FROM milestones WHERE project_id IN ($placeholders) ORDER BY position ASC, created_at ASC',
-        projectIds,
+        'SELECT * FROM milestones WHERE project_id IN ($placeholders) AND owner_id = ? ORDER BY position ASC, created_at ASC',
+        [...projectIds, ownerId],
       );
     }
 
     final tasksByGoal = await db.query(
       'tasks',
-      where: "goal_id = ? AND status != 'CANCELLED'",
-      whereArgs: [goalId],
+      where: "owner_id = ? AND goal_id = ? AND archived_at IS NULL AND COALESCE(status, '') != 'CANCELLED' "
+          "AND (project_id IS NULL OR project_id NOT IN (SELECT id FROM projects WHERE owner_id = ? AND goal_id = ?)) "
+          "AND NOT EXISTS (SELECT 1 FROM projects p WHERE p.id = tasks.project_id AND p.owner_id = tasks.owner_id AND p.archived_at IS NOT NULL)",
+      whereArgs: [ownerId, goalId, ownerId, goalId],
       orderBy: 'CASE status WHEN \'COMPLETED\' THEN 1 ELSE 0 END, due_at ASC, created_at DESC',
     );
 
@@ -190,8 +197,8 @@ class LifeThreadService {
     if (projectIds.isNotEmpty) {
       final placeholders = List.filled(projectIds.length, '?').join(',');
       projectTasks = await db.rawQuery(
-        "SELECT * FROM tasks WHERE project_id IN ($placeholders) AND status != 'CANCELLED' ORDER BY priority DESC, due_at ASC, created_at ASC",
-        projectIds,
+        "SELECT * FROM tasks WHERE project_id IN ($placeholders) AND owner_id = ? AND archived_at IS NULL AND COALESCE(status, '') != 'CANCELLED' ORDER BY priority DESC, due_at ASC, created_at ASC",
+        [...projectIds, ownerId],
       );
     }
 
@@ -202,11 +209,20 @@ class LifeThreadService {
       if (seen.add(id)) allTasks.add(t);
     }
 
-    final directTasks = allTasks
-        .where((t) => dbStrOrNull(t['project_id']) == null || !projectIds.contains(dbStr(t['project_id'])))
-        .toList();
+    // tasksByGoal contains only tasks not already represented by a project branch.
+    final directTasks = List<Map<String, Object?>>.from(tasksByGoal);
 
     final habits = await _habitsForGoal(db, goalId);
+    final todayNow = DateTime.now();
+    final todayKey = DateTime(todayNow.year, todayNow.month, todayNow.day).millisecondsSinceEpoch;
+    final completedHabitRows = await db.rawQuery(
+      'SELECT COUNT(DISTINCT o.habit_id) AS c FROM habit_occurrences o '
+      'JOIN habits h ON h.id = o.habit_id '
+      "WHERE h.owner_id = ? AND h.goal_id = ? AND h.archived_at IS NULL "
+      'AND (h.status = ? OR h.status IS NULL) AND o.scheduled_date = ? AND o.status = ?',
+      [ownerId, goalId, EntityStatus.active, todayKey, HabitOccurrenceStatus.completed],
+    );
+    final habitsDoneToday = (completedHabitRows.first['c'] as int?) ?? 0;
 
     final now = DateTime.now();
     final dayStart = DateTime(now.year, now.month, now.day).millisecondsSinceEpoch;
@@ -236,9 +252,12 @@ class LifeThreadService {
       final md = pMs.where((m) => dbStr(m['status']) == 'COMPLETED').length;
       final tt = pTs.length;
       final mt = pMs.length;
-      final pr = (tt + mt == 0)
-          ? 0.0
-          : ((tt == 0 ? 0.0 : td / tt) * 0.55 + (mt == 0 ? 0.0 : md / mt) * 0.45).clamp(0.0, 1.0);
+      final pr = ProgressCalculator.projectRatio(
+        tasksDone: td,
+        tasksTotal: tt,
+        milestonesDone: md,
+        milestonesTotal: mt,
+      );
       final open = pTs.where((t) => dbStr(t['status']) != 'COMPLETED').toList();
       String? nextTitle;
       String? nextId;
@@ -277,17 +296,14 @@ class LifeThreadService {
     final pt = projects.length;
     final tt = allTasks.length;
     final mt = milestones.length;
-    double ratio = 0;
-    if (tt + pt + mt > 0) {
-      ratio = ((tt == 0 ? 0.0 : tasksDone / tt) * 0.45 +
-              (pt == 0 ? 0.0 : projectsDone / pt) * 0.20 +
-              (mt == 0 ? 0.0 : milestonesDone / mt) * 0.35)
-          .clamp(0.0, 1.0);
-    }
+    final ratio = ProgressCalculator.goalRatio(
+      projectRatios: branches.map((b) => b.progressRatio).toList(),
+      directTasksDone: directTasks.where((t) => dbStr(t['status']) == 'COMPLETED').length,
+      directTasksTotal: directTasks.length,
+    );
     final workBoost = await _recentWorkBoost(
       allTasks.map((t) => dbStr(t['id'])).where((id) => id.isNotEmpty).toList(),
     );
-    ratio = (ratio + workBoost).clamp(0.0, 1.0);
 
     final nextMoves = _buildNextMoves(branches: branches, directTasks: directTasks, habits: habits);
     final summary = _doingSummary(
@@ -295,6 +311,7 @@ class LifeThreadService {
       branches: branches,
       directOpen: directTasks.where((t) => dbStr(t['status']) != 'COMPLETED').length,
       habits: habits.length,
+      habitsDoneToday: habitsDoneToday,
       scheduled: scheduled.length,
       progress: ratio,
       workBoost: workBoost,
@@ -320,6 +337,7 @@ class LifeThreadService {
       milestonesDone: milestonesDone,
       milestonesTotal: mt,
       habitsActive: habits.length,
+      habitsDoneToday: habitsDoneToday,
     );
   }
 
@@ -391,6 +409,7 @@ class LifeThreadService {
     required List<ProjectBranch> branches,
     required int directOpen,
     required int habits,
+    required int habitsDoneToday,
     required int scheduled,
     required double progress,
     double workBoost = 0,
@@ -408,33 +427,34 @@ class LifeThreadService {
       parts.add('$active active project${active == 1 ? '' : 's'}');
     }
     if (directOpen > 0) parts.add('$directOpen direct task${directOpen == 1 ? '' : 's'}');
-    if (habits > 0) parts.add('$habits habit${habits == 1 ? '' : 's'}');
+    if (habits > 0) parts.add('$habitsDoneToday/$habits habits done today');
     if (scheduled > 0) parts.add('$scheduled on calendar this fortnight');
     return 'Toward “$goalTitle”: ${parts.join(' · ')}';
   }
 
   Future<ProjectThread> forProject(String projectId) async {
     final db = await _db.database;
-    final rows = await db.query('projects', where: 'id = ?', whereArgs: [projectId], limit: 1);
+    final ownerId = await _db.requireOwnerId();
+    final rows = await db.query('projects', where: 'id = ? AND owner_id = ? AND archived_at IS NULL', whereArgs: [projectId, ownerId], limit: 1);
     final project = rows.isEmpty ? <String, Object?>{'id': projectId, 'title': 'Project'} : rows.first;
 
     Map<String, Object?>? goal;
     final goalId = dbStrOrNull(project['goal_id']);
     if (goalId != null) {
-      final g = await db.query('goals', where: 'id = ?', whereArgs: [goalId], limit: 1);
+      final g = await db.query('goals', where: 'id = ? AND owner_id = ? AND archived_at IS NULL', whereArgs: [goalId, ownerId], limit: 1);
       if (g.isNotEmpty) goal = g.first;
     }
 
     final milestones = await db.query(
       'milestones',
-      where: 'project_id = ?',
-      whereArgs: [projectId],
+      where: 'project_id = ? AND owner_id = ?',
+      whereArgs: [projectId, ownerId],
       orderBy: 'position ASC, created_at ASC',
     );
     final tasks = await db.query(
       'tasks',
-      where: "project_id = ? AND status != 'CANCELLED'",
-      whereArgs: [projectId],
+      where: "project_id = ? AND owner_id = ? AND archived_at IS NULL AND COALESCE(status, '') != 'CANCELLED'",
+      whereArgs: [projectId, ownerId],
       orderBy: 'CASE status WHEN \'COMPLETED\' THEN 1 ELSE 0 END, due_at ASC, created_at DESC',
     );
 
@@ -460,14 +480,12 @@ class LifeThreadService {
         milestones.where((m) => dbStr(m['status']) == 'COMPLETED').length;
     final tt = tasks.length;
     final mt = milestones.length;
-    var ratio = (tt + mt == 0)
-        ? 0.0
-        : ((tt == 0 ? 0.0 : tasksDone / tt) * 0.55 + (mt == 0 ? 0.0 : milestonesDone / mt) * 0.45)
-            .clamp(0.0, 1.0);
-    final workBoost = await _recentWorkBoost(
-      tasks.map((x) => dbStr(x['id'])).where((id) => id.isNotEmpty).toList(),
+    final ratio = ProgressCalculator.projectRatio(
+      tasksDone: tasksDone,
+      tasksTotal: tt,
+      milestonesDone: milestonesDone,
+      milestonesTotal: mt,
     );
-    ratio = (ratio + workBoost).clamp(0.0, 1.0);
 
     return ProjectThread(
       project: project,

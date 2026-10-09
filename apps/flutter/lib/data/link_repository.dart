@@ -12,6 +12,51 @@ class LinkRepository {
 
   bool? _useFromColumns;
 
+  static const Map<String, String> _entityTables = {
+    'PERSON': 'people', 'GOAL': 'goals', 'PROJECT': 'projects',
+    'MILESTONE': 'milestones', 'TASK': 'tasks', 'HABIT': 'habits',
+    'HABIT_SCHEDULE': 'habit_schedules', 'HABIT_OCCURRENCE': 'habit_occurrences',
+    'ROUTINE': 'routines', 'ROUTINE_STEP': 'routine_steps',
+    'ROUTINE_SCHEDULE': 'routine_schedules', 'ROUTINE_OCCURRENCE': 'routine_occurrences',
+    'EVENT': 'calendar_events', 'CALENDAR_EVENT': 'calendar_events',
+    'TIME_BLOCK': 'time_blocks', 'REMINDER': 'reminders',
+    'NOTE': 'notes', 'DOCUMENT': 'documents', 'BILL': 'bills',
+    'BILL_OCCURRENCE': 'bill_occurrences', 'SUBSCRIPTION': 'subscriptions',
+    'DEBT': 'debts', 'DEBT_PAYMENT': 'debt_payments', 'EXPENSE': 'expenses',
+    'INCOME': 'income', 'FINANCIAL_ACCOUNT': 'financial_accounts',
+    'SAVINGS_GOAL': 'savings_goals', 'SAVINGS_CONTRIBUTION': 'savings_contributions',
+    'PRACTICAL': 'practical_items', 'PRACTICAL_ITEM': 'practical_items',
+    'SHOPPING_LIST': 'shopping_lists', 'SHOPPING_ITEM': 'shopping_items',
+    'WELLNESS_CHECKIN': 'wellness_checkins', 'HEALTH_METRIC': 'health_metrics',
+    'GOAL_REFLECTION': 'goal_reflections', 'WORK_SESSION': 'work_sessions',
+    'BUDGET': 'budgets', 'APP_USAGE_EVENT': 'app_usage_events',
+    'ERROR_LOG': 'error_logs', 'FEEDBACK_ITEM': 'feedback_items',
+  };
+
+  Future<void> _ensureOwnedEntity(
+    Database db, {
+    required String type,
+    required String entityId,
+    required String ownerId,
+  }) async {
+    final table = _entityTables[type.toUpperCase()];
+    if (table == null) throw StateError('Unsupported link entity type: $type');
+    final info = await db.rawQuery('PRAGMA table_info($table)');
+    final columns = info.map((row) => '${row['name']}').toSet();
+    if (!columns.contains('owner_id')) {
+      throw StateError('Link entity type has no owner scope: $type');
+    }
+    final where = columns.contains('archived_at')
+        ? 'id = ? AND owner_id = ? AND archived_at IS NULL'
+        : 'id = ? AND owner_id = ?';
+    final rows = await db.query(
+      table, columns: ['id'], where: where, whereArgs: [entityId, ownerId], limit: 1,
+    );
+    if (rows.isEmpty) {
+      throw StateError('Linked entity not found or not owned by the current user: $type/$entityId');
+    }
+  }
+
   Future<bool> _fromStyle(Database db) async {
     if (_useFromColumns != null) return _useFromColumns!;
     try {
@@ -35,6 +80,8 @@ class LinkRepository {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
     final fromStyle = await _fromStyle(db);
+    await _ensureOwnedEntity(db, type: sourceType, entityId: sourceId, ownerId: ownerId);
+    await _ensureOwnedEntity(db, type: targetType, entityId: targetId, ownerId: ownerId);
 
     // Skip duplicates
     final existing = await linksFor(sourceType, sourceId);
@@ -83,24 +130,46 @@ class LinkRepository {
   }
 
   Future<void> unlink(String linkId) async {
-    await (await _db.database).delete('entity_links', where: 'id = ?', whereArgs: [linkId]);
+    final ownerId = await _db.requireOwnerId();
+    await (await _db.database).delete(
+      'entity_links',
+      where: 'id = ? AND owner_id = ?',
+      whereArgs: [linkId, ownerId],
+    );
   }
 
   Future<List<Map<String, Object?>>> linksFor(String type, String id) async {
     final db = await _db.database;
+    final ownerId = await _db.requireOwnerId();
     final fromStyle = await _fromStyle(db);
-    if (fromStyle) {
-      return db.rawQuery('''
-        SELECT * FROM entity_links
-        WHERE (from_type = ? AND from_id = ?) OR (to_type = ? AND to_id = ?)
-        ORDER BY created_at DESC
-      ''', [type, id, type, id]);
+    final rows = fromStyle
+        ? await db.rawQuery('''
+            SELECT * FROM entity_links
+            WHERE owner_id = ? AND ((from_type = ? AND from_id = ?) OR (to_type = ? AND to_id = ?))
+            ORDER BY created_at DESC
+          ''', [ownerId, type, id, type, id])
+        : await db.rawQuery('''
+            SELECT * FROM entity_links
+            WHERE owner_id = ? AND ((source_type = ? AND source_id = ?) OR (target_type = ? AND target_id = ?))
+            ORDER BY created_at DESC
+          ''', [ownerId, type, id, type, id]);
+
+    final valid = <Map<String, Object?>>[];
+    for (final row in rows) {
+      final fromType = '${row['from_type'] ?? row['source_type'] ?? ''}';
+      final fromId = '${row['from_id'] ?? row['source_id'] ?? ''}';
+      final toType = '${row['to_type'] ?? row['target_type'] ?? ''}';
+      final toId = '${row['to_id'] ?? row['target_id'] ?? ''}';
+      try {
+        await _ensureOwnedEntity(db, type: fromType, entityId: fromId, ownerId: ownerId);
+        await _ensureOwnedEntity(db, type: toType, entityId: toId, ownerId: ownerId);
+        valid.add(row);
+      } on StateError {
+        // A previously valid link may become stale if either endpoint is archived
+        // or changes owner; do not surface that relationship.
+      }
     }
-    return db.rawQuery('''
-      SELECT * FROM entity_links
-      WHERE (source_type = ? AND source_id = ?) OR (target_type = ? AND target_id = ?)
-      ORDER BY created_at DESC
-    ''', [type, id, type, id]);
+    return valid;
   }
 
   /// Normalized peer on the other side of a link relative to [type]/[id].
@@ -175,7 +244,11 @@ class LinkRepository {
   }
 
   Future<String?> _col(Database db, String table, String id, String col) async {
-    final rows = await db.query(table, columns: [col], where: 'id = ?', whereArgs: [id], limit: 1);
+    final ownerId = await _db.requireOwnerId();
+    final rows = await db.query(
+      table, columns: [col], where: 'id = ? AND owner_id = ?',
+      whereArgs: [id, ownerId], limit: 1,
+    );
     if (rows.isEmpty) return null;
     return rows.first[col]?.toString();
   }

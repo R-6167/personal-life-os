@@ -1,5 +1,6 @@
 import '../data/database.dart';
 import '../domain/db_map.dart';
+import 'progress_calculator.dart';
 
 /// What is the next concrete thing I can do on this project?
 class NextAction {
@@ -70,7 +71,13 @@ class ProjectWorkspaceService {
 
   Future<ProjectWorkspace> load(String projectId) async {
     final db = await _db.database;
-    final prows = await db.query('projects', where: 'id = ?', whereArgs: [projectId], limit: 1);
+    final ownerId = await _db.requireOwnerId();
+    final prows = await db.query(
+      'projects',
+      where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
+      whereArgs: [projectId, ownerId],
+      limit: 1,
+    );
     if (prows.isEmpty) {
       throw StateError('Project not found: $projectId');
     }
@@ -79,21 +86,26 @@ class ProjectWorkspaceService {
     Map<String, Object?>? goal;
     final goalId = dbStrOrNull(project['goal_id']);
     if (goalId != null) {
-      final g = await db.query('goals', where: 'id = ?', whereArgs: [goalId], limit: 1);
+      final g = await db.query(
+        'goals',
+        where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
+        whereArgs: [goalId, ownerId],
+        limit: 1,
+      );
       if (g.isNotEmpty) goal = g.first;
     }
 
     final milestones = await db.query(
       'milestones',
-      where: 'project_id = ?',
-      whereArgs: [projectId],
+      where: 'project_id = ? AND owner_id = ?',
+      whereArgs: [projectId, ownerId],
       orderBy: 'position ASC, created_at ASC',
     );
 
     final allTasks = await db.query(
       'tasks',
-      where: "project_id = ? AND (archived_at IS NULL) AND status != 'CANCELLED'",
-      whereArgs: [projectId],
+      where: "project_id = ? AND owner_id = ? AND archived_at IS NULL AND COALESCE(status, '') != 'CANCELLED'",
+      whereArgs: [projectId, ownerId],
       orderBy: 'priority DESC, due_at ASC, created_at ASC',
     );
 
@@ -107,9 +119,9 @@ class ProjectWorkspaceService {
       deps = await db.rawQuery('''
         SELECT d.*, t.title AS depends_on_title, t.status AS depends_on_status
         FROM task_dependencies d
-        JOIN tasks t ON t.id = d.depends_on_task_id
-        WHERE d.task_id IN ($ph)
-      ''', taskIds);
+        JOIN tasks t ON t.id = d.depends_on_task_id AND t.owner_id = ?
+        WHERE d.task_id IN ($ph) AND t.archived_at IS NULL
+      ''', [ownerId, ...taskIds]);
     }
 
     final now = DateTime.now();
@@ -141,10 +153,12 @@ class ProjectWorkspaceService {
         milestones.where((m) => dbStr(m['status']) == 'COMPLETED').length;
     final tt = allTasks.length;
     final mt = milestones.length;
-    final ratio = (tt + mt == 0)
-        ? 0.0
-        : ((tt == 0 ? 0.0 : tasksDone / tt) * 0.7 + (mt == 0 ? 0.0 : milestonesDone / mt) * 0.3)
-            .clamp(0.0, 1.0);
+    final ratio = ProgressCalculator.projectRatio(
+      tasksDone: tasksDone,
+      tasksTotal: tt,
+      milestonesDone: milestonesDone,
+      milestonesTotal: mt,
+    );
 
     final next = _computeNextAction(
       openTasks: openTasks,
