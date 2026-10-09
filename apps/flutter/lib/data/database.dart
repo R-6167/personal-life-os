@@ -177,6 +177,7 @@ CREATE TABLE IF NOT EXISTS users (
       'ALTER TABLE milestones ADD COLUMN position INTEGER DEFAULT 0',
       'ALTER TABLE tasks ADD COLUMN description TEXT',
       'ALTER TABLE financial_accounts ADD COLUMN status TEXT',
+      'ALTER TABLE documents ADD COLUMN notes TEXT',
     ]) {
       await _executeIgnoringDuplicateColumn(db, alter);
     }
