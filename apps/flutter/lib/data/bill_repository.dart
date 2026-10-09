@@ -64,6 +64,7 @@ class BillRepository {
     int? dueInDays,
     String frequency = 'MONTHLY',
     String? accountId,
+    String? assistantActionPreview,
   }) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
@@ -105,6 +106,13 @@ class BillRepository {
         'recorded_at': now,
         'source': EventSource.user,
       });
+      if (assistantActionPreview != null) {
+        await txn.insert('activity_events', {
+          'id': AppDatabase.newId(), 'owner_id': ownerId, 'event_type': 'ASSISTANT_ACTION_EXECUTED',
+          'entity_type': 'BILL', 'entity_id': billId, 'occurred_at': now, 'recorded_at': now,
+          'source': EventSource.system, 'metadata': '{"action":"createBill"}',
+        });
+      }
       await txn.insert('reminders', {
         'id': AppDatabase.newId(),
         'owner_id': ownerId,
@@ -137,6 +145,7 @@ class BillRepository {
     BillOccurrence occ, {
     double? actualMajor,
     String? accountId,
+    String? assistantActionPreview,
   }) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
@@ -259,6 +268,13 @@ class BillRepository {
         'metadata':
             '{"amount":$amount,"currency":"$currency","expenseId":"$expenseId","accountId":"${defaultAccount ?? ''}","nextDue":${nextDue ?? 'null'}}',
       });
+      if (assistantActionPreview != null) {
+        await txn.insert('activity_events', {
+          'id': AppDatabase.newId(), 'owner_id': ownerId, 'event_type': 'ASSISTANT_ACTION_EXECUTED',
+          'entity_type': 'BILL', 'entity_id': occ.billId, 'occurred_at': now, 'recorded_at': now,
+          'source': EventSource.system, 'metadata': '{"action":"payBill"}',
+        });
+      }
       await txn.insert('activity_events', {
         'id': AppDatabase.newId(),
         'owner_id': ownerId,
