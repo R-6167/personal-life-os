@@ -217,15 +217,13 @@ class OrdinOperator {
         case OrdinIntentKind.completeTask:
           final id = proposal.entityId;
           if (id == null) return OrdinActionResult(ok: false, message: 'Missing task id.');
-          final next = await TaskRepository(_db).complete(id);
-          await _record(ownerId, now, eventType: 'ASSISTANT_ACTION_EXECUTED', entityType: 'TASK', entityId: id, metadata: '{"action":"completeTask"}', summary: proposal.preview);
+          final next = await TaskRepository(_db).complete(id, assistantActionPreview: proposal.preview);
           return OrdinActionResult(ok: true, message: 'Done. ${proposal.preview}${next == null ? '' : ' Next occurrence created.'}', entityType: 'TASK', entityId: id);
 
         case OrdinIntentKind.createTask:
           final title = '${proposal.payload['title'] ?? ''}'.trim();
           if (title.isEmpty) return OrdinActionResult(ok: false, message: 'Empty title.');
-          final t = await TaskRepository(_db).create(title: title, status: EntityStatus.inbox);
-          await _record(ownerId, now, eventType: 'ASSISTANT_ACTION_EXECUTED', entityType: 'TASK', entityId: t.id, metadata: '{"action":"createTask"}', summary: proposal.preview);
+          final t = await TaskRepository(_db).create(title: title, status: EntityStatus.inbox, assistantActionPreview: proposal.preview);
           return OrdinActionResult(ok: true, message: 'Created task “$title”.', entityType: 'TASK', entityId: t.id);
 
         case OrdinIntentKind.rescheduleTaskToday:
@@ -251,8 +249,7 @@ class OrdinOperator {
 
         case OrdinIntentKind.addNote:
           final content = '${proposal.payload['content'] ?? ''}'.trim();
-          final note = await NoteRepository(_db).create(content: content);
-          await _record(ownerId, now, eventType: 'ASSISTANT_ACTION_EXECUTED', entityType: 'NOTE', entityId: note.id, metadata: '{"action":"addNote"}', summary: 'Note via assistant');
+          final note = await NoteRepository(_db).create(content: content, assistantActionPreview: proposal.preview);
           return OrdinActionResult(ok: true, message: 'Note saved.', entityType: 'NOTE', entityId: note.id);
 
         case OrdinIntentKind.createReminder:
@@ -276,8 +273,7 @@ class OrdinOperator {
         case OrdinIntentKind.completeHabit:
           final id = proposal.entityId;
           if (id == null) return OrdinActionResult(ok: false, message: 'Missing habit.');
-          await HabitRepository(_db).markDoneToday(id);
-          await _record(ownerId, now, eventType: 'ASSISTANT_ACTION_EXECUTED', entityType: 'HABIT', entityId: id, metadata: '{"action":"completeHabit"}', summary: proposal.preview);
+          await HabitRepository(_db).markDoneToday(id, assistantActionPreview: proposal.preview);
           return OrdinActionResult(ok: true, message: proposal.preview, entityType: 'HABIT', entityId: id);
 
         case OrdinIntentKind.payBill:
@@ -293,16 +289,14 @@ class OrdinOperator {
             if (billId.isEmpty) return OrdinActionResult(ok: false, message: 'Bill occurrence not found.');
             occ = BillOccurrence(id: occId, billId: billId, dueAt: proposal.payload['dueAt'] as int? ?? now, expectedAmountMinor: proposal.payload['amountMinor'] as int?, status: 'DUE', billName: proposal.payload['billName'] as String?);
           }
-          await bills.payOccurrence(occ);
-          await _record(ownerId, now, eventType: 'ASSISTANT_ACTION_EXECUTED', entityType: 'BILL', entityId: occ.billId, metadata: '{"action":"payBill"}', summary: proposal.preview);
+          await bills.payOccurrence(occ, assistantActionPreview: proposal.preview);
           return OrdinActionResult(ok: true, message: proposal.preview, entityType: 'BILL', entityId: occ.billId);
 
         case OrdinIntentKind.paySubscription:
           final sid = proposal.entityId;
           if (sid == null) return OrdinActionResult(ok: false, message: 'Missing subscription.');
           final amountMinor = proposal.payload['amountMinor'] as int?;
-          await FinanceService().paySubscription(subscriptionId: sid, amountMajor: amountMinor == null ? null : amountMinor / 100.0);
-          await _record(ownerId, now, eventType: 'ASSISTANT_ACTION_EXECUTED', entityType: 'SUBSCRIPTION', entityId: sid, metadata: '{"action":"paySubscription"}', summary: proposal.preview);
+          await FinanceService(db: _db).paySubscription(subscriptionId: sid, amountMajor: amountMinor == null ? null : amountMinor / 100.0, assistantActionPreview: proposal.preview);
           return OrdinActionResult(ok: true, message: proposal.preview, entityType: 'SUBSCRIPTION', entityId: sid);
 
         case OrdinIntentKind.pauseSubscription:
@@ -335,16 +329,14 @@ class OrdinOperator {
           final name = '${proposal.payload['name'] ?? ''}'.trim();
           if (name.isEmpty) return OrdinActionResult(ok: false, message: 'Missing bill name.');
           final amountMajor = proposal.payload['amountMajor'] as double?;
-          final bill = await BillRepository(_db).create(name: name, expectedMajor: amountMajor, dueInDays: 7, frequency: 'MONTHLY');
-          await _record(ownerId, now, eventType: 'ASSISTANT_ACTION_EXECUTED', entityType: 'BILL', entityId: bill.id, metadata: '{"action":"createBill"}', summary: proposal.preview);
+          final bill = await BillRepository(_db).create(name: name, expectedMajor: amountMajor, dueInDays: 7, frequency: 'MONTHLY', assistantActionPreview: proposal.preview);
           return OrdinActionResult(ok: true, message: proposal.preview, entityType: 'BILL', entityId: bill.id);
 
         case OrdinIntentKind.createSubscription:
           final name = '${proposal.payload['name'] ?? ''}'.trim();
           if (name.isEmpty) return OrdinActionResult(ok: false, message: 'Missing name.');
           final amountMajor = (proposal.payload['amountMajor'] as num?)?.toDouble() ?? 0;
-          final id = await FinanceService().createSubscription(name: name, amountMajor: amountMajor);
-          await _record(ownerId, now, eventType: 'ASSISTANT_ACTION_EXECUTED', entityType: 'SUBSCRIPTION', entityId: id, metadata: '{"action":"createSubscription"}', summary: proposal.preview);
+          final id = await FinanceService(db: _db).createSubscription(name: name, amountMajor: amountMajor, assistantActionPreview: proposal.preview);
           return OrdinActionResult(ok: true, message: proposal.preview, entityType: 'SUBSCRIPTION', entityId: id);
 
         case OrdinIntentKind.deferBill:
