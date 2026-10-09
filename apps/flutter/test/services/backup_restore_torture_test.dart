@@ -57,13 +57,31 @@ void main() {
       expect(unknownApp.ok, isFalse);
     });
 
-    test('encrypted backup round-trips and rejects a wrong passphrase', () {
+    test('v2 encrypted backup round-trips and rejects a wrong passphrase', () async {
       const plaintext = '{"app":"ordin","tasks":[{"id":"task-1"}]}';
-      final encrypted = SecureBackup.encrypt(plaintext, 'correct-horse');
+      final encrypted = await SecureBackup.encrypt(plaintext, 'correct-horse');
+      final envelope = jsonDecode(encrypted) as Map<String, dynamic>;
+
       expect(SecureBackup.looksEncrypted(encrypted), isTrue);
-      expect(SecureBackup.decrypt(encrypted, 'correct-horse'), plaintext);
-      expect(
-        () => SecureBackup.decrypt(encrypted, 'wrong-passphrase'),
+      expect(envelope['v'], 2);
+      expect(envelope['alg'], 'AES-256-GCM');
+      expect(envelope['kdf'], 'PBKDF2-HMAC-SHA256-x210000');
+      expect(await SecureBackup.decrypt(encrypted, 'correct-horse'), plaintext);
+      await expectLater(
+        SecureBackup.decrypt(encrypted, 'wrong-passphrase'),
+        throwsA(anything),
+      );
+    });
+
+    test('v2 encrypted backup detects ciphertext tampering', () async {
+      const plaintext = '{"app":"ordin","tasks":[{"id":"task-1"}]}';
+      final encrypted = await SecureBackup.encrypt(plaintext, 'correct-horse');
+      final envelope = jsonDecode(encrypted) as Map<String, dynamic>;
+      final ciphertext = base64.decode(envelope['ciphertext'] as String);
+      ciphertext[0] ^= 1;
+      envelope['ciphertext'] = base64.encode(ciphertext);
+      await expectLater(
+        SecureBackup.decrypt(jsonEncode(envelope), 'correct-horse'),
         throwsA(anything),
       );
     });
