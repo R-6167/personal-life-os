@@ -168,7 +168,22 @@ class ExportService {
             }
           });
           try {
-            final c = await txn.insert(table, snake, conflictAlgorithm: ConflictAlgorithm.ignore);
+            // Ignore only an already-present primary key. ConflictAlgorithm.ignore
+            // also suppresses NOT NULL / CHECK failures and makes corrupt rows look
+            // like harmless duplicates, which can silently produce partial restores.
+            final existing = await txn.query(
+              table,
+              columns: const ['id'],
+              where: 'id = ?',
+              whereArgs: [snake['id']],
+              limit: 1,
+            );
+            if (existing.isNotEmpty) continue;
+            final c = await txn.insert(
+              table,
+              snake,
+              conflictAlgorithm: ConflictAlgorithm.abort,
+            );
             if (c > 0) n++;
           } catch (e) {
             if (retry) failures.add('$table/${snake['id']}: $e');
