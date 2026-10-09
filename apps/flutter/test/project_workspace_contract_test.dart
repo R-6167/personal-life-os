@@ -3,6 +3,7 @@ import 'package:ordin/data/milestone_repository.dart';
 import 'package:ordin/data/link_repository.dart';
 import 'package:ordin/data/project_repository.dart';
 import 'package:ordin/data/task_repository.dart';
+import 'package:ordin/data/planning_repository.dart';
 import 'package:ordin/data/database.dart';
 import 'package:ordin/services/project_workspace.dart';
 
@@ -360,6 +361,105 @@ void main() {
     final db = await AppDatabase.instance.database;
     expect(await db.query('notes'), isEmpty);
     expect(await db.query('entity_links'), isEmpty);
+  });
+
+  test('task repository scopes reads and lifecycle mutations to current owner', () async {
+    final app = AppDatabase.instance;
+    final tasks = TaskRepository(app);
+    final task = await tasks.create(title: 'Protected task');
+    final db = await app.database;
+    final otherOwnerId = AppDatabase.newId();
+    final now = AppDatabase.nowMs();
+    await db.insert('users', {
+      'id': otherOwnerId,
+      'display_name': 'Other',
+      'name': 'Other',
+      'currency': 'KES',
+      'week_start_day': 1,
+      'created_at': now,
+      'updated_at': now,
+    });
+    await db.update(
+      'tasks',
+      {'owner_id': otherOwnerId},
+      where: 'id = ?',
+      whereArgs: [task.id],
+    );
+
+    expect(await tasks.getById(task.id), isNull);
+    expect(await tasks.descriptionOf(task.id), isNull);
+    expect(await tasks.listByProject('foreign-project'), isEmpty);
+    await expectLater(
+      tasks.update(id: task.id, title: 'Unauthorized edit'),
+      throwsA(isA<StateError>()),
+    );
+    await expectLater(tasks.reopen(task.id), throwsA(isA<StateError>()));
+    await expectLater(tasks.delete(task.id), throwsA(isA<StateError>()));
+    await expectLater(tasks.clearSchedule(task.id), throwsA(isA<StateError>()));
+    await expectLater(
+      PlanningRepository(app).scheduleTaskSession(
+        taskId: task.id,
+        start: DateTime(2026, 10, 10, 9),
+      ),
+      throwsA(isA<StateError>()),
+    );
+    expect(await tasks.complete(task.id), isNull);
+
+    final stored = await db.query(
+      'tasks',
+      columns: ['title', 'status', 'scheduled_start', 'archived_at'],
+      where: 'id = ?',
+      whereArgs: [task.id],
+      limit: 1,
+    );
+    expect(stored.single['title'], 'Protected task');
+    expect(stored.single['status'], EntityStatus.inbox);
+    expect(stored.single['scheduled_start'], isNull);
+    expect(stored.single['archived_at'], isNull);
+    expect(
+      await db.query(
+        'time_blocks',
+        where: 'task_id = ?',
+        whereArgs: [task.id],
+      ),
+      isEmpty,
+    );
+  });
+
+  test('task dependency reads do not expose other owners tasks', () async {
+    final app = AppDatabase.instance;
+    final tasks = TaskRepository(app);
+    final source = await tasks.create(title: 'Source task');
+    final target = await tasks.create(title: 'Target task');
+    final db = await app.database;
+    final ownerId = await app.requireOwnerId();
+    final otherOwnerId = AppDatabase.newId();
+    final now = AppDatabase.nowMs();
+    await db.insert('users', {
+      'id': otherOwnerId,
+      'display_name': 'Other',
+      'name': 'Other',
+      'currency': 'KES',
+      'week_start_day': 1,
+      'created_at': now,
+      'updated_at': now,
+    });
+    await db.update(
+      'tasks',
+      {'owner_id': otherOwnerId},
+      where: 'id = ?',
+      whereArgs: [target.id],
+    );
+    await db.insert('task_dependencies', {
+      'id': AppDatabase.newId(),
+      'task_id': source.id,
+      'depends_on_task_id': target.id,
+      'created_at': now,
+    });
+
+    expect(await tasks.dependencies(source.id), isEmpty);
+    expect(await tasks.listBlockedTaskIds(), isNot(contains(source.id)));
+    expect(ownerId, isNot(otherOwnerId));
   });
 
   test('generic entity links persist against the canonical schema', () async {
