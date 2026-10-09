@@ -255,7 +255,7 @@ class TaskRepository {
       final currentRows = await txn.query(
         'tasks',
         columns: ['owner_id', 'project_id', 'goal_id', 'milestone_id', 'parent_task_id'],
-        where: 'id = ? AND owner_id = ?',
+        where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
         whereArgs: [id, ownerId],
         limit: 1,
       );
@@ -282,12 +282,15 @@ class TaskRepository {
         parentTaskId: current['parent_task_id'] as String?,
         taskId: id,
       );
-      await txn.update(
+      final changed = await txn.update(
         'tasks',
         patch,
-        where: 'id = ? AND owner_id = ?',
+        where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
         whereArgs: [id, ownerId],
       );
+      if (changed != 1) {
+        throw StateError('Task not found, archived, or not owned by the current user: $id');
+      }
     });
   }
 
@@ -366,8 +369,23 @@ class TaskRepository {
     final now = AppDatabase.nowMs();
     final db = await _db.database;
     final payload = _recurrencePayload(rule, now);
-    final existing =
-        await db.query('task_recurrences', where: 'task_id = ?', whereArgs: [taskId], limit: 1);
+    final ownerId = await _db.requireOwnerId();
+    final taskRows = await db.query(
+      'tasks',
+      columns: ['id'],
+      where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
+      whereArgs: [taskId, ownerId],
+      limit: 1,
+    );
+    if (taskRows.isEmpty) {
+      throw StateError('Task not found, archived, or not owned by the current user: $taskId');
+    }
+    final existing = await db.query(
+      'task_recurrences',
+      where: 'task_id = ?',
+      whereArgs: [taskId],
+      limit: 1,
+    );
     if (existing.isNotEmpty) {
       await db.update('task_recurrences', payload, where: 'task_id = ?', whereArgs: [taskId]);
     } else {
@@ -381,7 +399,17 @@ class TaskRepository {
   }
 
   Future<Map<String, Object?>?> getRecurrence(String taskId) async {
-    final rows = await (await _db.database).query(
+    final ownerId = await _db.requireOwnerId();
+    final db = await _db.database;
+    final taskRows = await db.query(
+      'tasks',
+      columns: ['id'],
+      where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
+      whereArgs: [taskId, ownerId],
+      limit: 1,
+    );
+    if (taskRows.isEmpty) return null;
+    final rows = await db.query(
       'task_recurrences',
       where: 'task_id = ? AND (enabled IS NULL OR enabled = 1)',
       whereArgs: [taskId],
@@ -474,8 +502,19 @@ class TaskRepository {
   }
 
   Future<void> clearRecurrence(String taskId) async {
+    final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
     final db = await _db.database;
+    final taskRows = await db.query(
+      'tasks',
+      columns: ['id'],
+      where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
+      whereArgs: [taskId, ownerId],
+      limit: 1,
+    );
+    if (taskRows.isEmpty) {
+      throw StateError('Task not found, archived, or not owned by the current user: $taskId');
+    }
     await db.update(
       'task_recurrences',
       {'enabled': 0, 'updated_at': now},
@@ -494,16 +533,19 @@ class TaskRepository {
     final now = AppDatabase.nowMs();
 
     return _db.txn((txn) async {
-      await txn.update(
+      final changed = await txn.update(
         'tasks',
         {
           'status': EntityStatus.completed,
           'completed_at': now,
           'updated_at': now,
         },
-        where: 'id = ?',
-        whereArgs: [taskId],
+        where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
+        whereArgs: [taskId, ownerId],
       );
+      if (changed != 1) {
+        throw StateError('Task not found, archived, or not owned by the current user: $taskId');
+      }
       await txn.insert('activity_events', {
         'id': AppDatabase.newId(),
         'owner_id': ownerId,
@@ -549,8 +591,8 @@ class TaskRepository {
             'completed_at': null,
             'updated_at': now,
           },
-          where: 'id = ?',
-          whereArgs: [taskId],
+          where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
+          whereArgs: [taskId, await _db.requireOwnerId()],
         );
       },
       eventType: 'TASK_REOPENED',
@@ -572,8 +614,8 @@ class TaskRepository {
             'archived_at': now,
             'updated_at': now,
           },
-          where: 'id = ?',
-          whereArgs: [taskId],
+          where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
+          whereArgs: [taskId, await _db.requireOwnerId()],
         );
       },
       eventType: 'TASK_CANCELLED',
