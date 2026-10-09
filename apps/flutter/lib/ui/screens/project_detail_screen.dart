@@ -42,7 +42,10 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
   }
 
   Future<void> _load() async {
-    if (mounted) {
+    // Only block the screen for the first load. During refreshes keep the
+    // current workspace mounted so its scroll position and local state survive.
+    final initialLoad = _ws == null;
+    if (mounted && initialLoad) {
       setState(() {
         _loading = true;
         _loadError = null;
@@ -58,11 +61,20 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
       });
     } catch (_) {
       if (!mounted) return;
+      final hasWorkspace = _ws != null;
       setState(() {
-        _ws = null;
         _loading = false;
-        _loadError = 'Could not load this project. Please try again.';
+        if (!hasWorkspace) {
+          _loadError = 'Could not load this project. Please try again.';
+        }
       });
+      // A transient refresh failure must not replace a usable workspace with
+      // an error page. Keep the last successful data visible and report it.
+      if (hasWorkspace) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not refresh project data. Showing the last loaded version.')),
+        );
+      }
     }
   }
 
