@@ -48,7 +48,8 @@ The problem is not simply that the app lacks screens. Several connections are re
 **Evidence**
 - `attachNote` / `attachResource` write the entity first and link it afterward.
 - `_insertLink` catches all errors and tries a legacy column layout, then catches all errors again.
-- On the canonical schema the first link insert should use the current columns; if either insert fails, the method can leave an orphan or report success without a relationship.
+- The canonical `entity_links` schema omits `relation`, although `LinkRepository` and `_insertLink` write it. This can make canonical link creation fail before the legacy fallback also fails.
+- If either entity or link insert fails, the method can leave an orphan or report success without a relationship.
 
 **Impact:** Partial writes and invisible broken relationships.  
 **Action:** Use a SQLite transaction for entity + link; use the canonical schema deliberately; propagate failures to the UI and log enough context to diagnose them. Do not turn a failed relationship write into apparent success.
