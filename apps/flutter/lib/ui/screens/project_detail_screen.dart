@@ -42,7 +42,10 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
   }
 
   Future<void> _load() async {
-    if (mounted) {
+    // Show a blocking loader only before the first successful workspace load.
+    // Refreshes must keep the existing route, scroll position, and content alive.
+    final initialLoad = _ws == null;
+    if (mounted && initialLoad) {
       setState(() {
         _loading = true;
         _loadError = null;
@@ -58,11 +61,23 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
       });
     } catch (_) {
       if (!mounted) return;
+      final hasWorkspace = _ws != null;
       setState(() {
-        _ws = null;
         _loading = false;
-        _loadError = 'Could not load this project. Please try again.';
+        if (!hasWorkspace) {
+          _loadError = 'Could not load this project. Please try again.';
+        }
       });
+      // Do not discard the last known-good workspace after a transient error.
+      if (hasWorkspace) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Could not refresh project data. Showing the last loaded version.',
+            ),
+          ),
+        );
+      }
     }
   }
 
@@ -225,10 +240,10 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
+    if (_loading && _ws == null) {
       return const Scaffold(body: Center(child: CircularProgressIndicator(color: AppTheme.amber)));
     }
-    if (_loadError != null) {
+    if (_loadError != null && _ws == null) {
       return Scaffold(
         appBar: AppBar(),
         body: Center(
