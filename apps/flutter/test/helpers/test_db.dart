@@ -55,6 +55,7 @@ Future<AppDatabase> openTestDb() async {
         'ALTER TABLE habits ADD COLUMN goal_id TEXT',
         'ALTER TABLE habit_schedules ADD COLUMN target_count INTEGER DEFAULT 1',
         'ALTER TABLE habit_schedules ADD COLUMN updated_at INTEGER',
+        'ALTER TABLE habit_occurrences ADD COLUMN completed_at INTEGER',
         'ALTER TABLE goals ADD COLUMN target_date INTEGER',
         'ALTER TABLE goals ADD COLUMN description TEXT',
         'ALTER TABLE projects ADD COLUMN description TEXT',
