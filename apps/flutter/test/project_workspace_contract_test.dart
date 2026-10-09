@@ -1,4 +1,6 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ordin/ui/screens/project_detail_screen.dart';
 import 'package:ordin/data/milestone_repository.dart';
 import 'package:ordin/data/link_repository.dart';
 import 'package:ordin/data/project_repository.dart';
@@ -655,5 +657,54 @@ void main() {
         'relation': 'RELATED',
       },
     ]);
+  });
+
+  testWidgets('project workspace stays mounted while milestone mutations reload data',
+      (tester) async {
+    tester.view.physicalSize = const Size(1080, 1920);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final project = await ProjectRepository(AppDatabase.instance).create(
+      title: 'Workspace refresh regression',
+    );
+    await tester.pumpWidget(
+      MaterialApp(home: ProjectDetailScreen(projectId: project.id)),
+    );
+    for (var i = 0; i < 40 &&
+        find.text('Workspace refresh regression').evaluate().isEmpty; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(find.text('Workspace refresh regression'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+
+    await tester.ensureVisible(find.text('Milestones'));
+    await tester.pump();
+    await tester.tap(find.widgetWithText(TextButton, 'Add').first);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, 'First milestone');
+    await tester.tap(find.text('Save'));
+    await tester.pump();
+
+    var sawBlockingLoader = false;
+    for (var i = 0; i < 80; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+      if (find.byType(CircularProgressIndicator).evaluate().isNotEmpty) {
+        sawBlockingLoader = true;
+      }
+      if (find.text('First milestone').evaluate().isNotEmpty) break;
+    }
+
+    expect(find.text('First milestone'), findsOneWidget);
+    expect(find.text('Workspace refresh regression'), findsOneWidget);
+    expect(
+      sawBlockingLoader,
+      isFalse,
+      reason: 'Refreshing data should not replace a loaded workspace with a full-screen loader.',
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 300));
   });
 }
