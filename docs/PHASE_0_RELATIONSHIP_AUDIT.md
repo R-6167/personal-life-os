@@ -86,6 +86,7 @@ The problem is not simply that the app lacks screens. Several connections are re
 
 **Evidence**
 - `ProjectWorkspaceService` computes progress from task and milestone completion using a 70/30 weighted score.
+- `LifeThreadService` uses a 55/45 task/milestone ratio for project branches, a 45/20/35 task/project/milestone ratio for goals, and then adds a recent-work boost.
 - `ProjectRepository.progress` exposes raw counts, while `GoalRepository.progressRatio` uses a different 60/40 project/task formula.
 - Some queries do not consistently exclude archived tasks/projects or canceled/archived items.
 
