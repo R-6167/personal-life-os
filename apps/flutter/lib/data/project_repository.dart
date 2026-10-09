@@ -10,10 +10,11 @@ class ProjectRepository {
 
   Future<List<Project>> listActive() async {
     final db = await _db.database;
+    final ownerId = await _db.requireOwnerId();
     final rows = await db.query(
       'projects',
-      where: "(status = ? OR status IS NULL OR status = '') AND (archived_at IS NULL)",
-      whereArgs: [EntityStatus.active],
+      where: "owner_id = ? AND (status = ? OR status IS NULL OR status = '') AND archived_at IS NULL",
+      whereArgs: [ownerId, EntityStatus.active],
       orderBy: 'created_at DESC',
     );
     return rows.map(Project.fromMap).toList();
@@ -21,10 +22,11 @@ class ProjectRepository {
 
   Future<List<Project>> listByGoal(String goalId) async {
     final db = await _db.database;
+    final ownerId = await _db.requireOwnerId();
     final rows = await db.query(
       'projects',
-      where: 'goal_id = ? AND archived_at IS NULL',
-      whereArgs: [goalId],
+      where: 'goal_id = ? AND owner_id = ? AND archived_at IS NULL',
+      whereArgs: [goalId, ownerId],
       orderBy: 'created_at DESC',
     );
     return rows.map(Project.fromMap).toList();
@@ -32,7 +34,13 @@ class ProjectRepository {
 
   Future<Project?> getById(String id) async {
     final db = await _db.database;
-    final rows = await db.query('projects', where: 'id = ?', whereArgs: [id], limit: 1);
+    final ownerId = await _db.requireOwnerId();
+    final rows = await db.query(
+      'projects',
+      where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
+      whereArgs: [id, ownerId],
+      limit: 1,
+    );
     if (rows.isEmpty) return null;
     return Project.fromMap(rows.first);
   }
@@ -108,7 +116,23 @@ class ProjectRepository {
     } else if (targetDate != null) {
       patch['target_date'] = targetDate;
     }
-    await (await _db.database).update('projects', patch, where: 'id = ?', whereArgs: [id]);
+    final ownerId = await _db.requireOwnerId();
+    await _db.txn((txn) async {
+      await RelationshipValidator.validateProject(
+        txn,
+        ownerId: ownerId,
+        projectId: id,
+      );
+      final changed = await txn.update(
+        'projects',
+        patch,
+        where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
+        whereArgs: [id, ownerId],
+      );
+      if (changed != 1) {
+        throw StateError('Project not found or not owned by the current user: $id');
+      }
+    });
   }
 
   Future<Map<String, int>> progress(String projectId) async {
@@ -147,12 +171,17 @@ class ProjectRepository {
     await AtomicWrite.run(
       db: _db,
       state: (txn) async {
-        await txn.update(
+        final ownerId = await _db.requireOwnerId();
+        await RelationshipValidator.validateProject(txn, ownerId: ownerId, projectId: id);
+        final changed = await txn.update(
           'projects',
           {'status': EntityStatus.completed, 'updated_at': now},
-          where: 'id = ?',
-          whereArgs: [id],
+          where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
+          whereArgs: [id, ownerId],
         );
+        if (changed != 1) {
+          throw StateError('Project not found or not owned by the current user: $id');
+        }
       },
       eventType: 'PROJECT_COMPLETED',
       entityType: 'PROJECT',
