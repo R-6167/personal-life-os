@@ -4,6 +4,7 @@ import 'package:ordin/data/link_repository.dart';
 import 'package:ordin/data/project_repository.dart';
 import 'package:ordin/data/task_repository.dart';
 import 'package:ordin/data/planning_repository.dart';
+import 'package:ordin/data/task_dependency_queries.dart';
 import 'package:ordin/data/database.dart';
 import 'package:ordin/domain/enums.dart';
 import 'package:ordin/services/project_workspace.dart';
@@ -460,6 +461,13 @@ void main() {
 
     expect(await tasks.dependencies(source.id), isEmpty);
     expect(await tasks.listBlockedTaskIds(), isNot(contains(source.id)));
+    final dependencyQueries = TaskDependencyQueries(app);
+    expect(await dependencyQueries.listBlockerTitles(source.id), isEmpty);
+    expect(
+      (await dependencyQueries.listBlockedWithReasons()).containsKey(source.id),
+      isFalse,
+    );
+    expect(await dependencyQueries.countDependentsWaiting(target.id), 0);
     expect(ownerId, isNot(otherOwnerId));
   });
 
