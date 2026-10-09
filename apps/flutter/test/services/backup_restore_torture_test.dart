@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ordin/data/database.dart';
 import 'package:ordin/data/export_service.dart';
 import 'package:ordin/services/integrity_service.dart';
 import 'package:ordin/services/secure_backup.dart';
@@ -36,7 +37,7 @@ void main() {
     });
 
     test('export fails closed when any declared table cannot be read', () async {
-      final db = await (await exports._testDatabase()).database;
+      final db = await AppDatabase.instance.database;
       await db.execute('DROP TABLE feedback_items');
 
       await expectLater(
@@ -49,13 +50,11 @@ void main() {
       final integrity = IntegrityService();
       expect((await integrity.verifyBackupJson('{broken')).ok, isFalse);
       expect((await integrity.verifyBackupJson('[]')).ok, isFalse);
-      expect(
-        (await integrity.verifyBackupJson(jsonEncode({
-          'app': 'some-other-app',
-          'tasks': <Object>[],
-        })).ok,
-        isFalse,
-      );
+      final unknownApp = await integrity.verifyBackupJson(jsonEncode({
+        'app': 'some-other-app',
+        'tasks': <Object>[],
+      }));
+      expect(unknownApp.ok, isFalse);
     });
 
     test('encrypted backup round-trips and rejects a wrong passphrase', () {
