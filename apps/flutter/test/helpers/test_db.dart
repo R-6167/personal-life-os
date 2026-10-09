@@ -59,6 +59,7 @@ Future<AppDatabase> openTestDb() async {
         'ALTER TABLE projects ADD COLUMN target_date INTEGER',
         'ALTER TABLE milestones ADD COLUMN completed_at INTEGER',
         'ALTER TABLE milestones ADD COLUMN position INTEGER DEFAULT 0',
+        "ALTER TABLE entity_links ADD COLUMN relation TEXT DEFAULT 'RELATED'",
         'ALTER TABLE tasks ADD COLUMN description TEXT',
       ]) {
         try {
