@@ -68,6 +68,38 @@ void main() {
       );
     });
 
+    test('a failed row rolls back every row in the same restore', () async {
+      final db = await AppDatabase.instance.database;
+      final ownerId = await AppDatabase.instance.requireOwnerId();
+      final raw = await exports.buildBackupJson();
+      final payload = jsonDecode(raw) as Map<String, dynamic>;
+      final now = AppDatabase.nowMs();
+      payload['tasks'] = [
+        {
+          'id': 'stage1f-valid-task',
+          'ownerId': ownerId,
+          'title': 'Valid row that must roll back',
+          'createdAt': now,
+          'updatedAt': now,
+        },
+        {
+          'id': 'stage1f-invalid-task',
+          'ownerId': ownerId,
+          'title': null,
+          'createdAt': now,
+          'updatedAt': now,
+        },
+      ];
+
+      final result = await exports.importBackupJson(jsonEncode(payload));
+      expect(result.ok, isFalse, reason: result.message);
+      expect(
+        await db.query('tasks', where: 'id = ?', whereArgs: ['stage1f-valid-task']),
+        isEmpty,
+        reason: 'a failed restore must not commit earlier rows',
+      );
+    });
+
     test('restore of an exported database is idempotent', () async {
       final raw = await exports.buildBackupJson();
       final first = await exports.importBackupJson(raw);
