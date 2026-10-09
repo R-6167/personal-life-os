@@ -416,6 +416,7 @@ class ProjectWorkspaceService {
       'from_id': fromId,
       'to_type': toType,
       'to_id': toId,
+      'relation': 'RELATED',
       'created_at': now,
     });
   }
