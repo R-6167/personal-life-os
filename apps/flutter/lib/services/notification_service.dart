@@ -150,7 +150,9 @@ class NotificationService {
       if (notificationId != null) {
         await instance._plugin.cancel(notificationId);
       }
-    } catch (_) {}
+    } catch (error, stackTrace) {
+          await NotificationDiagnostics.record('cancel_action_notification', error, stackTrace: stackTrace);
+        }
 
     if (reminderId == null || reminderId.isEmpty) {
       if (actionId == actionSnooze15 || actionId == actionSnooze60) {
@@ -163,7 +165,9 @@ class NotificationService {
             when: DateTime.now().add(Duration(minutes: mins)),
             payload: payload,
           );
-        } catch (_) {}
+        } catch (error, stackTrace) {
+          await NotificationDiagnostics.record('schedule_anonymous_snooze', error, stackTrace: stackTrace);
+        }
       }
       return;
     }
@@ -181,10 +185,14 @@ class NotificationService {
             result: 'SNOOZED',
             snoozeMinutes: mins,
           );
-        } catch (_) {}
+        } catch (error, stackTrace) {
+          await NotificationDiagnostics.record('record_snooze_result', error, stackTrace: stackTrace);
+        }
         try {
           await instance.syncFromDatabase();
-        } catch (_) {}
+        } catch (error, stackTrace) {
+          await NotificationDiagnostics.record('resync_after_snooze', error, stackTrace: stackTrace);
+        }
         return;
       }
 
@@ -195,12 +203,18 @@ class NotificationService {
             reminderId: reminderId,
             result: 'DISMISSED',
           );
-        } catch (_) {}
+        } catch (error, stackTrace) {
+          await NotificationDiagnostics.record('record_dismiss_result', error, stackTrace: stackTrace);
+        }
         try {
           await instance.syncFromDatabase();
-        } catch (_) {}
+        } catch (error, stackTrace) {
+          await NotificationDiagnostics.record('resync_after_dismiss', error, stackTrace: stackTrace);
+        }
       }
-    } catch (_) {}
+    } catch (error, stackTrace) {
+          await NotificationDiagnostics.record('handle_notification_action', error, stackTrace: stackTrace);
+        }
   }
 
   static Future<void> _cancelReminder(String id) async {
