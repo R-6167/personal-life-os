@@ -68,6 +68,32 @@ void main() {
     );
   });
 
+  test('project workspace includes tasks with an unset status', () async {
+    final app = AppDatabase.instance;
+    final project = await ProjectRepository(app).create(title: 'Unknown status project');
+    final task = await TaskRepository(app).create(
+      title: 'Task with legacy status',
+      projectId: project.id,
+    );
+    await (await app.database).update(
+      'tasks',
+      {'status': null},
+      where: 'id = ?',
+      whereArgs: [task.id],
+    );
+
+    final workspace = await ProjectWorkspaceService(app).load(project.id);
+    final projectThread = await LifeThreadService(app).forProject(project.id);
+    final counts = await ProjectRepository(app).progress(project.id);
+
+    expect(workspace.tasksTotal, 1);
+    expect(workspace.progressRatio, 0.0);
+    expect(projectThread.tasksTotal, 1);
+    expect(projectThread.progressRatio, 0.0);
+    expect(counts['tasksTotal'], 1);
+    expect(counts['tasksDone'], 0);
+  });
+
   test('goal and project workspaces agree and habit completion stays separate', () async {
     final app = AppDatabase.instance;
     final goals = GoalRepository(app);
