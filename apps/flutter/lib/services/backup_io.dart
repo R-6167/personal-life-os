@@ -26,7 +26,7 @@ class BackupIo {
         'Passphrase must be at least 6 characters',
       );
     }
-    return SecureBackup.encrypt(plain, passphrase);
+    return await SecureBackup.encrypt(plain, passphrase);
   }
 
   /// Prefer system save dialog; fall back to share sheet.
@@ -157,7 +157,7 @@ class BackupIo {
           );
         }
         try {
-          raw = SecureBackup.decrypt(raw, passphrase);
+          raw = await SecureBackup.decrypt(raw, passphrase);
         } catch (e) {
           return BackupIoResult(ok: false, message: 'Decrypt failed: $e');
         }
@@ -199,7 +199,7 @@ class BackupIo {
     String passphrase,
   ) async {
     try {
-      final plain = SecureBackup.decrypt(encrypted, passphrase);
+      final plain = await SecureBackup.decrypt(encrypted, passphrase);
       final verify = await IntegrityService(db: _db).verifyRestoreDryRun(plain);
       if (!verify.ok) {
         return BackupIoResult(
