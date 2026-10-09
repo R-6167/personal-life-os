@@ -73,16 +73,23 @@ class ExportService {
       try {
         final rows = await db.query(t);
         data[t] = rows.map(_camel).toList();
-      } catch (e, st) {
-        await ErrorLogService.instance.log(
-          message: 'export table $t: $e',
-          stack: st.toString(),
-          level: 'EXPORT',
-        );
-        data[t] = [];
+      } catch (e) {
+        // An export with a silently empty table is a corrupt/incomplete backup.
+        // Abort rather than presenting a partial archive as a valid backup.
+        throw StateError('Backup export failed for table "$t": $e');
       }
     }
-    return const JsonEncoder.withIndent('  ').convert(data);
+    final json = const JsonEncoder.withIndent('  ').convert(data);
+    if (json.length > maxRawChars) {
+      throw StateError(
+        'Backup exceeds size limit (${(json.length / 1024).toStringAsFixed(0)} KB).',
+      );
+    }
+    final verification = await IntegrityService(db: _db).verifyBackupJson(json);
+    if (!verification.ok) {
+      throw StateError('Backup export verification failed: ${verification.summary}');
+    }
+    return json;
   }
 
   Future<ImportResult> importBackupJson(String raw, {bool replaceUsers = false}) async {
@@ -114,10 +121,36 @@ class ExportService {
       return ImportResult(ok: false, message: 'Unrecognized backup app tag: $app');
     }
 
+    // Validate every supplied row before opening a write transaction. A backup
+    // with malformed rows must not become a partially restored database.
+    for (final table in tables) {
+      if (table == 'users' && !replaceUsers) continue;
+      final rows = map[table] ?? map[_toCamel(table)];
+      if (rows == null) continue;
+      if (rows is! List) {
+        return ImportResult(ok: false, message: 'Invalid rows for table "$table"');
+      }
+      for (var i = 0; i < rows.length; i++) {
+        final row = rows[i];
+        if (row is! Map) {
+          return ImportResult(
+            ok: false,
+            message: 'Invalid row at $table[$i]: expected an object',
+          );
+        }
+        final id = row['id'] ?? row['Id'];
+        if (id is! String || id.isEmpty || id.length > 80) {
+          return ImportResult(
+            ok: false,
+            message: 'Invalid row at $table[$i]: missing or invalid id',
+          );
+        }
+      }
+    }
+
     final inserted = <String, int>{};
     var total = 0;
-    var skipped = 0;
-    var fkSkipped = 0;
+    final failures = <String>[];
 
     Future<void> pass(Transaction txn, {required bool retry}) async {
       for (final table in tables) {
@@ -126,34 +159,34 @@ class ExportService {
         if (rows is! List) continue;
         var n = 0;
         for (final row in rows) {
-          if (row is! Map) {
-            if (!retry) skipped++;
-            continue;
-          }
           final snake = <String, Object?>{};
-          row.forEach((k, v) {
+          (row as Map).forEach((k, v) {
             final key = _toSnake('$k');
             final sanitized = _sanitizeValue(v);
             if (sanitized != null || v == null) {
               snake[key] = sanitized;
             }
           });
-          final id = snake['id'];
-          if (id is! String || id.isEmpty || id.length > 80) {
-            if (!retry) skipped++;
-            continue;
-          }
           try {
-            final c = await txn.insert(table, snake, conflictAlgorithm: ConflictAlgorithm.ignore);
+            // Ignore only an already-present primary key. ConflictAlgorithm.ignore
+            // also suppresses NOT NULL / CHECK failures and makes corrupt rows look
+            // like harmless duplicates, which can silently produce partial restores.
+            final existing = await txn.query(
+              table,
+              columns: const ['id'],
+              where: 'id = ?',
+              whereArgs: [snake['id']],
+              limit: 1,
+            );
+            if (existing.isNotEmpty) continue;
+            final c = await txn.insert(
+              table,
+              snake,
+              conflictAlgorithm: ConflictAlgorithm.abort,
+            );
             if (c > 0) n++;
           } catch (e) {
-            if (retry) {
-              fkSkipped++;
-              await ErrorLogService.instance.log(
-                message: 'import $table/$id: $e',
-                level: 'IMPORT',
-              );
-            }
+            if (retry) failures.add('$table/${snake['id']}: $e');
           }
         }
         if (n > 0) {
@@ -163,23 +196,41 @@ class ExportService {
       }
     }
 
-    await _db.txn((txn) async {
-      await pass(txn, retry: false);
-      await pass(txn, retry: true);
-    });
+    try {
+      await _db.txn((txn) async {
+        await pass(txn, retry: false);
+        await pass(txn, retry: true);
+        if (failures.isNotEmpty) {
+          throw StateError(
+            'Restore rejected ${failures.length} row(s): ${failures.take(3).join('; ')}',
+          );
+        }
+      });
+    } catch (e) {
+      // Throwing inside the transaction rolls back even rows inserted earlier.
+      inserted.clear();
+      total = 0;
+      try {
+        await ErrorLogService.instance.log(
+          message: 'Backup restore aborted; transaction rolled back: $e',
+          level: 'IMPORT',
+        );
+      } catch (_) {
+        // Diagnostics must never mask the restore failure.
+      }
+      return ImportResult(
+        ok: false,
+        message: 'Restore aborted; no changes were committed: $e',
+      );
+    }
 
     final report = await IntegrityService(db: _db).run(repair: true);
-
-    final notes = <String>[];
-    if (skipped > 0) notes.add('Skipped $skipped invalid rows');
-    if (fkSkipped > 0) notes.add('FK-skipped $fkSkipped');
-    final note = notes.isEmpty ? '' : ' ${notes.join('; ')}.';
 
     return ImportResult(
       ok: true,
       message: total == 0
-          ? 'No new rows imported (may already exist). Integrity checks: ${report.checks.length}.$note'
-          : 'Imported $total rows across ${inserted.length} tables. Integrity fixed ${report.fixed}.$note',
+          ? 'No new rows imported (may already exist). Integrity checks: ${report.checks.length}.'
+          : 'Imported $total rows across ${inserted.length} tables. Integrity fixed ${report.fixed}.',
       inserted: inserted,
       total: total,
     );
