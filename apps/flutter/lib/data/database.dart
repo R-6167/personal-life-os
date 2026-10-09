@@ -15,7 +15,7 @@ class AppDatabase {
   static const _uuid = Uuid();
 
   // Bump whenever the database schema/migration contract changes.
-  static const schemaVersion = 23;
+  static const schemaVersion = 24;
 
   Future<Database> get database async {
     if (_db != null) return _db!;
@@ -82,6 +82,7 @@ class AppDatabase {
         await _migrateToV21(db);
         await _migrateToV22(db);
         await _migrateToV23(db);
+        await _migrateToV24(db);
         await _verifySchemaContract(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
@@ -103,6 +104,7 @@ class AppDatabase {
         if (oldVersion < 21) await _migrateToV21(db);
         if (oldVersion < 22) await _migrateToV22(db);
         if (oldVersion < 23) await _migrateToV23(db);
+        if (oldVersion < 24) await _migrateToV24(db);
         await _verifySchemaContract(db);
       },
       onOpen: (db) async {
@@ -293,6 +295,10 @@ CREATE TABLE IF NOT EXISTS users (
     await _ensureUsersTable(db);
     await _ensureDefaultUserRow(db);
     await _applySchema(db);
+    await _ensureSoftColumns(db);
+  }
+
+  Future<void> _migrateToV24(Database db) async {
     await _ensureSoftColumns(db);
   }
 
