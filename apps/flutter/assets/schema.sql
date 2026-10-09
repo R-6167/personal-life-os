@@ -134,7 +134,7 @@ CREATE TABLE IF NOT EXISTS entity_links (
   id TEXT PRIMARY KEY, owner_id TEXT NOT NULL,
   from_type TEXT NOT NULL, from_id TEXT NOT NULL,
   to_type TEXT NOT NULL, to_id TEXT NOT NULL,
-  created_at INTEGER NOT NULL
+  relation TEXT DEFAULT 'RELATED', created_at INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS financial_accounts (
