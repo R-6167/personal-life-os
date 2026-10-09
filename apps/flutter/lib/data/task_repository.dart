@@ -302,7 +302,7 @@ class TaskRepository {
         'SELECT d.id, d.depends_on_task_id, t.title AS depends_on_title '
         'FROM task_dependencies d '
         'INNER JOIN tasks source ON source.id = d.task_id AND source.owner_id = ? '
-        'LEFT JOIN tasks t ON t.id = d.depends_on_task_id AND t.owner_id = ? AND t.archived_at IS NULL '
+        'INNER JOIN tasks t ON t.id = d.depends_on_task_id AND t.owner_id = ? AND t.archived_at IS NULL '
         'WHERE d.task_id = ?',
         [ownerId, ownerId, taskId],
       );
@@ -580,11 +580,12 @@ class TaskRepository {
   }
 
   Future<void> reopen(String taskId) async {
+    final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
     await AtomicWrite.run(
       db: _db,
       state: (txn) async {
-        await txn.update(
+        final changed = await txn.update(
           'tasks',
           {
             'status': EntityStatus.inbox,
@@ -592,8 +593,11 @@ class TaskRepository {
             'updated_at': now,
           },
           where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
-          whereArgs: [taskId, await _db.requireOwnerId()],
+          whereArgs: [taskId, ownerId],
         );
+        if (changed != 1) {
+          throw StateError('Task not found, archived, or not owned by the current user: $taskId');
+        }
       },
       eventType: 'TASK_REOPENED',
       entityType: 'TASK',
@@ -603,11 +607,12 @@ class TaskRepository {
   }
 
   Future<void> delete(String taskId) async {
+    final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
     await AtomicWrite.run(
       db: _db,
       state: (txn) async {
-        await txn.update(
+        final changed = await txn.update(
           'tasks',
           {
             'status': EntityStatus.cancelled,
@@ -615,8 +620,11 @@ class TaskRepository {
             'updated_at': now,
           },
           where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
-          whereArgs: [taskId, await _db.requireOwnerId()],
+          whereArgs: [taskId, ownerId],
         );
+        if (changed != 1) {
+          throw StateError('Task not found, archived, or not owned by the current user: $taskId');
+        }
       },
       eventType: 'TASK_CANCELLED',
       entityType: 'TASK',
