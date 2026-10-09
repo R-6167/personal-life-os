@@ -54,6 +54,35 @@ void main() {
     expect(events.single['source'], EventSource.system);
   });
 
+  test('assistant-created task and audit event are committed together', () async {
+    final result = await OrdinOperator(db: db).execute(
+      OrdinActionProposal(
+        id: 'proposal-create-task',
+        kind: OrdinIntentKind.createTask,
+        title: 'Create task',
+        rationale: 'test',
+        preview: 'Create task “Atomic test task”',
+        payload: {'title': 'Atomic test task'},
+      ),
+    );
+
+    expect(result.ok, isTrue);
+    final taskRows = await (await db.database).query(
+      'tasks',
+      where: 'id = ? AND owner_id = ?',
+      whereArgs: [result.entityId, await db.requireOwnerId()],
+    );
+    expect(taskRows, hasLength(1));
+
+    final events = await (await db.database).query(
+      'activity_events',
+      where: 'event_type = ? AND entity_id = ?',
+      whereArgs: ['ASSISTANT_ACTION_EXECUTED', result.entityId],
+    );
+    expect(events, hasLength(1));
+    expect(events.single['source'], EventSource.system);
+  });
+
   test('action executor rejects a stale proposal for another owner', () async {
     final task = await dbTestTask();
     final otherOwner = 'other-owner';

@@ -154,6 +154,7 @@ class TaskRepository {
     String? goalId,
     String? milestoneId,
     String? parentTaskId,
+    String? assistantActionPreview,
   }) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
@@ -182,6 +183,7 @@ class TaskRepository {
       entityType: 'TASK',
       entityId: task.id,
       occurredAt: now,
+      additionalEvents: assistantActionPreview == null ? const [] : [AtomicEvent(eventType: 'ASSISTANT_ACTION_EXECUTED', entityType: 'TASK', entityId: task.id, source: EventSource.system, metadata: '{"action":"createTask"}', occurredAt: now)],
     );
     return task;
   }
@@ -407,7 +409,7 @@ class TaskRepository {
   }
 
   /// Multi-event lifecycle: complete + optional next occurrence in one txn.
-  Future<Task?> complete(String taskId) async {
+  Future<Task?> complete(String taskId, {String? assistantActionPreview}) async {
     final rule = await getRecurrenceRule(taskId);
     final src = await getById(taskId);
     if (src == null) return null;
@@ -438,6 +440,14 @@ class TaskRepository {
         'metadata': rule == null ? null : '{"recurring":true}',
       });
 
+      if (assistantActionPreview != null) {
+        await txn.insert('activity_events', {
+          'id': AppDatabase.newId(), 'owner_id': ownerId,
+          'event_type': 'ASSISTANT_ACTION_EXECUTED', 'entity_type': 'TASK', 'entity_id': taskId,
+          'occurred_at': now, 'recorded_at': now, 'source': EventSource.system,
+          'metadata': '{"action":"completeTask"}',
+        });
+      }
       if (rule == null) return null;
       return _spawnNextInTxn(
         txn,

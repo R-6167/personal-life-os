@@ -25,7 +25,7 @@ class NoteRepository {
     return Note.fromMap(rows.first);
   }
 
-  Future<Note> create({String? title, required String content}) async {
+  Future<Note> create({String? title, required String content, String? assistantActionPreview}) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
     final note = Note(
@@ -45,6 +45,7 @@ class NoteRepository {
       entityType: 'NOTE',
       entityId: note.id,
       occurredAt: now,
+      additionalEvents: assistantActionPreview == null ? const [] : [AtomicEvent(eventType: 'ASSISTANT_ACTION_EXECUTED', entityType: 'NOTE', entityId: note.id, source: EventSource.system, metadata: '{"action":"addNote"}', occurredAt: now)],
     );
     return note;
   }

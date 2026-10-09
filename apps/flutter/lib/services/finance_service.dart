@@ -377,6 +377,7 @@ class FinanceService {
     String frequency = 'MONTHLY',
     int daysToRenewal = 30,
     String? accountId,
+    String? assistantActionPreview,
   }) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
@@ -420,6 +421,13 @@ class FinanceService {
         'recorded_at': now,
         'source': EventSource.user,
       });
+      if (assistantActionPreview != null) {
+        await txn.insert('activity_events', {
+          'id': AppDatabase.newId(), 'owner_id': ownerId, 'event_type': 'ASSISTANT_ACTION_EXECUTED',
+          'entity_type': 'SUBSCRIPTION', 'entity_id': id, 'occurred_at': now, 'recorded_at': now,
+          'source': EventSource.system, 'metadata': '{"action":"createSubscription"}',
+        });
+      }
     });
     return id;
   }
@@ -428,6 +436,7 @@ class FinanceService {
     required String subscriptionId,
     double? amountMajor,
     String? accountId,
+    String? assistantActionPreview,
   }) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
@@ -510,6 +519,13 @@ class FinanceService {
         'source': EventSource.user,
         'metadata': '{"amount":$minor,"expenseId":"$expenseId","nextRenewal":$next}',
       });
+      if (assistantActionPreview != null) {
+        await txn.insert('activity_events', {
+          'id': AppDatabase.newId(), 'owner_id': ownerId, 'event_type': 'ASSISTANT_ACTION_EXECUTED',
+          'entity_type': 'SUBSCRIPTION', 'entity_id': subscriptionId, 'occurred_at': now, 'recorded_at': now,
+          'source': EventSource.system, 'metadata': '{"action":"paySubscription"}',
+        });
+      }
       await txn.insert('activity_events', {
         'id': AppDatabase.newId(),
         'owner_id': ownerId,
