@@ -39,10 +39,11 @@ class PlanningRepository {
   Future<List<Map<String, Object?>>> listBlocksOnDay(DateTime day) async {
     final start = DateTime(day.year, day.month, day.day).millisecondsSinceEpoch;
     final end = start + const Duration(days: 1).inMilliseconds - 1;
+    final ownerId = await _db.requireOwnerId();
     return (await _db.database).query(
       'time_blocks',
-      where: "start_at <= ? AND end_at >= ? AND (status IS NULL OR status != 'CANCELLED')",
-      whereArgs: [end, start],
+      where: "owner_id = ? AND start_at <= ? AND end_at >= ? AND (status IS NULL OR status != 'CANCELLED')",
+      whereArgs: [ownerId, end, start],
       orderBy: 'start_at ASC',
     );
   }
@@ -54,20 +55,29 @@ class PlanningRepository {
     String? title,
   }) async {
     durationMinutes = durationMinutes.clamp(15, 8 * 60);
-    final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
     final startMs = start.millisecondsSinceEpoch;
     final endMs = start.add(Duration(minutes: durationMinutes)).millisecondsSinceEpoch;
     final blockId = AppDatabase.newId();
 
     await _db.txn((txn) async {
+      final taskRows = await txn.query(
+        'tasks',
+        columns: ['id'],
+        where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
+        whereArgs: [taskId, ownerId],
+        limit: 1,
+      );
+      if (taskRows.isEmpty) {
+        throw StateError('Task not found, archived, or not owned by the current user: $taskId');
+      }
       await txn.update(
         'time_blocks',
         {'status': 'CANCELLED', 'updated_at': now},
-        where: "task_id = ? AND status = 'PLANNED'",
-        whereArgs: [taskId],
+        where: "task_id = ? AND owner_id = ? AND status = 'PLANNED'",
+        whereArgs: [taskId, ownerId],
       );
-      await txn.update(
+      final changed = await txn.update(
         'tasks',
         {
           'scheduled_start': startMs,
@@ -75,9 +85,12 @@ class PlanningRepository {
           'status': EntityStatus.inProgress,
           'updated_at': now,
         },
-        where: 'id = ?',
-        whereArgs: [taskId],
+        where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
+        whereArgs: [taskId, ownerId],
       );
+      if (changed != 1) {
+        throw StateError('Task could not be scheduled: $taskId');
+      }
       await txn.insert('time_blocks', {
         'id': blockId,
         'owner_id': ownerId,
@@ -135,10 +148,17 @@ class PlanningRepository {
     required DateTime start,
     int? durationMinutes,
   }) async {
+    final ownerId = await _db.requireOwnerId();
     final db = await _db.database;
-    final taskRows =
-        await db.query('tasks', where: 'id = ?', whereArgs: [taskId], limit: 1);
-    if (taskRows.isEmpty) return;
+    final taskRows = await db.query(
+      'tasks',
+      where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
+      whereArgs: [taskId, ownerId],
+      limit: 1,
+    );
+    if (taskRows.isEmpty) {
+      throw StateError('Task not found, archived, or not owned by the current user: $taskId');
+    }
 
     final existingStart = taskRows.first['scheduled_start'] as int?;
     final existingEnd = taskRows.first['scheduled_end'] as int?;
@@ -160,13 +180,23 @@ class PlanningRepository {
     final blockId = AppDatabase.newId();
 
     await _db.txn((txn) async {
+      final current = await txn.query(
+        'tasks',
+        columns: ['id'],
+        where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
+        whereArgs: [taskId, ownerId],
+        limit: 1,
+      );
+      if (current.isEmpty) {
+        throw StateError('Task not found, archived, or not owned by the current user: $taskId');
+      }
       await txn.update(
         'time_blocks',
         {'status': 'CANCELLED', 'updated_at': now},
-        where: "task_id = ? AND status = 'PLANNED'",
-        whereArgs: [taskId],
+        where: "task_id = ? AND owner_id = ? AND status = 'PLANNED'",
+        whereArgs: [taskId, ownerId],
       );
-      await txn.update(
+      final changed = await txn.update(
         'tasks',
         {
           'scheduled_start': startMs,
@@ -174,9 +204,12 @@ class PlanningRepository {
           'status': EntityStatus.inProgress,
           'updated_at': now,
         },
-        where: 'id = ?',
-        whereArgs: [taskId],
+        where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
+        whereArgs: [taskId, ownerId],
       );
+      if (changed != 1) {
+        throw StateError('Task could not be rescheduled: $taskId');
+      }
       await txn.insert('time_blocks', {
         'id': blockId,
         'owner_id': ownerId,
@@ -214,17 +247,25 @@ class PlanningRepository {
     final startMs = start.millisecondsSinceEpoch;
     final resolvedEnd = end ?? start.add(Duration(minutes: durationMinutes ?? 30));
     final endMs = resolvedEnd.millisecondsSinceEpoch;
+    final ownerId = await _db.requireOwnerId();
     final db = await _db.database;
-    final rows = await db.query('time_blocks', where: 'id = ?', whereArgs: [blockId], limit: 1);
-    if (rows.isEmpty) return;
+    final rows = await db.query(
+      'time_blocks',
+      where: 'id = ? AND owner_id = ?',
+      whereArgs: [blockId, ownerId],
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      throw StateError('Time block not found or not owned by the current user: $blockId');
+    }
     final taskId = rows.first['task_id'] as String?;
 
     await _db.txn((txn) async {
       await txn.update(
         'time_blocks',
         {'start_at': startMs, 'end_at': endMs, 'updated_at': now},
-        where: 'id = ?',
-        whereArgs: [blockId],
+        where: 'id = ? AND owner_id = ?',
+        whereArgs: [blockId, ownerId],
       );
       if (taskId != null) {
         await txn.update(
@@ -234,26 +275,34 @@ class PlanningRepository {
             'scheduled_end': endMs,
             'updated_at': now,
           },
-          where: 'id = ?',
-          whereArgs: [taskId],
+          where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
+          whereArgs: [taskId, ownerId],
         );
       }
     });
   }
 
   Future<void> cancelBlock(String blockId) async {
+    final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
     final db = await _db.database;
-    final rows = await db.query('time_blocks', where: 'id = ?', whereArgs: [blockId], limit: 1);
-    if (rows.isEmpty) return;
+    final rows = await db.query(
+      'time_blocks',
+      where: 'id = ? AND owner_id = ?',
+      whereArgs: [blockId, ownerId],
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      throw StateError('Time block not found or not owned by the current user: $blockId');
+    }
     final taskId = rows.first['task_id'] as String?;
 
     await _db.txn((txn) async {
       await txn.update(
         'time_blocks',
         {'status': 'CANCELLED', 'updated_at': now},
-        where: 'id = ?',
-        whereArgs: [blockId],
+        where: 'id = ? AND owner_id = ?',
+        whereArgs: [blockId, ownerId],
       );
       if (taskId != null) {
         await txn.update(
@@ -263,8 +312,8 @@ class PlanningRepository {
             'scheduled_end': null,
             'updated_at': now,
           },
-          where: 'id = ?',
-          whereArgs: [taskId],
+          where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
+          whereArgs: [taskId, ownerId],
         );
       }
     });
