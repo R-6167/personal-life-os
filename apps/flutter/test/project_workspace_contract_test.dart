@@ -463,6 +463,69 @@ void main() {
     expect(ownerId, isNot(otherOwnerId));
   });
 
+  test('planning availability ignores calendar, block, and task rows from other owners', () async {
+    final app = AppDatabase.instance;
+    final db = await app.database;
+    final task = await TaskRepository(app).create(title: 'Foreign scheduled task');
+    final ownerId = await app.requireOwnerId();
+    final otherOwnerId = AppDatabase.newId();
+    final now = AppDatabase.nowMs();
+    await db.insert('users', {
+      'id': otherOwnerId,
+      'display_name': 'Other',
+      'name': 'Other',
+      'currency': 'KES',
+      'week_start_day': 1,
+      'created_at': now,
+      'updated_at': now,
+    });
+    await db.update(
+      'tasks',
+      {
+        'owner_id': otherOwnerId,
+        'scheduled_start': DateTime(2026, 10, 10, 9).millisecondsSinceEpoch,
+        'scheduled_end': DateTime(2026, 10, 10, 10).millisecondsSinceEpoch,
+      },
+      where: 'id = ?',
+      whereArgs: [task.id],
+    );
+    await db.insert('calendar_events', {
+      'id': AppDatabase.newId(),
+      'owner_id': otherOwnerId,
+      'title': 'Private event',
+      'start_at': DateTime(2026, 10, 10, 10).millisecondsSinceEpoch,
+      'end_at': DateTime(2026, 10, 10, 11).millisecondsSinceEpoch,
+      'status': 'CONFIRMED',
+      'created_at': now,
+      'updated_at': now,
+    });
+    await db.insert('time_blocks', {
+      'id': AppDatabase.newId(),
+      'owner_id': otherOwnerId,
+      'title': 'Private block',
+      'type': 'FOCUS',
+      'start_at': DateTime(2026, 10, 10, 11).millisecondsSinceEpoch,
+      'end_at': DateTime(2026, 10, 10, 12).millisecondsSinceEpoch,
+      'status': 'PLANNED',
+      'created_at': now,
+      'updated_at': now,
+    });
+
+    final planning = PlanningRepository(app);
+    expect(
+      await planning.collectDayBusy(day: DateTime(2026, 10, 10)),
+      isEmpty,
+    );
+    expect(
+      await planning.conflictsWithLocked(
+        start: DateTime(2026, 10, 10, 9),
+        durationMinutes: 60,
+      ),
+      isFalse,
+    );
+    expect(ownerId, isNot(otherOwnerId));
+  });
+
   test('generic entity links persist against the canonical schema', () async {
     final app = AppDatabase.instance;
     final db = await app.database;
