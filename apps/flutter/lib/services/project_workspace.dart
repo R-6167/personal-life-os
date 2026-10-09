@@ -93,7 +93,7 @@ class ProjectWorkspaceService {
 
     final allTasks = await db.query(
       'tasks',
-      where: "project_id = ? AND (archived_at IS NULL) AND status != 'CANCELLED'",
+      where: "project_id = ? AND archived_at IS NULL AND COALESCE(status, '') != 'CANCELLED'",
       whereArgs: [projectId],
       orderBy: 'priority DESC, due_at ASC, created_at ASC',
     );
