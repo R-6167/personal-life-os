@@ -5,6 +5,7 @@ import 'package:ordin/data/project_repository.dart';
 import 'package:ordin/data/task_repository.dart';
 import 'package:ordin/data/planning_repository.dart';
 import 'package:ordin/data/database.dart';
+import 'package:ordin/domain/enums.dart';
 import 'package:ordin/services/project_workspace.dart';
 
 import 'helpers/test_db.dart';
@@ -388,7 +389,7 @@ void main() {
 
     expect(await tasks.getById(task.id), isNull);
     expect(await tasks.descriptionOf(task.id), isNull);
-    expect(await tasks.listByProject('foreign-project'), isEmpty);
+    expect(await tasks.listOpen().then((items) => items.map((item) => item.id)), isNot(contains(task.id)));
     await expectLater(
       tasks.update(id: task.id, title: 'Unauthorized edit'),
       throwsA(isA<StateError>()),
