@@ -13,11 +13,12 @@ class TaskRepository {
   final AppDatabase _db;
 
   Future<List<Task>> listOpen() async {
+    final ownerId = await _db.requireOwnerId();
     final db = await _db.database;
     final rows = await db.query(
       'tasks',
-      where: 'status NOT IN (?, ?) AND archived_at IS NULL',
-      whereArgs: [EntityStatus.completed, EntityStatus.cancelled],
+      where: 'owner_id = ? AND status NOT IN (?, ?) AND archived_at IS NULL',
+      whereArgs: [ownerId, EntityStatus.completed, EntityStatus.cancelled],
       orderBy: 'priority DESC, due_at ASC, updated_at DESC',
     );
     return rows.map(Task.fromMap).toList();
@@ -25,12 +26,13 @@ class TaskRepository {
 
   Future<List<Task>> listOverdue() async {
     final now = AppDatabase.nowMs();
+    final ownerId = await _db.requireOwnerId();
     final db = await _db.database;
     final rows = await db.query(
       'tasks',
       where:
-          'due_at IS NOT NULL AND due_at < ? AND status NOT IN (?, ?) AND archived_at IS NULL',
-      whereArgs: [now, EntityStatus.completed, EntityStatus.cancelled],
+          'owner_id = ? AND due_at IS NOT NULL AND due_at < ? AND status NOT IN (?, ?) AND archived_at IS NULL',
+      whereArgs: [ownerId, now, EntityStatus.completed, EntityStatus.cancelled],
       orderBy: 'due_at ASC',
     );
     return rows.map(Task.fromMap).toList();
@@ -39,12 +41,13 @@ class TaskRepository {
   Future<List<Task>> listDueToday() async {
     final start = AppDatabase.startOfTodayMs();
     final end = AppDatabase.endOfTodayMs();
+    final ownerId = await _db.requireOwnerId();
     final db = await _db.database;
     final rows = await db.query(
       'tasks',
       where:
-          'due_at IS NOT NULL AND due_at >= ? AND due_at <= ? AND status NOT IN (?, ?) AND archived_at IS NULL',
-      whereArgs: [start, end, EntityStatus.completed, EntityStatus.cancelled],
+          'owner_id = ? AND due_at IS NOT NULL AND due_at >= ? AND due_at <= ? AND status NOT IN (?, ?) AND archived_at IS NULL',
+      whereArgs: [ownerId, start, end, EntityStatus.completed, EntityStatus.cancelled],
       orderBy: 'priority DESC, due_at ASC',
     );
     return rows.map(Task.fromMap).toList();
@@ -53,28 +56,31 @@ class TaskRepository {
   Future<List<Task>> listScheduledOnDay(DateTime day) async {
     final start = DateTime(day.year, day.month, day.day).millisecondsSinceEpoch;
     final end = start + const Duration(days: 1).inMilliseconds - 1;
+    final ownerId = await _db.requireOwnerId();
     final db = await _db.database;
     final rows = await db.query(
       'tasks',
       where:
-          'scheduled_start IS NOT NULL AND scheduled_start <= ? AND '
+          'owner_id = ? AND scheduled_start IS NOT NULL AND scheduled_start <= ? AND '
           '(scheduled_end IS NULL OR scheduled_end > ?) AND '
           'status NOT IN (?, ?) AND archived_at IS NULL',
-      whereArgs: [end, start, EntityStatus.completed, EntityStatus.cancelled],
+      whereArgs: [ownerId, end, start, EntityStatus.completed, EntityStatus.cancelled],
       orderBy: 'scheduled_start ASC',
     );
     return rows.map(Task.fromMap).toList();
   }
 
   Future<Set<String>> listBlockedTaskIds() async {
+    final ownerId = await _db.requireOwnerId();
     final db = await _db.database;
     try {
       final rows = await db.rawQuery(
         'SELECT DISTINCT d.task_id AS id '
         'FROM task_dependencies d '
-        'INNER JOIN tasks dep ON dep.id = d.depends_on_task_id '
+        'INNER JOIN tasks task ON task.id = d.task_id AND task.owner_id = ? AND task.archived_at IS NULL '
+        'INNER JOIN tasks dep ON dep.id = d.depends_on_task_id AND dep.owner_id = ? '
         'WHERE dep.status NOT IN (?, ?) AND dep.archived_at IS NULL',
-        [EntityStatus.completed, EntityStatus.cancelled],
+        [ownerId, ownerId, EntityStatus.completed, EntityStatus.cancelled],
       );
       return rows.map((r) => r['id'] as String).toSet();
     } catch (_) {
@@ -88,38 +94,46 @@ class TaskRepository {
   }
 
   Future<List<Task>> listByProject(String projectId) async {
+    final ownerId = await _db.requireOwnerId();
     final rows = await (await _db.database).query(
       'tasks',
-      where: 'project_id = ? AND archived_at IS NULL',
-      whereArgs: [projectId],
+      where: 'owner_id = ? AND project_id = ? AND archived_at IS NULL',
+      whereArgs: [ownerId, projectId],
       orderBy: 'status ASC, priority DESC, updated_at DESC',
     );
     return rows.map(Task.fromMap).toList();
   }
 
   Future<List<Task>> listByGoal(String goalId) async {
+    final ownerId = await _db.requireOwnerId();
     final rows = await (await _db.database).query(
       'tasks',
-      where: 'goal_id = ? AND archived_at IS NULL',
-      whereArgs: [goalId],
+      where: 'owner_id = ? AND goal_id = ? AND archived_at IS NULL',
+      whereArgs: [ownerId, goalId],
       orderBy: 'status ASC, priority DESC, updated_at DESC',
     );
     return rows.map(Task.fromMap).toList();
   }
 
   Future<Task?> getById(String id) async {
-    final rows =
-        await (await _db.database).query('tasks', where: 'id = ?', whereArgs: [id], limit: 1);
+    final ownerId = await _db.requireOwnerId();
+    final rows = await (await _db.database).query(
+      'tasks',
+      where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
+      whereArgs: [id, ownerId],
+      limit: 1,
+    );
     if (rows.isEmpty) return null;
     return Task.fromMap(rows.first);
   }
 
   Future<String?> descriptionOf(String taskId) async {
+    final ownerId = await _db.requireOwnerId();
     final rows = await (await _db.database).query(
       'tasks',
       columns: ['description'],
-      where: 'id = ?',
-      whereArgs: [taskId],
+      where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
+      whereArgs: [taskId, ownerId],
       limit: 1,
     );
     if (rows.isEmpty) return null;
@@ -278,14 +292,16 @@ class TaskRepository {
   }
 
   Future<List<Map<String, Object?>>> dependencies(String taskId) async {
+    final ownerId = await _db.requireOwnerId();
     final db = await _db.database;
     try {
       return await db.rawQuery(
         'SELECT d.id, d.depends_on_task_id, t.title AS depends_on_title '
         'FROM task_dependencies d '
-        'LEFT JOIN tasks t ON t.id = d.depends_on_task_id '
+        'INNER JOIN tasks source ON source.id = d.task_id AND source.owner_id = ? '
+        'LEFT JOIN tasks t ON t.id = d.depends_on_task_id AND t.owner_id = ? AND t.archived_at IS NULL '
         'WHERE d.task_id = ?',
-        [taskId],
+        [ownerId, ownerId, taskId],
       );
     } catch (_) {
       return [];
@@ -293,13 +309,17 @@ class TaskRepository {
   }
 
   Future<void> clearSchedule(String taskId) async {
+    final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
-    await (await _db.database).update(
+    final changed = await (await _db.database).update(
       'tasks',
       {'scheduled_start': null, 'scheduled_end': null, 'updated_at': now},
-      where: 'id = ?',
-      whereArgs: [taskId],
+      where: 'id = ? AND owner_id = ? AND archived_at IS NULL',
+      whereArgs: [taskId, ownerId],
     );
+    if (changed != 1) {
+      throw StateError('Task not found or not owned by the current user: $taskId');
+    }
   }
 
   Future<void> setRecurrence({
