@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../data/database.dart';
 
 /// Best-effort, local-only diagnostics for notification failures.
@@ -44,7 +46,7 @@ class NotificationDiagnostics {
     final entries = context.entries
         .map((entry) => '"${_escape(entry.key)}":"${_escape('${entry.value ?? ''}')}"')
         .join(',');
-    return '{$entries}';
+    return jsonEncode(context);
   }
 
   static String _escape(String value) => value
