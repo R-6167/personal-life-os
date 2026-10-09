@@ -7,6 +7,7 @@ import 'package:timezone/timezone.dart' as tz;
 import '../data/budget_repository.dart';
 import '../data/database.dart';
 import '../data/extended_repository.dart';
+import 'notification_diagnostics.dart';
 import 'notification_payload.dart';
 import 'notification_router.dart';
 import 'reminder_generator_service.dart';
@@ -149,7 +150,9 @@ class NotificationService {
       if (notificationId != null) {
         await instance._plugin.cancel(notificationId);
       }
-    } catch (_) {}
+    } catch (error, stackTrace) {
+          await NotificationDiagnostics.record('cancel_action_notification', error, stackTrace: stackTrace);
+        }
 
     if (reminderId == null || reminderId.isEmpty) {
       if (actionId == actionSnooze15 || actionId == actionSnooze60) {
@@ -162,7 +165,9 @@ class NotificationService {
             when: DateTime.now().add(Duration(minutes: mins)),
             payload: payload,
           );
-        } catch (_) {}
+        } catch (error, stackTrace) {
+          await NotificationDiagnostics.record('schedule_anonymous_snooze', error, stackTrace: stackTrace);
+        }
       }
       return;
     }
@@ -180,10 +185,14 @@ class NotificationService {
             result: 'SNOOZED',
             snoozeMinutes: mins,
           );
-        } catch (_) {}
+        } catch (error, stackTrace) {
+          await NotificationDiagnostics.record('record_snooze_result', error, stackTrace: stackTrace);
+        }
         try {
           await instance.syncFromDatabase();
-        } catch (_) {}
+        } catch (error, stackTrace) {
+          await NotificationDiagnostics.record('resync_after_snooze', error, stackTrace: stackTrace);
+        }
         return;
       }
 
@@ -194,12 +203,18 @@ class NotificationService {
             reminderId: reminderId,
             result: 'DISMISSED',
           );
-        } catch (_) {}
+        } catch (error, stackTrace) {
+          await NotificationDiagnostics.record('record_dismiss_result', error, stackTrace: stackTrace);
+        }
         try {
           await instance.syncFromDatabase();
-        } catch (_) {}
+        } catch (error, stackTrace) {
+          await NotificationDiagnostics.record('resync_after_dismiss', error, stackTrace: stackTrace);
+        }
       }
-    } catch (_) {}
+    } catch (error, stackTrace) {
+          await NotificationDiagnostics.record('handle_notification_action', error, stackTrace: stackTrace);
+        }
   }
 
   static Future<void> _cancelReminder(String id) async {
@@ -225,7 +240,9 @@ class NotificationService {
 
     try {
       await ReminderGeneratorService().generateAll();
-    } catch (_) {}
+    } catch (error, stackTrace) {
+      await NotificationDiagnostics.record('generate_reminders', error, stackTrace: stackTrace);
+    }
 
     await cancelAll();
     var n = 0;
@@ -253,15 +270,24 @@ class NotificationService {
       final body = '${r['message'] ?? 'Open Ordin to act'}'
           .replaceFirst(RegExp(r'^\[[^\]]+\]\s*'), '');
 
-      await _schedule(
-        id: _stableId('rem', remId),
-        title: '${r['title']}',
-        body: body,
-        when: when,
-        high: true,
-        payload: payload.encode(),
-      );
-      n++;
+      try {
+        await _schedule(
+          id: _stableId('rem', remId),
+          title: '${r['title']}',
+          body: body,
+          when: when,
+          high: true,
+          payload: payload.encode(),
+        );
+        n++;
+      } catch (error, stackTrace) {
+        await NotificationDiagnostics.record(
+          'schedule_reminder',
+          error,
+          stackTrace: stackTrace,
+          details: {'reminderId': remId, 'sourceType': sourceType},
+        );
+      }
     }
 
     n += await notifyBudgetAlerts(delay: const Duration(seconds: 2));
