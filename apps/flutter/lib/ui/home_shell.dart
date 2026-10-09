@@ -569,7 +569,6 @@ class _HomeShellState extends State<HomeShell> {
                           await _habits.markDoneToday(h.id);
                           HapticFeedback.selectionClick();
                           AppDataBus.instance.lifeChanged();
-                          await _reloadLife();
                         },
                       ),
                     ),
@@ -591,7 +590,6 @@ class _HomeShellState extends State<HomeShell> {
                           final paid = await promptAndPayBill(context, o);
                           if (paid) {
                             AppDataBus.instance.financeChanged();
-                            await _reloadFinance();
                           }
                         },
                         child: const Text('Pay'),
@@ -610,7 +608,6 @@ class _HomeShellState extends State<HomeShell> {
                               builder: (_) => ProjectDetailScreen(projectId: p.id)))
                           .then((_) {
                         AppDataBus.instance.lifeChanged();
-                        return _reloadLife();
                       });
                     },
                     child: Text(p.title, style: const TextStyle(color: AppTheme.silver)),
