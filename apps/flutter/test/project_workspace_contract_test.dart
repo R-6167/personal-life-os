@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ordin/data/milestone_repository.dart';
+import 'package:ordin/data/project_repository.dart';
 import 'package:ordin/data/task_repository.dart';
 import 'package:ordin/data/database.dart';
 import 'package:ordin/services/project_workspace.dart';
@@ -106,4 +107,127 @@ void main() {
       throwsA(isA<StateError>()),
     );
   });
+  test('project goal links must resolve to an active goal owned by the user', () async {
+    final app = AppDatabase.instance;
+    final db = await app.database;
+    final ownerId = await app.requireOwnerId();
+    final now = AppDatabase.nowMs();
+
+    await db.insert('projects', {
+      'id': 'goal-link-project',
+      'owner_id': ownerId,
+      'title': 'Goal link project',
+      'status': 'ACTIVE',
+      'created_at': now,
+      'updated_at': now,
+    });
+
+    await expectLater(
+      ProjectRepository(app).linkGoal('goal-link-project', 'missing-goal'),
+      throwsA(isA<StateError>()),
+    );
+    final unchanged = await db.query(
+      'projects',
+      columns: ['goal_id'],
+      where: 'id = ?',
+      whereArgs: ['goal-link-project'],
+      limit: 1,
+    );
+    expect(unchanged.single['goal_id'], isNull);
+
+    await db.insert('goals', {
+      'id': 'goal-link-valid',
+      'owner_id': ownerId,
+      'title': 'Valid goal',
+      'status': 'ACTIVE',
+      'created_at': now,
+      'updated_at': now,
+    });
+    await ProjectRepository(app).linkGoal('goal-link-project', 'goal-link-valid');
+    final linked = await db.query(
+      'projects',
+      columns: ['goal_id'],
+      where: 'id = ?',
+      whereArgs: ['goal-link-project'],
+      limit: 1,
+    );
+    expect(linked.single['goal_id'], 'goal-link-valid');
+  });
+
+  test('task rejects missing project and goal references', () async {
+    final tasks = TaskRepository(AppDatabase.instance);
+    await expectLater(
+      tasks.create(title: 'Missing project', projectId: 'not-a-project'),
+      throwsA(isA<StateError>()),
+    );
+    await expectLater(
+      tasks.create(title: 'Missing goal', goalId: 'not-a-goal'),
+      throwsA(isA<StateError>()),
+    );
+  });
+
+  test('child task must have a parent in the same project', () async {
+    final app = AppDatabase.instance;
+    final db = await app.database;
+    final ownerId = await app.requireOwnerId();
+    final now = AppDatabase.nowMs();
+    for (final id in ['parent-project-a', 'parent-project-b']) {
+      await db.insert('projects', {
+        'id': id,
+        'owner_id': ownerId,
+        'title': id,
+        'status': 'ACTIVE',
+        'created_at': now,
+        'updated_at': now,
+      });
+    }
+    final parent = await TaskRepository(app).create(
+      title: 'Parent in A',
+      projectId: 'parent-project-a',
+    );
+
+    await expectLater(
+      TaskRepository(app).create(
+        title: 'Child in B',
+        projectId: 'parent-project-b',
+        parentTaskId: parent.id,
+      ),
+      throwsA(isA<StateError>()),
+    );
+  });
+
+  test('milestones receive stable sequential positions', () async {
+    final app = AppDatabase.instance;
+    final db = await app.database;
+    final ownerId = await app.requireOwnerId();
+    final now = AppDatabase.nowMs();
+    await db.insert('projects', {
+      'id': 'ordered-milestones-project',
+      'owner_id': ownerId,
+      'title': 'Ordered milestones',
+      'status': 'ACTIVE',
+      'created_at': now,
+      'updated_at': now,
+    });
+
+    await MilestoneRepository(app).create(
+      projectId: 'ordered-milestones-project',
+      title: 'First',
+    );
+    await MilestoneRepository(app).create(
+      projectId: 'ordered-milestones-project',
+      title: 'Second',
+    );
+
+    final rows = await db.query(
+      'milestones',
+      columns: ['title', 'position'],
+      where: 'project_id = ?',
+      whereArgs: ['ordered-milestones-project'],
+      orderBy: 'position ASC',
+    );
+    expect(rows.map((r) => r['title']).toList(), ['First', 'Second']);
+    expect(rows.map((r) => r['position']).toList(), [0, 1]);
+  });
+
 }
