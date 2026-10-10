@@ -545,3 +545,75 @@ Future<bool> _simpleText(
   await onSave(ctrls.map((c) => c.text.trim()).toList());
   return true;
 }
+
+Future<bool> _entityWithLifeAreaForm(
+  BuildContext context, {
+  required String title,
+  required Future<void> Function(String title, String? description, String? lifeAreaId) onSave,
+}) async {
+  final titleCtrl = TextEditingController();
+  final descCtrl = TextEditingController();
+  String? lifeAreaId;
+  final areaRepo = LifeAreaRepository(AppDatabase.instance);
+  await areaRepo.seedDefaultsIfEmpty();
+  final areas = await areaRepo.listActive();
+
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setLocal) => AlertDialog(
+        backgroundColor: AppTheme.metal,
+        title: Text(title, style: const TextStyle(color: AppTheme.silver)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: titleCtrl,
+              autofocus: true,
+              style: const TextStyle(color: AppTheme.silver),
+              decoration: const InputDecoration(labelText: 'Title'),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: descCtrl,
+              style: const TextStyle(color: AppTheme.silver),
+              decoration: const InputDecoration(labelText: 'Description (optional)'),
+            ),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String?>(
+              value: lifeAreaId,
+              dropdownColor: AppTheme.metal,
+              decoration: const InputDecoration(labelText: 'Life area (optional)'),
+              items: [
+                const DropdownMenuItem(value: null, child: Text('None')),
+                ...areas.map(
+                  (a) => DropdownMenuItem(value: a.id, child: Text(a.title)),
+                ),
+              ],
+              onChanged: (v) => setLocal(() => lifeAreaId = v),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              if (titleCtrl.text.trim().isEmpty) return;
+              Navigator.pop(ctx, true);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    ),
+  );
+  if (ok != true) return false;
+  final desc = descCtrl.text.trim();
+  await onSave(
+    titleCtrl.text.trim(),
+    desc.isEmpty ? null : desc,
+    lifeAreaId,
+  );
+  return true;
+}
+
