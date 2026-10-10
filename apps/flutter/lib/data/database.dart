@@ -15,7 +15,7 @@ class AppDatabase {
   static const _uuid = Uuid();
 
   // Bump whenever the database schema/migration contract changes.
-  static const schemaVersion = 24;
+  static const schemaVersion = 25;
 
   Future<Database> get database async {
     if (_db != null) return _db!;
@@ -83,6 +83,7 @@ class AppDatabase {
         await _migrateToV22(db);
         await _migrateToV23(db);
         await _migrateToV24(db);
+        await _migrateToV25(db);
         await _verifySchemaContract(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
@@ -105,6 +106,7 @@ class AppDatabase {
         if (oldVersion < 22) await _migrateToV22(db);
         if (oldVersion < 23) await _migrateToV23(db);
         if (oldVersion < 24) await _migrateToV24(db);
+        if (oldVersion < 25) await _migrateToV25(db);
         await _verifySchemaContract(db);
       },
       onOpen: (db) async {
@@ -299,6 +301,21 @@ CREATE TABLE IF NOT EXISTS users (
     await _ensureSoftColumns(db);
   }
 
+  Future<void> _migrateToV25(Database db) async {
+    await db.execute('''
+CREATE TABLE IF NOT EXISTS life_areas (
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, title TEXT NOT NULL,
+  description TEXT, color TEXT, icon TEXT,
+  position INTEGER DEFAULT 0, archived_at INTEGER,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
+)
+    ''');
+    await _executeIgnoringDuplicateColumn(db, 'ALTER TABLE goals ADD COLUMN life_area_id TEXT');
+    await _executeIgnoringDuplicateColumn(db, 'ALTER TABLE projects ADD COLUMN life_area_id TEXT');
+    await _executeIgnoringDuplicateColumn(db, 'ALTER TABLE tasks ADD COLUMN life_area_id TEXT');
+  }
+
   Future<void> _migrateToV24(Database db) async {
     await _applySchema(db);
     await _ensureSoftColumns(db);
@@ -315,7 +332,7 @@ CREATE TABLE IF NOT EXISTS users (
 
   Future<void> _verifySchemaContract(Database db) async {
     const requiredTables = <String>[
-      'users', 'goals', 'projects', 'tasks', 'activity_events',
+      'users', 'goals', 'projects', 'tasks', 'life_areas', 'activity_events',
       'error_logs', 'work_sessions',
     ];
     for (final table in requiredTables) {

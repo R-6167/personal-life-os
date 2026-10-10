@@ -17,6 +17,14 @@ CREATE TABLE IF NOT EXISTS categories (
   FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS life_areas (
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, title TEXT NOT NULL,
+  description TEXT, color TEXT, icon TEXT,
+  position INTEGER DEFAULT 0, archived_at INTEGER,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS people (
   id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, name TEXT NOT NULL,
   phone TEXT, email TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
@@ -25,13 +33,15 @@ CREATE TABLE IF NOT EXISTS people (
 
 CREATE TABLE IF NOT EXISTS goals (
   id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, title TEXT NOT NULL,
-  description TEXT, status TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+  description TEXT, status TEXT, life_area_id TEXT,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
   FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, goal_id TEXT, title TEXT NOT NULL,
-  status TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+  status TEXT, life_area_id TEXT,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
   FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
@@ -43,7 +53,8 @@ CREATE TABLE IF NOT EXISTS milestones (
 
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, project_id TEXT, goal_id TEXT,
-  milestone_id TEXT, parent_task_id TEXT, title TEXT NOT NULL, description TEXT,
+  milestone_id TEXT, parent_task_id TEXT, life_area_id TEXT,
+  title TEXT NOT NULL, description TEXT,
   status TEXT, priority INTEGER DEFAULT 0, due_at INTEGER,
   scheduled_start INTEGER, scheduled_end INTEGER, estimated_minutes INTEGER,
   completed_at INTEGER, archived_at INTEGER,
