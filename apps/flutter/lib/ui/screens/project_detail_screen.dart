@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../data/database.dart';
 import '../../data/milestone_repository.dart';
+import '../../services/app_data_bus.dart';
 import '../../data/project_repository.dart';
 import '../../data/task_repository.dart';
 import '../../domain/db_map.dart';
@@ -238,6 +239,25 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
     return '${d.month}/${d.day} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
   }
 
+  Future<void> _moveMilestone(List<Map<String, Object?>> milestones, int index, int delta) async {
+    final next = index + delta;
+    if (next < 0 || next >= milestones.length) return;
+    final ids = milestones.map((m) => dbStr(m['id'])).toList();
+    final tmp = ids[index];
+    ids[index] = ids[next];
+    ids[next] = tmp;
+    try {
+      await _milestonesRepo.reorder(projectId: widget.projectId, orderedIds: ids);
+      AppDataBus.instance.lifeChanged();
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not reorder milestone: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading && _ws == null) {
@@ -460,7 +480,10 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
               Text('Stages toward finishing this project.',
                   style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.35)))
             else
-              ...ws.milestones.map((m) => Padding(
+              ...ws.milestones.asMap().entries.map((entry) {
+              final index = entry.key;
+              final m = entry.value;
+              return Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: GlassCard(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -471,6 +494,20 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
+                            IconButton(
+                              tooltip: 'Move milestone up',
+                              icon: const Icon(Icons.arrow_upward, color: AppTheme.silver, size: 18),
+                              onPressed: index == 0
+                                  ? null
+                                  : () => _moveMilestone(ws.milestones, index, -1),
+                            ),
+                            IconButton(
+                              tooltip: 'Move milestone down',
+                              icon: const Icon(Icons.arrow_downward, color: AppTheme.silver, size: 18),
+                              onPressed: index == ws.milestones.length - 1
+                                  ? null
+                                  : () => _moveMilestone(ws.milestones, index, 1),
+                            ),
                             IconButton(
                               tooltip: 'Add task to milestone',
                               icon: const Icon(Icons.add_task, color: AppTheme.silverMuted),
@@ -491,7 +528,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                         ),
                       ),
                     ),
-                  )),
+                  );
+                  }),
 
             // —— Tasks + subtasks ——
             const SizedBox(height: 12),

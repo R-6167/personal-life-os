@@ -7,10 +7,14 @@ import 'atomic_write.dart';
 import 'database.dart';
 import 'planning_repository.dart';
 import 'relationship_validator.dart';
+import 'task_dependency_mutations.dart';
 
-class TaskRepository {
+class TaskRepository with TaskDependencyMutations {
   TaskRepository(this._db);
   final AppDatabase _db;
+
+  @override
+  AppDatabase get dependencyDb => _db;
 
   Future<List<Task>> listOpen() async {
     final ownerId = await _db.requireOwnerId();
