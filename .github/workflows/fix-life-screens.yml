@@ -9,14 +9,15 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: fix/life-screens-and-notes
-      - name: Apply patch
+          ref: main
+      - name: Apply patch onto feature branch
         run: |
           set -euo pipefail
+          git checkout -B fix/life-screens-and-notes
           python3 tools/patch_life_screens.py
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git status
           git commit -m "fix: wellness schema v26, resilient life screens, note notepad mode" || echo nochange
-          git push origin HEAD:fix/life-screens-and-notes
+          git push -u origin HEAD:fix/life-screens-and-notes --force
