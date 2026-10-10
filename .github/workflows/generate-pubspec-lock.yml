@@ -6,7 +6,11 @@ on:
       target_branch:
         description: Branch to update with pubspec.lock
         required: true
-        default: security/sonar-c-readiness
+        default: main
+      regenerate:
+        description: "true = refresh lock from pubspec.yaml; false = enforce existing lock"
+        required: true
+        default: "false"
 
 jobs:
   lock:
@@ -26,11 +30,17 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Generate and commit lockfile
+      - name: Sync lockfile
         working-directory: apps/flutter
         run: |
           set -euo pipefail
-          flutter pub get
+          test -s pubspec.lock
+          if [ "${{ github.event.inputs.regenerate }}" = "true" ]; then
+            # Intentional unlock only when operator requests a lock refresh after pubspec.yaml changes.
+            flutter pub get
+          else
+            flutter pub get --enforce-lockfile
+          fi
           test -s pubspec.lock
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -39,5 +49,5 @@ jobs:
             echo "pubspec.lock already up to date"
             exit 0
           fi
-          git commit -m "security: commit complete pubspec.lock (CI generated)"
+          git commit -m "security: update pubspec.lock"
           git push origin "HEAD:${{ github.event.inputs.target_branch }}"
