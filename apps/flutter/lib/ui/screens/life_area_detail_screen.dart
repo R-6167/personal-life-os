@@ -112,7 +112,7 @@ class _LifeAreaDetailScreenState extends State<LifeAreaDetailScreen> {
                                           GoalDetailScreen(goalId: g.id),
                                     ),
                                   );
-                                },
+                                }),
                               ),
                             )
                             .toList(),
@@ -132,7 +132,7 @@ class _LifeAreaDetailScreenState extends State<LifeAreaDetailScreen> {
                                           ProjectDetailScreen(projectId: p.id),
                                     ),
                                   );
-                                },
+                                }),
                               ),
                             )
                             .toList(),
@@ -152,7 +152,7 @@ class _LifeAreaDetailScreenState extends State<LifeAreaDetailScreen> {
                                           TaskDetailScreen(taskId: t.id),
                                     ),
                                   );
-                                },
+                                }),
                               ),
                             )
                             .toList(),
