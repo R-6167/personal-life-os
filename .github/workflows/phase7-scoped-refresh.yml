@@ -9,13 +9,13 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: fix/phase-7-scoped-refresh
-      - name: Apply cleanup and phase-7 fixes
+          ref: fix/phase-7-refresh-v2
+      - name: Apply phase-7 fixes and remove temp workflows
         run: |
           set -euo pipefail
           cd .github/workflows
           rm -f wave-a-*.yml wave-b-*.yml cleanup-temp-workflows.yml phase7-scoped-refresh.yml
-          ls -la || true
+          ls -la
           cd ../..
           python3 << 'PY'
           from pathlib import Path
@@ -131,9 +131,9 @@ jobs:
           for old, repl in replacements:
               if old in t:
                   t = t.replace(old, repl, 1)
-                  print('replaced nav block')
+                  print('replaced nav')
               else:
-                  print('nav block not found')
+                  print('nav block skip')
 
           pd.write_text(t)
           print('then_load', t.count('.then((_) => _load())'))
@@ -143,5 +143,5 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git status
-          git commit -m "fix(phase-7): scoped refresh on project/task view-only navigation" || echo nochange
-          git push origin HEAD:fix/phase-7-scoped-refresh
+          git commit -m "fix(phase-7): scoped refresh + remove temp workflows" || echo nochange
+          git push origin HEAD:fix/phase-7-refresh-v2
