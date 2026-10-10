@@ -9,43 +9,147 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: chore/cleanup-temp-workflows
-      - name: Remove wave-a and wave-b temp workflows; fix project open
+          ref: fix/phase-7-scoped-refresh
+      - name: Cleanup workflows + phase-7 navigation fixes
         run: |
           set -euo pipefail
+          # Remove temp patching workflows (keep ci, flutter-apk, generate-pubspec-lock)
           cd .github/workflows
-          rm -f wave-a-*.yml wave-b-*.yml
+          rm -f wave-a-*.yml wave-b-*.yml cleanup-temp-workflows.yml
           ls -la
           cd ../..
+
           python3 << 'PY'
           from pathlib import Path
-          p = Path('apps/flutter/lib/ui/home_shell.dart')
-          s = p.read_text()
-          old = """                    onTap: () {
-                      Navigator.of(context)
-                          .push(MaterialPageRoute(
-                              builder: (_) => ProjectDetailScreen(projectId: p.id)))
-                          .then((_) {
-                        AppDataBus.instance.lifeChanged();
-                      });
-                    },"""
-          new = """                    onTap: () {
-                      // ProjectDetailScreen publishes mutations via AppDataBus.
-                      // Merely viewing should not force a Life reload on return.
-                      Navigator.of(context).push(MaterialPageRoute(
-                        builder: (_) => ProjectDetailScreen(projectId: p.id),
-                      ));
-                    },"""
+
+          # --- home_shell: no forced life reload after project view ---
+          hs = Path('apps/flutter/lib/ui/home_shell.dart')
+          s = hs.read_text()
+          old = (
+              "                    onTap: () {\n"
+              "                      Navigator.of(context)\n"
+              "                          .push(MaterialPageRoute(\n"
+              "                              builder: (_) => ProjectDetailScreen(projectId: p.id)))\n"
+              "                          .then((_) {\n"
+              "                        AppDataBus.instance.lifeChanged();\n"
+              "                      });\n"
+              "                    },"
+          )
+          new = (
+              "                    onTap: () {\n"
+              "                      // Mutations publish via AppDataBus; viewing alone must not reload.\n"
+              "                      Navigator.of(context).push(MaterialPageRoute(\n"
+              "                        builder: (_) => ProjectDetailScreen(projectId: p.id),\n"
+              "                      ));\n"
+              "                    },"
+          )
           if old in s:
               s = s.replace(old, new, 1)
-              p.write_text(s)
-              print('home_shell project open fixed')
+              hs.write_text(s)
+              print('home_shell fixed')
           else:
-              print('pattern not found or already fixed')
+              print('home_shell pattern missing')
+
+          # --- project_detail: generation-gated nested navigations ---
+          pd = Path('apps/flutter/lib/ui/screens/project_detail_screen.dart')
+          t = pd.read_text()
+          if "import '../../services/app_data_bus.dart';" not in t:
+              t = t.replace(
+                  "import '../../services/project_workspace.dart';",
+                  "import '../../services/app_data_bus.dart';\nimport '../../services/project_workspace.dart';",
+              )
+
+          helpers = '''
+  Future<void> _openGoalDetails(String goalId) async {
+    final generationBefore = AppDataBus.instance.generation;
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => GoalDetailScreen(goalId: goalId)),
+    );
+    if (!mounted) return;
+    if (AppDataBus.instance.generation != generationBefore) {
+      await _load();
+    }
+  }
+
+  Future<void> _openTaskDetails(String taskId) async {
+    final generationBefore = AppDataBus.instance.generation;
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => TaskDetailScreen(taskId: taskId)),
+    );
+    if (!mounted) return;
+    if (AppDataBus.instance.generation != generationBefore) {
+      await _load();
+    }
+  }
+
+'''
+          if '_openTaskDetails' not in t:
+              # insert after initState block ends (first _load call's closing of initState)
+              marker = '  Future<void> _load() async {'
+              if marker not in t:
+                  raise SystemExit('load marker missing')
+              t = t.replace(marker, helpers + marker, 1)
+              print('helpers inserted')
+
+          # Replace .then(_load) task navigations
+          t = t.replace(
+              """                          onPressed: () {
+                            Navigator.of(context)
+                                .push(MaterialPageRoute(
+                                    builder: (_) => TaskDetailScreen(taskId: ws.nextAction!.taskId)))
+                                .then((_) => _load());
+                          },""",
+              "                          onPressed: () => _openTaskDetails(ws.nextAction!.taskId),",
+          )
+
+          t = t.replace(
+              """                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => GoalDetailScreen(goalId: goalId)),
+                  );
+                },""",
+              "                onTap: () => _openGoalDetails(goalId),",
+          )
+
+          t = t.replace(
+              """                        onTap: () async {
+                          await Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => TaskDetailScreen(taskId: id)),
+                          );
+                          await _load();
+                        },""",
+              "                        onTap: () => _openTaskDetails(id),",
+          )
+
+          t = t.replace(
+              """                            onTap: () async {
+                              await Navigator.of(context).push(
+                                MaterialPageRoute(
+                                    builder: (_) => TaskDetailScreen(taskId: dbStr(s['id']))),
+                              );
+                              await _load();
+                            },""",
+              "                            onTap: () => _openTaskDetails(dbStr(s['id'])),",
+          )
+
+          t = t.replace(
+              """                      onTap: () {
+                        Navigator.of(context)
+                            .push(MaterialPageRoute(
+                                builder: (_) => TaskDetailScreen(taskId: dbStr(t['id']))))
+                            .then((_) => _load());
+                      },""",
+              "                      onTap: () => _openTaskDetails(dbStr(t['id'])),",
+          )
+
+          pd.write_text(t)
+          print('project_detail then-load left', t.count('.then((_) => _load())'))
+          print('openTaskDetails calls', t.count('_openTaskDetails'))
           PY
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git status
-          git commit -m "chore: remove temp wave workflows; fix(phase-7): no forced life reload after project view" || echo nochange
-          git push origin HEAD:chore/cleanup-temp-workflows
+          git commit -m "fix(phase-7): scoped refresh — no forced reloads on view-only navigation" || echo nochange
+          git push origin HEAD:fix/phase-7-scoped-refresh
