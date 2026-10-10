@@ -16,6 +16,18 @@ class TaskRepository with TaskDependencyMutations {
   @override
   AppDatabase get dependencyDb => _db;
 
+
+  Future<List<Task>> listByLifeArea(String lifeAreaId) async {
+    final ownerId = await _db.requireOwnerId();
+    final rows = await (await _db.database).query(
+      'tasks',
+      where: 'owner_id = ? AND life_area_id = ? AND status NOT IN (?, ?) AND archived_at IS NULL',
+      whereArgs: [ownerId, lifeAreaId, EntityStatus.completed, EntityStatus.cancelled],
+      orderBy: 'priority DESC, due_at ASC, updated_at DESC',
+    );
+    return rows.map(Task.fromMap).toList();
+  }
+
   Future<List<Task>> listOpen() async {
     final ownerId = await _db.requireOwnerId();
     final db = await _db.database;

@@ -19,6 +19,18 @@ class GoalRepository {
     return rows.map(Goal.fromMap).toList();
   }
 
+
+  Future<List<Goal>> listByLifeArea(String lifeAreaId) async {
+    final ownerId = await _db.requireOwnerId();
+    final rows = await (await _db.database).query(
+      'goals',
+      where: 'owner_id = ? AND life_area_id = ? AND status != ?',
+      whereArgs: [ownerId, lifeAreaId, 'COMPLETED'],
+      orderBy: 'updated_at DESC',
+    );
+    return rows.map(Goal.fromMap).toList();
+  }
+
   Future<Goal?> getById(String id) async {
     final db = await _db.database;
     final rows = await db.query('goals', where: 'id = ?', whereArgs: [id], limit: 1);

@@ -5,6 +5,7 @@ import '../../data/life_area_repository.dart';
 import '../../domain/life_area.dart';
 import '../../services/app_data_bus.dart';
 import '../theme.dart';
+import 'life_area_detail_screen.dart';
 import '../widgets/glass.dart';
 
 /// Manage configurable life areas (work, health, finance, …).
@@ -160,8 +161,16 @@ class _LifeAreasScreenState extends State<LifeAreasScreen> {
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 8),
                       child: GlassCard(
-                        child: ListTile(
-                          title: Text(a.title, style: const TextStyle(color: AppTheme.silver)),
+              onTap: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => LifeAreaDetailScreen(lifeAreaId: a.id),
+                  ),
+                );
+                await _load();
+              },
+              child: ListTile(
+                title: Text(a.title, style: const TextStyle(color: AppTheme.silver)),
                           subtitle: a.description == null || a.description!.isEmpty
                               ? null
                               : Text(
