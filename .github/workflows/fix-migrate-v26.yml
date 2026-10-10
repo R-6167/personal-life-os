@@ -1,0 +1,92 @@
+name: Fix migrate v26 method
+on:
+  workflow_dispatch:
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: fix/life-screens-and-notes
+      - name: Insert _migrateToV26 and clean duplicate call
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path('apps/flutter/lib/data/database.dart')
+          s = p.read_text()
+
+          # Remove accidental unconditional duplicate call in onUpgrade
+          s = s.replace(
+              "        if (oldVersion < 26) await _migrateToV26(db);\n        await _migrateToV26(db);\n        await _verifySchemaContract(db);",
+              "        if (oldVersion < 26) await _migrateToV26(db);\n        await _verifySchemaContract(db);",
+              1,
+          )
+
+          method = '''
+  Future<void> _migrateToV26(Database db) async {
+    await db.execute("""
+CREATE TABLE IF NOT EXISTS wellness_checkins (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  day INTEGER NOT NULL,
+  mood INTEGER,
+  energy INTEGER,
+  stress INTEGER,
+  sleep_hours REAL,
+  notes TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(owner_id, day),
+  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
+)
+    """);
+    await db.execute("""
+CREATE TABLE IF NOT EXISTS health_metrics (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  metric_type TEXT NOT NULL,
+  value REAL NOT NULL,
+  unit TEXT,
+  measured_at INTEGER NOT NULL,
+  notes TEXT,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
+)
+    """);
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_wellness_owner_day ON wellness_checkins(owner_id, day DESC)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_health_metrics_type ON health_metrics(owner_id, metric_type, measured_at DESC)');
+  }
+'''
+
+          if 'Future<void> _migrateToV26' not in s:
+              # Insert after _migrateToV25 method body ends (before _migrateToV24)
+              marker = '  Future<void> _migrateToV24(Database db) async {'
+              if marker not in s:
+                  # after v25 ALTER tasks line
+                  needle = "    await _executeIgnoringDuplicateColumn(db, 'ALTER TABLE tasks ADD COLUMN life_area_id TEXT');\n  }\n"
+                  if needle not in s:
+                      raise SystemExit('cannot find insert point')
+                  s = s.replace(needle, needle + method, 1)
+              else:
+                  s = s.replace(marker, method + '\n' + marker, 1)
+              print('method inserted')
+          else:
+              print('method already present')
+
+          if 'Future<void> _migrateToV26' not in s:
+              raise SystemExit('still missing method')
+          if s.count('await _migrateToV26(db);') > 2:
+              # onCreate + onUpgrade conditional only
+              print('warn calls', s.count('await _migrateToV26(db);'))
+
+          p.write_text(s)
+          print('ok')
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/flutter/lib/data/database.dart
+          git commit -m "fix: define _migrateToV26 wellness tables method" || echo nochange
+          git push origin HEAD:fix/life-screens-and-notes
