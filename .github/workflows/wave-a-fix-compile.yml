@@ -10,12 +10,11 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: feat/phase-2-milestone-deps-polish
-      - name: Fix AppDataBus calls and project_detail braces
+      - name: Fix compile errors
         run: |
           set -euo pipefail
           python3 << 'PY'
           from pathlib import Path
-          import re
 
           pd = Path('apps/flutter/lib/ui/screens/project_detail_screen.dart')
           src = pd.read_text()
@@ -23,25 +22,35 @@ jobs:
               "AppDataBus.instance.publish(['projects', 'tasks']);",
               "AppDataBus.instance.lifeChanged();",
           )
-          m = re.search(
-              r"(const Icon\(Icons\.flag, color: AppTheme\.amber\),\s*\],\s*\),\s*\),\s*\),\s*),\s*\),\),\s*)(//[^\n]*Tasks)",
-              src,
-              re.S,
-          )
-          if m:
-              src = src[:m.start(1)] + ');\n                  }),\n\n            ' + m.group(2) + src[m.end(2):]
+          # Close asMap block correctly (was leftover map-arrow close)
+          old = "                  )),\n\n            // \u2014\u2014 Tasks + subtasks \u2014\u2014"
+          new = "                  );\n                  }),\n\n            // \u2014\u2014 Tasks + subtasks \u2014\u2014"
+          if old in src:
+              src = src.replace(old, new, 1)
           else:
-              # simpler replace of the known bad close
-              src2 = src.replace('                  )),\n\n            // —— Tasks', '                  );\n                  }),\n\n            // —— Tasks', 1)
-              if src2 == src:
-                  src2 = src.replace('                  )),\n\n            // -- Tasks', '                  );\n                  }),\n\n            // -- Tasks', 1)
-              src = src2
+              # ascii fallback
+              old2 = "                  )),\n\n            // Tasks"
+              # find line with )), before Tasks comment
+              lines = src.splitlines(keepends=True)
+              out = []
+              fixed = False
+              for i, line in enumerate(lines):
+                  if (not fixed and line.strip() == ')),' and i + 2 < len(lines)
+                      and 'Tasks' in lines[i + 2]):
+                      out.append('                  );\n')
+                      out.append('                  }),\n')
+                      fixed = True
+                  else:
+                      out.append(line)
+              if not fixed:
+                  raise SystemExit('could not find )), close before Tasks')
+              src = ''.join(out)
           if 'publish(' in src:
               raise SystemExit('publish still in project detail')
           if src.count('{') != src.count('}'):
-              raise SystemExit(f"brace mismatch {{ {src.count('{')} }} {src.count('}')}")
+              raise SystemExit(f"brace mismatch open={src.count('{')} close={src.count('}')}")
           pd.write_text(src)
-          print('project_detail ok', src.count('{'))
+          print('project_detail ok')
 
           td = Path('apps/flutter/lib/ui/screens/task_detail_screen.dart')
           tsrc = td.read_text()
