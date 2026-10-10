@@ -86,17 +86,7 @@ class _LifeHubState extends State<LifeHub> {
     return items.take(5).toList();
   }
 
-  Widget _navCard(
-  icon: Icons.category_outlined,
-  title: 'Life areas',
-  subtitle: 'Configure domains of life',
-  onTap: () {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const LifeAreasScreen()),
-    );
-  },
-),
-_navCard({
+  Widget _navCard({
     required IconData icon,
     required String title,
     required String subtitle,
@@ -132,6 +122,16 @@ _navCard({
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
       children: [
+        _navCard(
+          icon: Icons.category_outlined,
+          title: 'Life areas',
+          subtitle: 'Configure domains of life',
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const LifeAreasScreen()),
+            );
+          },
+        ),
         _navCard(
           icon: Icons.priority_high,
           title: 'Needs attention',
