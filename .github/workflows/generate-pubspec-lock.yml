@@ -1,0 +1,38 @@
+name: Generate pubspec.lock
+
+on:
+  workflow_dispatch:
+
+jobs:
+  lock:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: security/sonar-c-readiness
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: "3.27.4"
+          channel: stable
+          cache: true
+
+      - name: Generate and commit lockfile
+        working-directory: apps/flutter
+        run: |
+          set -euo pipefail
+          flutter pub get
+          test -s pubspec.lock
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pubspec.lock
+          if git diff --cached --quiet; then
+            echo "pubspec.lock already up to date"
+            exit 0
+          fi
+          git commit -m "security: commit complete pubspec.lock (CI generated)"
+          git push origin HEAD:security/sonar-c-readiness
