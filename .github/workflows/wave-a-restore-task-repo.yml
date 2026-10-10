@@ -1,0 +1,49 @@
+name: WaveA restore TaskRepository
+
+on:
+  workflow_dispatch:
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: feat/phase-2-milestone-deps-polish
+
+      - name: Wire TaskRepository with mixin from main
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          from pathlib import Path
+          import urllib.request
+          p = Path('apps/flutter/lib/data/task_repository.dart')
+          src = urllib.request.urlopen(
+              'https://raw.githubusercontent.com/R-6167/personal-life-os/main/apps/flutter/lib/data/task_repository.dart'
+          ).read().decode()
+          if "import 'task_dependency_mutations.dart';" not in src:
+              src = src.replace(
+                  "import 'relationship_validator.dart';\n",
+                  "import 'relationship_validator.dart';\nimport 'task_dependency_mutations.dart';\n",
+              )
+          if 'with TaskDependencyMutations' not in src:
+              src = src.replace(
+                  'class TaskRepository {\n  TaskRepository(this._db);\n  final AppDatabase _db;\n',
+                  'class TaskRepository with TaskDependencyMutations {\n  TaskRepository(this._db);\n  final AppDatabase _db;\n\n  @override\n  AppDatabase get dependencyDb => _db;\n',
+              )
+          p.write_text(src)
+          print('wrote', len(src))
+          assert 'TaskDependencyMutations' in src
+          assert 'PLACEHOLDER' not in src
+          PY
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/flutter/lib/data/task_repository.dart
+          git diff --cached --quiet && echo 'no change' && exit 0
+          git commit -m "fix: restore TaskRepository with TaskDependencyMutations"
+          git push origin HEAD:feat/phase-2-milestone-deps-polish
