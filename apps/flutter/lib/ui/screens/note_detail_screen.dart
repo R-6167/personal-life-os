@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../services/app_data_bus.dart';
+
 import '../../data/bill_repository.dart';
 import '../../data/database.dart';
 import '../../data/extended_repository.dart';
@@ -31,7 +33,7 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
   List<LinkSuggestion> _suggestions = [];
   final Set<String> _pickedSuggestions = {};
   bool _loading = true;
-  bool _editing = false;
+  bool _editing = true;
   bool _scanning = false;
   late TextEditingController _content;
   late TextEditingController _title;
@@ -52,6 +54,7 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
   }
 
   Future<void> _load() async {
+    try {
     final n = await NoteRepository(AppDatabase.instance).getById(widget.noteId);
     final raw = await LinkRepository(AppDatabase.instance).linksFor('NOTE', widget.noteId);
     final resolved = <_ResolvedLink>[];
@@ -84,6 +87,13 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
     });
     if (n != null) {
       await _scanMentions(content: n.content, title: n.title);
+    }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Note data unavailable: $e')),
+      );
     }
   }
 
@@ -128,7 +138,8 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
       title: _title.text.trim().isEmpty ? null : _title.text.trim(),
       content: _content.text.trim(),
     );
-    setState(() => _editing = false);
+    AppDataBus.instance.lifeChanged();
+      setState(() => _editing = false);
     try {
       await NoteIntelligence().autoLinkStrongMentions(
         noteId: widget.noteId,

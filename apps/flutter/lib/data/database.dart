@@ -15,7 +15,7 @@ class AppDatabase {
   static const _uuid = Uuid();
 
   // Bump whenever the database schema/migration contract changes.
-  static const schemaVersion = 25;
+  static const schemaVersion = 26;
 
   Future<Database> get database async {
     if (_db != null) return _db!;
@@ -84,6 +84,7 @@ class AppDatabase {
         await _migrateToV23(db);
         await _migrateToV24(db);
         await _migrateToV25(db);
+        await _migrateToV26(db);
         await _verifySchemaContract(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
@@ -107,6 +108,7 @@ class AppDatabase {
         if (oldVersion < 23) await _migrateToV23(db);
         if (oldVersion < 24) await _migrateToV24(db);
         if (oldVersion < 25) await _migrateToV25(db);
+        if (oldVersion < 26) await _migrateToV26(db);
         await _verifySchemaContract(db);
       },
       onOpen: (db) async {
@@ -316,6 +318,41 @@ CREATE TABLE IF NOT EXISTS life_areas (
     await _executeIgnoringDuplicateColumn(db, 'ALTER TABLE tasks ADD COLUMN life_area_id TEXT');
   }
 
+
+  Future<void> _migrateToV26(Database db) async {
+    await db.execute("""
+CREATE TABLE IF NOT EXISTS wellness_checkins (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  day INTEGER NOT NULL,
+  mood INTEGER,
+  energy INTEGER,
+  stress INTEGER,
+  sleep_hours REAL,
+  notes TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(owner_id, day),
+  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
+)
+    """);
+    await db.execute("""
+CREATE TABLE IF NOT EXISTS health_metrics (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  metric_type TEXT NOT NULL,
+  value REAL NOT NULL,
+  unit TEXT,
+  measured_at INTEGER NOT NULL,
+  notes TEXT,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
+)
+    """);
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_wellness_owner_day ON wellness_checkins(owner_id, day DESC)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_health_metrics_type ON health_metrics(owner_id, metric_type, measured_at DESC)');
+  }
+
   Future<void> _migrateToV24(Database db) async {
     await _applySchema(db);
     await _ensureSoftColumns(db);
@@ -332,7 +369,7 @@ CREATE TABLE IF NOT EXISTS life_areas (
 
   Future<void> _verifySchemaContract(Database db) async {
     const requiredTables = <String>[
-      'users', 'goals', 'projects', 'tasks', 'life_areas', 'activity_events',
+      'users', 'goals', 'projects', 'tasks', 'life_areas', 'wellness_checkins', 'health_metrics', 'activity_events',
       'error_logs', 'work_sessions',
     ];
     for (final table in requiredTables) {
