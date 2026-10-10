@@ -18,71 +18,32 @@ jobs:
 
           schema = Path('apps/flutter/assets/schema.sql')
           sql = schema.read_text()
-          table = '''
-          CREATE TABLE IF NOT EXISTS life_areas (
-            id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, title TEXT NOT NULL,
-            description TEXT, color TEXT, icon TEXT,
-            position INTEGER DEFAULT 0, archived_at INTEGER,
-            created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
-            FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
-          );
-
-          '''
+          table = (
+              "CREATE TABLE IF NOT EXISTS life_areas (\n"
+              "  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, title TEXT NOT NULL,\n"
+              "  description TEXT, color TEXT, icon TEXT,\n"
+              "  position INTEGER DEFAULT 0, archived_at INTEGER,\n"
+              "  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,\n"
+              "  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE\n"
+              ");\n\n"
+          )
           if 'CREATE TABLE IF NOT EXISTS life_areas' not in sql:
-              # insert after categories block
               needle = 'CREATE TABLE IF NOT EXISTS people ('
-              if needle not in sql:
-                  raise SystemExit('people table not found')
+              assert needle in sql
               sql = sql.replace(needle, table + needle, 1)
-              # add nullable life_area_id to goals, projects, tasks
               sql = sql.replace(
-                  '''CREATE TABLE IF NOT EXISTS goals (
-            id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, title TEXT NOT NULL,
-            description TEXT, status TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
-            FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
-          );''',
-                  '''CREATE TABLE IF NOT EXISTS goals (
-            id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, title TEXT NOT NULL,
-            description TEXT, status TEXT, life_area_id TEXT,
-            created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
-            FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
-          );''',
+                  'description TEXT, status TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,\n  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE\n);\n\nCREATE TABLE IF NOT EXISTS projects (',
+                  'description TEXT, status TEXT, life_area_id TEXT,\n  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,\n  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE\n);\n\nCREATE TABLE IF NOT EXISTS projects (',
                   1,
               )
               sql = sql.replace(
-                  '''CREATE TABLE IF NOT EXISTS projects (
-            id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, goal_id TEXT, title TEXT NOT NULL,
-            status TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
-            FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
-          );''',
-                  '''CREATE TABLE IF NOT EXISTS projects (
-            id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, goal_id TEXT, title TEXT NOT NULL,
-            status TEXT, life_area_id TEXT,
-            created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
-            FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
-          );''',
+                  'goal_id TEXT, title TEXT NOT NULL,\n  status TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,\n  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE\n);\n\nCREATE TABLE IF NOT EXISTS milestones (',
+                  'goal_id TEXT, title TEXT NOT NULL,\n  status TEXT, life_area_id TEXT,\n  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,\n  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE\n);\n\nCREATE TABLE IF NOT EXISTS milestones (',
                   1,
               )
               sql = sql.replace(
-                  '''CREATE TABLE IF NOT EXISTS tasks (
-            id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, project_id TEXT, goal_id TEXT,
-            milestone_id TEXT, parent_task_id TEXT, title TEXT NOT NULL, description TEXT,
-            status TEXT, priority INTEGER DEFAULT 0, due_at INTEGER,
-            scheduled_start INTEGER, scheduled_end INTEGER, estimated_minutes INTEGER,
-            completed_at INTEGER, archived_at INTEGER,
-            created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
-            FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
-          );''',
-                  '''CREATE TABLE IF NOT EXISTS tasks (
-            id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, project_id TEXT, goal_id TEXT,
-            milestone_id TEXT, parent_task_id TEXT, life_area_id TEXT,
-            title TEXT NOT NULL, description TEXT,
-            status TEXT, priority INTEGER DEFAULT 0, due_at INTEGER,
-            scheduled_start INTEGER, scheduled_end INTEGER, estimated_minutes INTEGER,
-            completed_at INTEGER, archived_at INTEGER,
-            created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
-            FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
-          );''',
+                  'milestone_id TEXT, parent_task_id TEXT, title TEXT NOT NULL, description TEXT,\n  status TEXT, priority INTEGER DEFAULT 0, due_at INTEGER,',
+                  'milestone_id TEXT, parent_task_id TEXT, life_area_id TEXT,\n  title TEXT NOT NULL, description TEXT,\n  status TEXT, priority INTEGER DEFAULT 0, due_at INTEGER,',
                   1,
               )
               schema.write_text(sql)
@@ -92,50 +53,48 @@ jobs:
 
           db = Path('apps/flutter/lib/data/database.dart')
           src = db.read_text()
-          if 'schemaVersion = 25' not in src:
-              src = src.replace('static const schemaVersion = 24;', 'static const schemaVersion = 25;')
+          src = src.replace('static const schemaVersion = 24;', 'static const schemaVersion = 25;')
           if '_migrateToV25' not in src:
               src = src.replace(
                   '        await _migrateToV24(db);\n        await _verifySchemaContract(db);',
                   '        await _migrateToV24(db);\n        await _migrateToV25(db);\n        await _verifySchemaContract(db);',
+                  1,
               )
-              # onUpgrade only once - the first replace might hit both onCreate and something else
-              # Fix: only onCreate had that pair. Add onUpgrade line.
-              if "if (oldVersion < 25) await _migrateToV25(db);" not in src:
-                  src = src.replace(
-                      "        if (oldVersion < 24) await _migrateToV24(db);\n        await _verifySchemaContract(db);",
-                      "        if (oldVersion < 24) await _migrateToV24(db);\n        if (oldVersion < 25) await _migrateToV25(db);\n        await _verifySchemaContract(db);",
-                  )
-              method = '''
-          Future<void> _migrateToV25(Database db) async {
-            await db.execute('''
-          CREATE TABLE IF NOT EXISTS life_areas (
-            id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, title TEXT NOT NULL,
-            description TEXT, color TEXT, icon TEXT,
-            position INTEGER DEFAULT 0, archived_at INTEGER,
-            created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
-            FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
-          )
-            ''');
-            await _executeIgnoringDuplicateColumn(db, 'ALTER TABLE goals ADD COLUMN life_area_id TEXT');
-            await _executeIgnoringDuplicateColumn(db, 'ALTER TABLE projects ADD COLUMN life_area_id TEXT');
-            await _executeIgnoringDuplicateColumn(db, 'ALTER TABLE tasks ADD COLUMN life_area_id TEXT');
-          }
-
-          '''
+              src = src.replace(
+                  '        if (oldVersion < 24) await _migrateToV24(db);\n        await _verifySchemaContract(db);',
+                  '        if (oldVersion < 24) await _migrateToV24(db);\n        if (oldVersion < 25) await _migrateToV25(db);\n        await _verifySchemaContract(db);',
+                  1,
+              )
+              method_lines = [
+                  '  Future<void> _migrateToV25(Database db) async {',
+                  "    await db.execute('''",
+                  'CREATE TABLE IF NOT EXISTS life_areas (',
+                  '  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, title TEXT NOT NULL,',
+                  '  description TEXT, color TEXT, icon TEXT,',
+                  '  position INTEGER DEFAULT 0, archived_at INTEGER,',
+                  '  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,',
+                  '  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE',
+                  ')',
+                  "    ''');",
+                  "    await _executeIgnoringDuplicateColumn(db, 'ALTER TABLE goals ADD COLUMN life_area_id TEXT');",
+                  "    await _executeIgnoringDuplicateColumn(db, 'ALTER TABLE projects ADD COLUMN life_area_id TEXT');",
+                  "    await _executeIgnoringDuplicateColumn(db, 'ALTER TABLE tasks ADD COLUMN life_area_id TEXT');",
+                  '  }',
+                  '',
+              ]
+              method = '\n'.join(method_lines) + '\n'
               src = src.replace(
                   '  Future<void> _migrateToV24(Database db) async {',
                   method + '  Future<void> _migrateToV24(Database db) async {',
                   1,
               )
-          # schema contract
           if "'life_areas'" not in src:
               src = src.replace(
                   "      'users', 'goals', 'projects', 'tasks', 'activity_events',",
                   "      'users', 'goals', 'projects', 'tasks', 'life_areas', 'activity_events',",
               )
           db.write_text(src)
-          print('database.dart updated', 'schemaVersion = 25' in src, '_migrateToV25' in src)
+          print('database ok', 'schemaVersion = 25' in src, '_migrateToV25' in src)
           PY
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
