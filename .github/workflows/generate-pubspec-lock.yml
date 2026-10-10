@@ -2,6 +2,11 @@ name: Generate pubspec.lock
 
 on:
   workflow_dispatch:
+    inputs:
+      target_branch:
+        description: Branch to update with pubspec.lock
+        required: true
+        default: security/sonar-c-readiness
 
 jobs:
   lock:
@@ -9,10 +14,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout
+      - name: Checkout target branch
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: security/sonar-c-readiness
+          ref: ${{ github.event.inputs.target_branch }}
 
       - name: Set up Flutter
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
@@ -35,4 +40,4 @@ jobs:
             exit 0
           fi
           git commit -m "security: commit complete pubspec.lock (CI generated)"
-          git push origin HEAD:security/sonar-c-readiness
+          git push origin "HEAD:${{ github.event.inputs.target_branch }}"
