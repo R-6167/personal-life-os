@@ -123,8 +123,12 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
       parentTaskId: parentTaskId,
     );
     HapticFeedback.lightImpact();
-    AppDataBus.instance.tasksChanged();
-    AppDataBus.instance.lifeChanged();
+    AppDataBus.instance.notifyDomains({
+      DataDomain.tasks,
+      DataDomain.life,
+      DataDomain.today,
+      DataDomain.timeline,
+    });
     await _load();
   }
 
@@ -149,8 +153,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
     );
     if (title == null || title.isEmpty) return;
     await _milestonesRepo.create(projectId: widget.projectId, title: title);
-    AppDataBus.instance.lifeChanged();
-    await _load();
+                                   AppDataBus.instance.lifeChanged();
+                                   await _load();
   }
 
   Future<void> _setDeadline() async {
@@ -165,8 +169,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
       id: widget.projectId,
       targetDate: DateTime(picked.year, picked.month, picked.day).millisecondsSinceEpoch,
     );
-    AppDataBus.instance.lifeChanged();
-    await _load();
+                                   AppDataBus.instance.lifeChanged();
+                                   await _load();
   }
 
   Future<void> _addNote() async {
@@ -190,8 +194,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
     );
     if (ok != true || c.text.trim().isEmpty) return;
     await _workspace.attachNote(projectId: widget.projectId, content: c.text.trim());
-    AppDataBus.instance.lifeChanged();
-    await _load();
+                                   AppDataBus.instance.lifeChanged();
+                                   await _load();
   }
 
   Future<void> _addResource() async {
@@ -214,8 +218,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
     );
     if (ok != true || c.text.trim().isEmpty) return;
     await _workspace.attachResource(projectId: widget.projectId, title: c.text.trim());
-    AppDataBus.instance.lifeChanged();
-    await _load();
+                                   AppDataBus.instance.lifeChanged();
+                                   await _load();
   }
 
   Future<void> _scheduleNext() async {
@@ -230,8 +234,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
     if (day == null) return;
     final start = DateTime(day.year, day.month, day.day, 9);
     await _tasksRepo.scheduleSession(taskId: na.taskId, start: start, durationMinutes: 45);
-    AppDataBus.instance.tasksChanged();
-    await _load();
+                                     AppDataBus.instance.tasksChanged();
+                                     await _load();
   }
 
   String? _milestoneTitle(ProjectWorkspace workspace, Object? milestoneId) {
@@ -385,8 +389,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                           onPressed: () async {
                             await _tasksRepo.complete(ws.nextAction!.taskId);
                             HapticFeedback.selectionClick();
-                            AppDataBus.instance.tasksChanged();
-                            await _load();
+                                     AppDataBus.instance.tasksChanged();
+                                     await _load();
                           },
                           icon: const Icon(Icons.check, size: 18),
                           label: const Text('Done'),
@@ -584,8 +588,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                                           color: AppTheme.amber, size: 20),
                                       onPressed: () async {
                                         await _tasksRepo.complete(dbStr(s['id']));
-                                         AppDataBus.instance.tasksChanged();
-                                         await _load();
+                                     AppDataBus.instance.tasksChanged();
+                                     await _load();
                                       },
                                     )
                                   : const Icon(Icons.check_circle, color: AppTheme.amber, size: 18),
