@@ -285,10 +285,6 @@ class _HomeShellState extends State<HomeShell> {
 
   Future<void> _reloadTasks() =>
       _reload(domains: {DataDomain.tasks, DataDomain.today});
-  Future<void> _reloadLife() =>
-      _reload(domains: {DataDomain.life, DataDomain.today});
-  Future<void> _reloadFinance() =>
-      _reload(domains: {DataDomain.finance, DataDomain.today});
 
   Future<void> _openTask(Task t) async {
     await Navigator.of(context).push(
@@ -446,8 +442,8 @@ class _HomeShellState extends State<HomeShell> {
           projects: _projectList,
           routines: _routineList,
           onChanged: () async {
+            // AppDataBus is the single refresh path for domain mutations.
             AppDataBus.instance.lifeChanged();
-            await _reloadLife();
           },
         ),
         FinanceHub(
@@ -457,17 +453,20 @@ class _HomeShellState extends State<HomeShell> {
           monthSpendMinor: _monthSpendMinor,
           onChanged: () async {
             AppDataBus.instance.financeChanged();
-            await _reloadFinance();
           },
           onPayBill: (o) async {
             await promptAndPayBill(context, o);
             AppDataBus.instance.financeChanged();
-            await _reloadFinance();
           },
         ),
         MoreHub(onChanged: () async {
-          AppDataBus.instance.lifeChanged();
-          await _reload(domains: {DataDomain.life, DataDomain.finance});
+          // More spans multiple domains but still needs only one scoped reload.
+          AppDataBus.instance.notifyDomains({
+            DataDomain.life,
+            DataDomain.finance,
+            DataDomain.today,
+            DataDomain.timeline,
+          });
         }),
       ],
     );
@@ -568,7 +567,6 @@ class _HomeShellState extends State<HomeShell> {
                           await _habits.markDoneToday(h.id);
                           HapticFeedback.selectionClick();
                           AppDataBus.instance.lifeChanged();
-                          await _reloadLife();
                         },
                       ),
                     ),
@@ -590,7 +588,6 @@ class _HomeShellState extends State<HomeShell> {
                           final paid = await promptAndPayBill(context, o);
                           if (paid) {
                             AppDataBus.instance.financeChanged();
-                            await _reloadFinance();
                           }
                         },
                         child: const Text('Pay'),
@@ -609,7 +606,6 @@ class _HomeShellState extends State<HomeShell> {
                               builder: (_) => ProjectDetailScreen(projectId: p.id)))
                           .then((_) {
                         AppDataBus.instance.lifeChanged();
-                        return _reloadLife();
                       });
                     },
                     child: Text(p.title, style: const TextStyle(color: AppTheme.silver)),
