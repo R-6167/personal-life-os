@@ -174,6 +174,7 @@ class TaskRepository with TaskDependencyMutations {
     String? goalId,
     String? milestoneId,
     String? parentTaskId,
+    String? lifeAreaId,
     String? assistantActionPreview,
   }) async {
     final ownerId = await _db.requireOwnerId();
@@ -183,6 +184,7 @@ class TaskRepository with TaskDependencyMutations {
       ownerId: ownerId,
       projectId: projectId,
       goalId: goalId,
+      lifeAreaId: lifeAreaId,
       title: title,
       status: status,
       priority: priority,

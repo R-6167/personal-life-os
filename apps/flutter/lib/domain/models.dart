@@ -6,6 +6,7 @@ class Goal {
   final String title;
   final String status;
   final int priority;
+  final String? lifeAreaId;
   final int createdAt;
   final int updatedAt;
 
@@ -15,6 +16,7 @@ class Goal {
     required this.title,
     required this.status,
     this.priority = 0,
+    this.lifeAreaId,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -25,6 +27,7 @@ class Goal {
         title: dbStr(m['title']),
         status: dbStr(m['status'], 'ACTIVE'),
         priority: dbIntOr(m['priority']),
+        lifeAreaId: dbStrOrNull(m['life_area_id']),
         createdAt: dbIntOr(m['created_at']),
         updatedAt: dbIntOr(m['updated_at']),
       );
@@ -35,6 +38,7 @@ class Goal {
         'owner_id': ownerId,
         'title': title,
         'status': status,
+        'life_area_id': lifeAreaId,
         'created_at': createdAt,
         'updated_at': updatedAt,
       };
@@ -47,6 +51,7 @@ class Project {
   final String title;
   final String status;
   final int priority;
+  final String? lifeAreaId;
   final int createdAt;
   final int updatedAt;
 
@@ -57,6 +62,7 @@ class Project {
     required this.title,
     required this.status,
     this.priority = 0,
+    this.lifeAreaId,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -65,9 +71,11 @@ class Project {
         id: dbStr(m['id']),
         ownerId: dbStr(m['owner_id']),
         goalId: dbStrOrNull(m['goal_id']),
+        lifeAreaId: dbStrOrNull(m['life_area_id']),
         title: dbStr(m['title']),
         status: dbStr(m['status'], 'ACTIVE'),
         priority: dbIntOr(m['priority']),
+        lifeAreaId: dbStrOrNull(m['life_area_id']),
         createdAt: dbIntOr(m['created_at']),
         updatedAt: dbIntOr(m['updated_at']),
       );
@@ -78,6 +86,7 @@ class Project {
         'goal_id': goalId,
         'title': title,
         'status': status,
+        'life_area_id': lifeAreaId,
         'created_at': createdAt,
         'updated_at': updatedAt,
       };
@@ -118,6 +127,7 @@ class Task {
   final String ownerId;
   final String? projectId;
   final String? goalId;
+  final String? lifeAreaId;
   final String title;
   final String status;
   final int priority;
@@ -134,6 +144,7 @@ class Task {
     required this.ownerId,
     this.projectId,
     this.goalId,
+    this.lifeAreaId,
     required this.title,
     required this.status,
     this.priority = 0,
@@ -190,6 +201,7 @@ class Task {
         'owner_id': ownerId,
         'project_id': projectId,
         'goal_id': goalId,
+        'life_area_id': lifeAreaId,
         'title': title,
         'status': status,
         'priority': priority,

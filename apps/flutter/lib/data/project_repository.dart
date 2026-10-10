@@ -45,7 +45,7 @@ class ProjectRepository {
     return Project.fromMap(rows.first);
   }
 
-  Future<Project> create({required String title, String? description, String? goalId}) async {
+  Future<Project> create({required String title, String? description, String? goalId, String? lifeAreaId}) async {
     final ownerId = await _db.requireOwnerId();
     final now = AppDatabase.nowMs();
     final project = Project(
@@ -54,6 +54,7 @@ class ProjectRepository {
       goalId: goalId,
       title: title.trim(),
       status: EntityStatus.active,
+      lifeAreaId: lifeAreaId,
       createdAt: now,
       updatedAt: now,
     );
