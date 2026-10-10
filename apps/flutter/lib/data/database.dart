@@ -109,7 +109,6 @@ class AppDatabase {
         if (oldVersion < 24) await _migrateToV24(db);
         if (oldVersion < 25) await _migrateToV25(db);
         if (oldVersion < 26) await _migrateToV26(db);
-        await _migrateToV26(db);
         await _verifySchemaContract(db);
       },
       onOpen: (db) async {
@@ -317,6 +316,41 @@ CREATE TABLE IF NOT EXISTS life_areas (
     await _executeIgnoringDuplicateColumn(db, 'ALTER TABLE goals ADD COLUMN life_area_id TEXT');
     await _executeIgnoringDuplicateColumn(db, 'ALTER TABLE projects ADD COLUMN life_area_id TEXT');
     await _executeIgnoringDuplicateColumn(db, 'ALTER TABLE tasks ADD COLUMN life_area_id TEXT');
+  }
+
+
+  Future<void> _migrateToV26(Database db) async {
+    await db.execute("""
+CREATE TABLE IF NOT EXISTS wellness_checkins (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  day INTEGER NOT NULL,
+  mood INTEGER,
+  energy INTEGER,
+  stress INTEGER,
+  sleep_hours REAL,
+  notes TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(owner_id, day),
+  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
+)
+    """);
+    await db.execute("""
+CREATE TABLE IF NOT EXISTS health_metrics (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  metric_type TEXT NOT NULL,
+  value REAL NOT NULL,
+  unit TEXT,
+  measured_at INTEGER NOT NULL,
+  notes TEXT,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
+)
+    """);
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_wellness_owner_day ON wellness_checkins(owner_id, day DESC)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_health_metrics_type ON health_metrics(owner_id, metric_type, measured_at DESC)');
   }
 
   Future<void> _migrateToV24(Database db) async {
