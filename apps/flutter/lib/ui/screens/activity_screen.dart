@@ -16,6 +16,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
   final _svc = ActivityTimelineService();
   List<TimelineDayGroup> _groups = [];
   bool _loading = true;
+  bool _hasLoaded = false;
 
   @override
   void initState() {
@@ -24,12 +25,13 @@ class _ActivityScreenState extends State<ActivityScreen> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    if (mounted && !_hasLoaded) setState(() => _loading = true);
     final entries = await _svc.build(limit: 100);
     final groups = _svc.groupByDay(entries);
     if (!mounted) return;
     setState(() {
       _groups = groups;
+      _hasLoaded = true;
       _loading = false;
     });
   }
@@ -67,7 +69,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
             IconButton(onPressed: _load, icon: const Icon(Icons.refresh)),
           ],
         ),
-        body: _loading
+        body: (_loading && !_hasLoaded)
             ? const Center(child: CircularProgressIndicator(color: AppTheme.amber))
             : _groups.isEmpty
                 ? Center(

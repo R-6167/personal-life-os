@@ -54,7 +54,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    if (mounted && _built == null) setState(() => _loading = true);
     final built = await _engine.build(day: _day);
     final open = await _tasks.listOpen();
     if (!mounted) return;
@@ -136,7 +136,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             ),
           ],
         ),
-        body: _loading
+        body: (_loading && _built == null)
             ? const Center(child: CircularProgressIndicator(color: AppTheme.amber))
             : ListView(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),

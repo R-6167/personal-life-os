@@ -62,7 +62,7 @@ class _PlanningScreenState extends State<PlanningScreen> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    if (mounted && _built == null) setState(() => _loading = true);
     final built = await _engine.build(day: _day);
     final free = await _plan.availableMinutes(day: _day);
     final open = await _tasks.listOpen();
@@ -447,7 +447,7 @@ class _PlanningScreenState extends State<PlanningScreen> {
             ),
           ],
         ),
-        body: _loading
+        body: (_loading && _built == null)
             ? const Center(child: CircularProgressIndicator(color: AppTheme.amber))
             : RefreshIndicator(
                 color: AppTheme.amber,
