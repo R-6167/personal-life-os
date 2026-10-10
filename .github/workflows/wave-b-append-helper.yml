@@ -1,0 +1,36 @@
+name: WaveB append helper
+on:
+  workflow_dispatch:
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: feat/phase-3-life-area-pickers
+      - name: Append helper via heredoc file
+        run: |
+          set -euo pipefail
+          python3 -c '
+          from pathlib import Path
+          p = Path("apps/flutter/lib/ui/forms/create_forms.dart")
+          s = p.read_text()
+          if "Future<bool> _entityWithLifeAreaForm(" in s:
+              print("already")
+          else:
+              helper = Path("/tmp/helper.dart").read_text()
+              p.write_text(s + "\n" + helper)
+              print("appended", len(helper))
+          assert "Future<bool> _entityWithLifeAreaForm(" in p.read_text()
+          '
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/flutter/lib/ui/forms/create_forms.dart
+          git commit -m "fix(phase-3): define _entityWithLifeAreaForm helper" || echo nochange
+          git push origin HEAD:feat/phase-3-life-area-pickers
+        # Write helper file before python step needs it - use prior step
+      - name: Write helper snippet
+        if: false
+        run: echo skip
