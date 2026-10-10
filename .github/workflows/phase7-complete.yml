@@ -16,7 +16,7 @@ jobs:
           python3 << 'PY'
           from pathlib import Path
 
-          # ---- goal_detail_screen.dart ----
+          # ========== goal_detail_screen.dart ==========
           gd = Path('apps/flutter/lib/ui/screens/goal_detail_screen.dart')
           t = gd.read_text()
           if "import '../../services/app_data_bus.dart';" not in t:
@@ -50,8 +50,7 @@ jobs:
               )
               t = t.replace('  Future<void> _load() async {', helpers + '  Future<void> _load() async {', 1)
 
-          # Publish bus on local mutations
-          muts = [
+          for old, repl in [
               (
                   "    await _projectsRepo.create(title: title, goalId: widget.goalId);\n    await _load();",
                   "    await _projectsRepo.create(title: title, goalId: widget.goalId);\n    AppDataBus.instance.lifeChanged();\n    await _load();",
@@ -64,91 +63,62 @@ jobs:
                   "    await _threadSvc.linkHabitToGoal(goalId: widget.goalId, habitId: h.id);\n    await _load();",
                   "    await _threadSvc.linkHabitToGoal(goalId: widget.goalId, habitId: h.id);\n    AppDataBus.instance.lifeChanged();\n    await _load();",
               ),
-          ]
-          for old, repl in muts:
-              if old in t:
-                  t = t.replace(old, repl, 1)
-                  print('goal mut ok')
-
-          # target date update
-          if 'await _goals.updateMeta(' in t and 'AppDataBus.instance.lifeChanged();\n    await _load();' not in t.split('await _goals.updateMeta(')[1][:200]:
-              t = t.replace(
+              (
                   "    await _goals.updateMeta(\n      id: widget.goalId,\n      targetDate: DateTime(picked.year, picked.month, picked.day).millisecondsSinceEpoch,\n    );\n    await _load();",
                   "    await _goals.updateMeta(\n      id: widget.goalId,\n      targetDate: DateTime(picked.year, picked.month, picked.day).millisecondsSinceEpoch,\n    );\n    AppDataBus.instance.lifeChanged();\n    await _load();",
-                  1,
-              )
-
-          # complete goal
-          t = t.replace(
-              "                  await _goals.complete(widget.goalId);\n                  if (mounted) Navigator.pop(context);",
-              "                  await _goals.complete(widget.goalId);\n                  AppDataBus.instance.lifeChanged();\n                  if (mounted) Navigator.pop(context);",
-              1,
-          )
-
-          # Nav replacements — order matters for unique blocks
-          nav_repls = [
+              ),
               (
-                  "                      onTap: m.kind == 'TASK'\n                          ? () {\n                              Navigator.of(context)\n                                  .push(MaterialPageRoute(\n                                      builder: (_) => TaskDetailScreen(taskId: m.id)))\n                                  .then((_) => _load());\n                            }\n                          : null,",
-                  "                      onTap: m.kind == 'TASK'\n                          ? () => _openTaskDetails(m.id)\n                          : null,",
+                  "                  await _goals.complete(widget.goalId);\n                  if (mounted) Navigator.pop(context);",
+                  "                  await _goals.complete(widget.goalId);\n                  AppDataBus.instance.lifeChanged();\n                  if (mounted) Navigator.pop(context);",
+              ),
+          ]:
+              if old in t:
+                  t = t.replace(old, repl, 1)
+                  print('mut ok')
+
+          # precise nav replacements
+          navs = [
+              (
+                  "                          ? () {\n                              Navigator.of(context)\n                                  .push(MaterialPageRoute(\n                                      builder: (_) => TaskDetailScreen(taskId: m.id)))\n                                  .then((_) => _load());\n                            }",
+                  "                          ? () => _openTaskDetails(m.id)",
               ),
               (
                   "                onTap: () {\n                  Navigator.of(context)\n                      .push(MaterialPageRoute(\n                          builder: (_) =>\n                              ProjectDetailScreen(projectId: dbStr(b.project['id']))))\n                      .then((_) => _load());\n                },",
                   "                onTap: () => _openProjectDetails(dbStr(b.project['id'])),",
               ),
+              (
+                  "                    onOpenTask: (id) {\n                      Navigator.of(context)\n                          .push(MaterialPageRoute(builder: (_) => TaskDetailScreen(taskId: id)))\n                          .then((_) => _load());\n                    },",
+                  "                    onOpenTask: (id) => _openTaskDetails(id),",
+              ),
+              (
+                  "                      onTap: () {\n                        Navigator.of(context)\n                            .push(MaterialPageRoute(\n                                builder: (_) => TaskDetailScreen(taskId: dbStr(task['id']))))\n                            .then((_) => _load());\n                      },",
+                  "                      onTap: () => _openTaskDetails(dbStr(task['id'])),",
+              ),
           ]
-          for old, repl in nav_repls:
-              if old in t:
-                  t = t.replace(old, repl, 1)
-                  print('goal nav block')
+          for old, repl in navs:
+              c = t.count(old)
+              if c:
+                  t = t.replace(old, repl)
+                  print('nav', c)
               else:
-                  print('goal nav miss')
+                  print('nav miss', repr(old[:60]))
 
-          # Generic task then-load patterns
-          import re
-          # Replace remaining .then((_) => _load()) after TaskDetail push
-          pattern = re.compile(
-              r"Navigator\.of\(context\)\s*\n\s*\.push\(MaterialPageRoute\(\s*\n\s*builder: \(_\) => TaskDetailScreen\(taskId: ([^)]+)\)\)\)\s*\n\s*\.then\(\(_\) => _load\(\)\);",
-              re.M,
-          )
-          t2, n = pattern.subn(r"_openTaskDetails(\1);", t)
-          print('regex task nav', n)
-          t = t2
-
-          # fallback simple patterns
-          t = t.replace(
-              ".then((_) => _load());",
-              "/* view-only: generation gate via helpers */;",
-          )
-          # fix any broken remnants - if we left comments on broken chains, use count
           left = t.count('.then((_) => _load())')
-          print('goal then left', left)
-          if '/* view-only' in t:
-              # clean broken Navigator chains that still have .then replaced only
-              # Re-read raw and do safer line-based if needed
-              pass
-
+          print('then left', left)
+          if left:
+              raise SystemExit('goal still has then-load')
           gd.write_text(t)
-          print('goal helpers', t.count('_openTaskDetails'), t.count('_openProjectDetails'))
 
-          # ---- life_area_detail_screen.dart ----
+          # ========== life_area_detail_screen.dart ==========
           lad = Path('apps/flutter/lib/ui/screens/life_area_detail_screen.dart')
           s = lad.read_text()
           if "import '../../services/app_data_bus.dart';" not in s:
-              # insert after first package import block domain imports
-              if "import '../../domain/" in s:
-                  s = s.replace(
-                      "import '../../domain/",
-                      "import '../../services/app_data_bus.dart';\nimport '../../domain/",
-                      1,
-                  )
-              else:
-                  s = s.replace(
-                      "import 'package:flutter/material.dart';",
-                      "import 'package:flutter/material.dart';\n\nimport '../../services/app_data_bus.dart';",
-                      1,
-                  )
-
-          if '_openWithGeneration' not in s and '_openGoal' not in s:
+              s = s.replace(
+                  "import 'package:flutter/material.dart';",
+                  "import 'package:flutter/material.dart';\n\nimport '../../services/app_data_bus.dart';",
+                  1,
+              )
+          if '_openAfterMaybeReload' not in s:
               helpers = (
                   "  Future<void> _openAfterMaybeReload(Future<void> Function() open) async {\n"
                   "    final generationBefore = AppDataBus.instance.generation;\n"
@@ -161,67 +131,59 @@ jobs:
               )
               s = s.replace('  Future<void> _load() async {', helpers + '  Future<void> _load() async {', 1)
 
-          s = s.replace(
-              """                                onTap: () async {
-                                  await Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (_) =>
-                                          GoalDetailScreen(goalId: g.id),
-                                    ),
-                                  );
-                                  await _load();
-                                },""",
-              """                                onTap: () => _openAfterMaybeReload(() async {
-                                  await Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (_) =>
-                                          GoalDetailScreen(goalId: g.id),
-                                    ),
-                                  );
-                                }),""",
-          )
-          s = s.replace(
-              """                                onTap: () async {
-                                  await Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (_) =>
-                                          ProjectDetailScreen(projectId: p.id),
-                                    ),
-                                  );
-                                  await _load();
-                                },""",
-              """                                onTap: () => _openAfterMaybeReload(() async {
-                                  await Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (_) =>
-                                          ProjectDetailScreen(projectId: p.id),
-                                    ),
-                                  );
-                                }),""",
-          )
-          s = s.replace(
-              """                                onTap: () async {
-                                  await Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (_) =>
-                                          TaskDetailScreen(taskId: t.id),
-                                    ),
-                                  );
-                                  await _load();
-                                },""",
-              """                                onTap: () => _openAfterMaybeReload(() async {
-                                  await Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (_) =>
-                                          TaskDetailScreen(taskId: t.id),
-                                    ),
-                                  );
-                                }),""",
-          )
-          lad.write_text(s)
-          print('life area await _load after nav', s.count('await _load();'))
+          # replace any onTap that ends with await _load after Navigator push
+          import re
+          def gate_block(match):
+              body = match.group(1)
+              return (
+                  "onTap: () => _openAfterMaybeReload(() async {\n"
+                  + body
+                  + "\n                                })"
+              )
 
-          # ---- home_shell assistant: generation-gated ----
+          # simpler explicit 3 replacements with flexible whitespace via regex
+          patterns = [
+              (
+                  r"onTap: \(\) async \{\s*await Navigator\.of\(context\)\.push\(\s*MaterialPageRoute\(\s*builder: \(_\) =>\s*GoalDetailScreen\(goalId: g\.id\),\s*\),\s*\);\s*await _load\(\);\s*\},",
+                  "onTap: () => _openAfterMaybeReload(() async {\n"
+                  "                                  await Navigator.of(context).push(\n"
+                  "                                    MaterialPageRoute(\n"
+                  "                                      builder: (_) =>\n"
+                  "                                          GoalDetailScreen(goalId: g.id),\n"
+                  "                                    ),\n"
+                  "                                  );\n"
+                  "                                })",
+              ),
+              (
+                  r"onTap: \(\) async \{\s*await Navigator\.of\(context\)\.push\(\s*MaterialPageRoute\(\s*builder: \(_\) =>\s*ProjectDetailScreen\(projectId: p\.id\),\s*\),\s*\);\s*await _load\(\);\s*\},",
+                  "onTap: () => _openAfterMaybeReload(() async {\n"
+                  "                                  await Navigator.of(context).push(\n"
+                  "                                    MaterialPageRoute(\n"
+                  "                                      builder: (_) =>\n"
+                  "                                          ProjectDetailScreen(projectId: p.id),\n"
+                  "                                    ),\n"
+                  "                                  );\n"
+                  "                                })",
+              ),
+              (
+                  r"onTap: \(\) async \{\s*await Navigator\.of\(context\)\.push\(\s*MaterialPageRoute\(\s*builder: \(_\) =>\s*TaskDetailScreen\(taskId: t\.id\),\s*\),\s*\);\s*await _load\(\);\s*\},",
+                  "onTap: () => _openAfterMaybeReload(() async {\n"
+                  "                                  await Navigator.of(context).push(\n"
+                  "                                    MaterialPageRoute(\n"
+                  "                                      builder: (_) =>\n"
+                  "                                          TaskDetailScreen(taskId: t.id),\n"
+                  "                                    ),\n"
+                  "                                  );\n"
+                  "                                })",
+              ),
+          ]
+          for pat, repl in patterns:
+              s2, n = re.subn(pat, repl, s, count=1, flags=re.S)
+              print('lad regex', n)
+              s = s2
+          lad.write_text(s)
+
+          # ========== home_shell assistant ==========
           hs = Path('apps/flutter/lib/ui/home_shell.dart')
           h = hs.read_text()
           old_a = (
@@ -246,7 +208,6 @@ jobs:
               "      MaterialPageRoute(builder: (_) => const AssistantScreen()),\n"
               "    );\n"
               "    if (!mounted) return;\n"
-              "    // Only reload if assistant (or nested screens) published a mutation.\n"
               "    if (AppDataBus.instance.generation == generationBefore) return;\n"
               "    final dirty = AppDataBus.instance.takeDirty();\n"
               "    final domains = dirty.isEmpty\n"
@@ -259,27 +220,17 @@ jobs:
               h = h.replace(old_a, new_a, 1)
               print('assistant gated')
           else:
-              print('assistant pattern miss')
+              raise SystemExit('assistant pattern miss')
           hs.write_text(h)
 
-          print('DONE')
+          # final asserts
+          assert '.then((_) => _load())' not in Path('apps/flutter/lib/ui/screens/goal_detail_screen.dart').read_text()
+          print('ALL OK')
           PY
-          # sanity: goal_detail must still compile-ish
-          python3 -c "
-          from pathlib import Path
-          t = Path('apps/flutter/lib/ui/screens/goal_detail_screen.dart').read_text()
-          assert 'AppDataBus' in t
-          assert '_openTaskDetails' in t
-          # no unbroken then-load
-          assert '.then((_) => _load())' not in t, 'still has then-load'
-          # no orphaned comment-only broken nav
-          assert '/* view-only' not in t or t.count('/* view-only') == 0
-          print('goal ok')
-          "
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add apps/flutter/lib/ui/screens/goal_detail_screen.dart \
                   apps/flutter/lib/ui/screens/life_area_detail_screen.dart \
                   apps/flutter/lib/ui/home_shell.dart
-          git commit -m "fix(phase-7): generation-gate goal, life-area, assistant navigations" || echo nochange
+          git commit -m "fix(phase-7): gate goal, life-area, assistant view-only reloads" || echo nochange
           git push origin HEAD:fix/phase-7-complete-refresh
