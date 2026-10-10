@@ -42,6 +42,28 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
     _load();
   }
 
+  Future<void> _openGoalDetails(String goalId) async {
+    final generationBefore = AppDataBus.instance.generation;
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => GoalDetailScreen(goalId: goalId)),
+    );
+    if (!mounted) return;
+    if (AppDataBus.instance.generation != generationBefore) {
+      await _load();
+    }
+  }
+
+  Future<void> _openTaskDetails(String taskId) async {
+    final generationBefore = AppDataBus.instance.generation;
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => TaskDetailScreen(taskId: taskId)),
+    );
+    if (!mounted) return;
+    if (AppDataBus.instance.generation != generationBefore) {
+      await _load();
+    }
+  }
+
   Future<void> _load() async {
     // Show a blocking loader only before the first successful workspace load.
     // Refreshes must keep the existing route, scroll position, and content alive.
@@ -391,12 +413,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                           label: const Text('Done'),
                         ),
                         OutlinedButton(
-                          onPressed: () {
-                            Navigator.of(context)
-                                .push(MaterialPageRoute(
-                                    builder: (_) => TaskDetailScreen(taskId: ws.nextAction!.taskId)))
-                                .then((_) => _load());
-                          },
+                          onPressed: () => _openTaskDetails(ws.nextAction!.taskId),
                           child: const Text('Open'),
                         ),
                         OutlinedButton(
@@ -449,11 +466,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
             if (goalTitle != null && goalId != null) ...[
               const SizedBox(height: 10),
               GlassCard(
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => GoalDetailScreen(goalId: goalId)),
-                  );
-                },
+                onTap: () => _openGoalDetails(goalId),
                 child: Row(
                   children: [
                     const Icon(Icons.flag_outlined, color: AppTheme.amber, size: 18),
@@ -549,12 +562,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                     Padding(
                       padding: const EdgeInsets.only(bottom: 6),
                       child: GlassCard(
-                        onTap: () async {
-                          await Navigator.of(context).push(
-                            MaterialPageRoute(builder: (_) => TaskDetailScreen(taskId: id)),
-                          );
-                          await _load();
-                        },
+                        onTap: () => _openTaskDetails(id),
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                         child: ListTile(
                           title: Text(dbStr(task['title']), style: const TextStyle(color: AppTheme.silver)),
@@ -595,13 +603,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                     ...children.map((s) => Padding(
                           padding: const EdgeInsets.only(left: 20, bottom: 6),
                           child: GlassCard(
-                            onTap: () async {
-                              await Navigator.of(context).push(
-                                MaterialPageRoute(
-                                    builder: (_) => TaskDetailScreen(taskId: dbStr(s['id']))),
-                              );
-                              await _load();
-                            },
+                            onTap: () => _openTaskDetails(dbStr(s['id'])),
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                             child: ListTile(
                               dense: true,
@@ -652,12 +654,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
               ...ws.scheduled.map((t) => Padding(
                     padding: const EdgeInsets.only(bottom: 6),
                     child: GlassCard(
-                      onTap: () {
-                        Navigator.of(context)
-                            .push(MaterialPageRoute(
-                                builder: (_) => TaskDetailScreen(taskId: dbStr(t['id']))))
-                            .then((_) => _load());
-                      },
+                      onTap: () => _openTaskDetails(dbStr(t['id'])),
                       child: Text(
                         '${_fmtTime(t['scheduled_start'] as int?)}  ·  ${dbStr(t['title'])}',
                         style: const TextStyle(color: AppTheme.silver),

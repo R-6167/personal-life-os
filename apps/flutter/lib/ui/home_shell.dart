@@ -602,12 +602,9 @@ class _HomeShellState extends State<HomeShell> {
                   padding: const EdgeInsets.only(bottom: 8),
                   child: GlassCard(
                     onTap: () {
-                      Navigator.of(context)
-                          .push(MaterialPageRoute(
-                              builder: (_) => ProjectDetailScreen(projectId: p.id)))
-                          .then((_) {
-                        AppDataBus.instance.lifeChanged();
-                      });
+                      Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => ProjectDetailScreen(projectId: p.id),
+                      ));
                     },
                     child: Text(p.title, style: const TextStyle(color: AppTheme.silver)),
                   ),
