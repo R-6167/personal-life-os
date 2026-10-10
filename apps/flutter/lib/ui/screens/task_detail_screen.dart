@@ -406,6 +406,70 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
     return 'Due ${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
   }
 
+  Future<void> _addDependency() async {
+    final candidates = await _tasks.listOpen();
+    final existing = {
+      for (final d in _deps) d['depends_on_task_id'] as String?,
+    };
+    final options = [
+      for (final t in candidates)
+        if (t.id != widget.taskId && !existing.contains(t.id)) t,
+    ];
+    if (!mounted) return;
+    if (options.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No other tasks available to depend on.')),
+      );
+      return;
+    }
+    final chosen = await showModalBottomSheet<Task>(
+      context: context,
+      backgroundColor: AppTheme.metalDeep,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('Blocked by which task?',
+                  style: TextStyle(color: AppTheme.silver, fontWeight: FontWeight.w600)),
+            ),
+            ...options.map(
+              (t) => ListTile(
+                title: Text(t.title, style: const TextStyle(color: AppTheme.silver)),
+                onTap: () => Navigator.pop(ctx, t),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (chosen == null) return;
+    try {
+      await _tasks.addDependency(taskId: widget.taskId, dependsOnTaskId: chosen.id);
+      AppDataBus.instance.publish(['tasks']);
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not add dependency: $e')),
+      );
+    }
+  }
+
+  Future<void> _removeDependency(String dependsOnTaskId) async {
+    try {
+      await _tasks.removeDependency(taskId: widget.taskId, dependsOnTaskId: dependsOnTaskId);
+      AppDataBus.instance.publish(['tasks']);
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not remove dependency: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -545,16 +609,44 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
                   trailing: const Icon(Icons.repeat, color: AppTheme.amber),
                 ),
               ),
-              if (_deps.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                const Text('Blocked by',
-                    style: TextStyle(color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text('Blocked by',
+                        style: TextStyle(color: AppTheme.woodLight, fontWeight: FontWeight.w600)),
+                  ),
+                  TextButton.icon(
+                    onPressed: _addDependency,
+                    icon: const Icon(Icons.add, size: 16, color: AppTheme.amber),
+                    label: const Text('Add', style: TextStyle(color: AppTheme.amber)),
+                  ),
+                ],
+              ),
+              if (_deps.isEmpty)
+                Text('No blockers · this task can be scheduled freely',
+                    style: TextStyle(color: AppTheme.silver.withValues(alpha: 0.45), fontSize: 12))
+              else
                 ..._deps.map((d) => Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: Text('• ${d['depends_on_title'] ?? d['depends_on_task_id']}',
-                          style: const TextStyle(color: AppTheme.silver)),
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              '• ${d['depends_on_title'] ?? d['depends_on_task_id']}',
+                              style: const TextStyle(color: AppTheme.silver),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Remove dependency',
+                            icon: const Icon(Icons.close, size: 16, color: AppTheme.silver),
+                            onPressed: () => _removeDependency(
+                              d['depends_on_task_id'] as String,
+                            ),
+                          ),
+                        ],
+                      ),
                     )),
-              ],
               const SizedBox(height: 16),
               WorkSessionPanel(taskId: t.id),
             ],
