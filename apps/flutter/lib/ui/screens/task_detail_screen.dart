@@ -6,6 +6,7 @@ import '../../data/project_repository.dart';
 import '../../data/task_repository.dart';
 import '../../domain/enums.dart';
 import '../../domain/models.dart';
+import '../../services/app_data_bus.dart';
 import '../../services/feedback_service.dart';
 import '../../services/recurrence_engine.dart';
 import '../theme.dart';
@@ -89,6 +90,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
       clearDue: _due == null,
       projectId: _projectId ?? '',
     );
+    AppDataBus.instance.tasksChanged();
     setState(() => _editing = false);
     await _load();
     if (mounted) {
@@ -287,6 +289,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
     if (ok == null || !mounted) return;
     if (ok == false) {
       await _tasks.clearRecurrence(widget.taskId);
+      AppDataBus.instance.tasksChanged();
       await _load();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Recurrence cleared')));
@@ -309,6 +312,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
       );
       await _tasks.setRecurrenceRule(taskId: widget.taskId, rule: rule);
     }
+    AppDataBus.instance.tasksChanged();
     await _load();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Recurrence updated')));
@@ -324,6 +328,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
     );
     if (picked == null) return;
     await _tasks.reschedule(widget.taskId, picked);
+    AppDataBus.instance.tasksChanged();
     await _load();
   }
 
@@ -382,6 +387,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
       durationMinutes: minutes,
       title: t.title,
     );
+    AppDataBus.instance.tasksChanged();
     await _load();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Session scheduled')));
@@ -428,12 +434,15 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
                 } else if (v == 'complete') {
                   FeedbackService.instance.success();
                   await _tasks.complete(t.id);
+                  AppDataBus.instance.tasksChanged();
                   await _load();
                 } else if (v == 'reopen') {
                   await _tasks.reopen(t.id);
+                  AppDataBus.instance.tasksChanged();
                   await _load();
                 } else if (v == 'delete') {
                   await _tasks.delete(t.id);
+                  AppDataBus.instance.tasksChanged();
                   if (mounted) Navigator.pop(context);
                 }
               },
