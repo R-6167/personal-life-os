@@ -1,0 +1,79 @@
+name: Phase7 fix parens
+on:
+  workflow_dispatch:
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: fix/phase-7-complete-refresh
+      - name: Fix life_area_detail onTap closings
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path('apps/flutter/lib/ui/screens/life_area_detail_screen.dart')
+          s = p.read_text()
+          old = (
+              "                                onTap: () => _openAfterMaybeReload(() async {\n"
+              "                                  await Navigator.of(context).push(\n"
+              "                                    MaterialPageRoute(\n"
+              "                                      builder: (_) =>\n"
+              "                                          GoalDetailScreen(goalId: g.id),\n"
+              "                                    ),\n"
+              "                                  );\n"
+              "                                },\n"
+              "                              ),"
+          )
+          new = (
+              "                                onTap: () => _openAfterMaybeReload(() async {\n"
+              "                                  await Navigator.of(context).push(\n"
+              "                                    MaterialPageRoute(\n"
+              "                                      builder: (_) =>\n"
+              "                                          GoalDetailScreen(goalId: g.id),\n"
+              "                                    ),\n"
+              "                                  );\n"
+              "                                }),\n"
+              "                              ),"
+          )
+          # generic: any screen ending with }, then ), for _tile — change }, to }),
+          # Safer: replace the three exact blocks
+          for screen, arg in [
+              ('GoalDetailScreen', 'goalId: g.id'),
+              ('ProjectDetailScreen', 'projectId: p.id'),
+              ('TaskDetailScreen', 'taskId: t.id'),
+          ]:
+              old = (
+                  f"                                onTap: () => _openAfterMaybeReload(() async {{\n"
+                  f"                                  await Navigator.of(context).push(\n"
+                  f"                                    MaterialPageRoute(\n"
+                  f"                                      builder: (_) =>\n"
+                  f"                                          {screen}({arg}),\n"
+                  f"                                    ),\n"
+                  f"                                  );\n"
+                  f"                                }},\n"
+                  f"                              ),"
+              )
+              new = old.replace(
+                  "                                },\n                              ),",
+                  "                                }),\n                              ),",
+                  1,
+              )
+              if old not in s:
+                  raise SystemExit(f'missing block {screen}')
+              s = s.replace(old, new, 1)
+              print('fixed', screen)
+          p.write_text(s)
+          # brace balance check
+          assert s.count('(') == s.count(')'), (s.count('('), s.count(')'))
+          assert s.count('{') == s.count('}'), (s.count('{'), s.count('}'))
+          print('balanced')
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/flutter/lib/ui/screens/life_area_detail_screen.dart
+          git commit -m "fix(phase-7): close _openAfterMaybeReload callbacks in life area detail"
+          git push origin HEAD:fix/phase-7-complete-refresh
