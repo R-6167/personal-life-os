@@ -15,8 +15,8 @@ jobs:
           set -euo pipefail
           python3 << 'PY'
           from pathlib import Path
+          import re
 
-          # ========== goal_detail_screen.dart ==========
           gd = Path('apps/flutter/lib/ui/screens/goal_detail_screen.dart')
           t = gd.read_text()
           if "import '../../services/app_data_bus.dart';" not in t:
@@ -51,57 +51,34 @@ jobs:
               t = t.replace('  Future<void> _load() async {', helpers + '  Future<void> _load() async {', 1)
 
           for old, repl in [
-              (
-                  "    await _projectsRepo.create(title: title, goalId: widget.goalId);\n    await _load();",
-                  "    await _projectsRepo.create(title: title, goalId: widget.goalId);\n    AppDataBus.instance.lifeChanged();\n    await _load();",
-              ),
-              (
-                  "    await _tasksRepo.create(title: title, goalId: widget.goalId);\n    await _load();",
-                  "    await _tasksRepo.create(title: title, goalId: widget.goalId);\n    AppDataBus.instance.tasksChanged();\n    await _load();",
-              ),
-              (
-                  "    await _threadSvc.linkHabitToGoal(goalId: widget.goalId, habitId: h.id);\n    await _load();",
-                  "    await _threadSvc.linkHabitToGoal(goalId: widget.goalId, habitId: h.id);\n    AppDataBus.instance.lifeChanged();\n    await _load();",
-              ),
-              (
-                  "    await _goals.updateMeta(\n      id: widget.goalId,\n      targetDate: DateTime(picked.year, picked.month, picked.day).millisecondsSinceEpoch,\n    );\n    await _load();",
-                  "    await _goals.updateMeta(\n      id: widget.goalId,\n      targetDate: DateTime(picked.year, picked.month, picked.day).millisecondsSinceEpoch,\n    );\n    AppDataBus.instance.lifeChanged();\n    await _load();",
-              ),
-              (
-                  "                  await _goals.complete(widget.goalId);\n                  if (mounted) Navigator.pop(context);",
-                  "                  await _goals.complete(widget.goalId);\n                  AppDataBus.instance.lifeChanged();\n                  if (mounted) Navigator.pop(context);",
-              ),
+              ("    await _projectsRepo.create(title: title, goalId: widget.goalId);\n    await _load();",
+               "    await _projectsRepo.create(title: title, goalId: widget.goalId);\n    AppDataBus.instance.lifeChanged();\n    await _load();"),
+              ("    await _tasksRepo.create(title: title, goalId: widget.goalId);\n    await _load();",
+               "    await _tasksRepo.create(title: title, goalId: widget.goalId);\n    AppDataBus.instance.tasksChanged();\n    await _load();"),
+              ("    await _threadSvc.linkHabitToGoal(goalId: widget.goalId, habitId: h.id);\n    await _load();",
+               "    await _threadSvc.linkHabitToGoal(goalId: widget.goalId, habitId: h.id);\n    AppDataBus.instance.lifeChanged();\n    await _load();"),
+              ("    await _goals.updateMeta(\n      id: widget.goalId,\n      targetDate: DateTime(picked.year, picked.month, picked.day).millisecondsSinceEpoch,\n    );\n    await _load();",
+               "    await _goals.updateMeta(\n      id: widget.goalId,\n      targetDate: DateTime(picked.year, picked.month, picked.day).millisecondsSinceEpoch,\n    );\n    AppDataBus.instance.lifeChanged();\n    await _load();"),
+              ("                  await _goals.complete(widget.goalId);\n                  if (mounted) Navigator.pop(context);",
+               "                  await _goals.complete(widget.goalId);\n                  AppDataBus.instance.lifeChanged();\n                  if (mounted) Navigator.pop(context);"),
           ]:
               if old in t:
                   t = t.replace(old, repl, 1)
-                  print('mut ok')
 
-          # precise nav replacements
           navs = [
-              (
-                  "                          ? () {\n                              Navigator.of(context)\n                                  .push(MaterialPageRoute(\n                                      builder: (_) => TaskDetailScreen(taskId: m.id)))\n                                  .then((_) => _load());\n                            }",
-                  "                          ? () => _openTaskDetails(m.id)",
-              ),
-              (
-                  "                onTap: () {\n                  Navigator.of(context)\n                      .push(MaterialPageRoute(\n                          builder: (_) =>\n                              ProjectDetailScreen(projectId: dbStr(b.project['id']))))\n                      .then((_) => _load());\n                },",
-                  "                onTap: () => _openProjectDetails(dbStr(b.project['id'])),",
-              ),
-              (
-                  "                    onOpenTask: (id) {\n                      Navigator.of(context)\n                          .push(MaterialPageRoute(builder: (_) => TaskDetailScreen(taskId: id)))\n                          .then((_) => _load());\n                    },",
-                  "                    onOpenTask: (id) => _openTaskDetails(id),",
-              ),
-              (
-                  "                      onTap: () {\n                        Navigator.of(context)\n                            .push(MaterialPageRoute(\n                                builder: (_) => TaskDetailScreen(taskId: dbStr(task['id']))))\n                            .then((_) => _load());\n                      },",
-                  "                      onTap: () => _openTaskDetails(dbStr(task['id'])),",
-              ),
+              ("                          ? () {\n                              Navigator.of(context)\n                                  .push(MaterialPageRoute(\n                                      builder: (_) => TaskDetailScreen(taskId: m.id)))\n                                  .then((_) => _load());\n                            }",
+               "                          ? () => _openTaskDetails(m.id)"),
+              ("                    onOpen: () {\n                      Navigator.of(context)\n                          .push(MaterialPageRoute(\n                              builder: (_) =>\n                                  ProjectDetailScreen(projectId: dbStr(b.project['id']))))\n                          .then((_) => _load());\n                    },",
+               "                    onOpen: () => _openProjectDetails(dbStr(b.project['id'])),"),
+              ("                    onOpenTask: (id) {\n                      Navigator.of(context)\n                          .push(MaterialPageRoute(builder: (_) => TaskDetailScreen(taskId: id)))\n                          .then((_) => _load());\n                    },",
+               "                    onOpenTask: (id) => _openTaskDetails(id),"),
+              ("                      onTap: () {\n                        Navigator.of(context)\n                            .push(MaterialPageRoute(\n                                builder: (_) => TaskDetailScreen(taskId: dbStr(task['id']))))\n                            .then((_) => _load());\n                      },",
+               "                      onTap: () => _openTaskDetails(dbStr(task['id'])),"),
           ]
           for old, repl in navs:
-              c = t.count(old)
-              if c:
-                  t = t.replace(old, repl)
-                  print('nav', c)
-              else:
-                  print('nav miss', repr(old[:60]))
+              n = t.count(old)
+              t = t.replace(old, repl)
+              print('nav', n)
 
           left = t.count('.then((_) => _load())')
           print('then left', left)
@@ -109,7 +86,7 @@ jobs:
               raise SystemExit('goal still has then-load')
           gd.write_text(t)
 
-          # ========== life_area_detail_screen.dart ==========
+          # life area
           lad = Path('apps/flutter/lib/ui/screens/life_area_detail_screen.dart')
           s = lad.read_text()
           if "import '../../services/app_data_bus.dart';" not in s:
@@ -131,59 +108,32 @@ jobs:
               )
               s = s.replace('  Future<void> _load() async {', helpers + '  Future<void> _load() async {', 1)
 
-          # replace any onTap that ends with await _load after Navigator push
-          import re
-          def gate_block(match):
-              body = match.group(1)
-              return (
-                  "onTap: () => _openAfterMaybeReload(() async {\n"
-                  + body
-                  + "\n                                })"
+          for screen, id_expr in [
+              ('GoalDetailScreen', 'goalId: g.id'),
+              ('ProjectDetailScreen', 'projectId: p.id'),
+              ('TaskDetailScreen', 'taskId: t.id'),
+          ]:
+              # match multiline onTap async with await _load
+              pat = re.compile(
+                  rf"onTap: \(\) async \{{.*?{screen}\({id_expr}\),.*?await _load\(\);\s*\}}",
+                  re.S,
               )
-
-          # simpler explicit 3 replacements with flexible whitespace via regex
-          patterns = [
-              (
-                  r"onTap: \(\) async \{\s*await Navigator\.of\(context\)\.push\(\s*MaterialPageRoute\(\s*builder: \(_\) =>\s*GoalDetailScreen\(goalId: g\.id\),\s*\),\s*\);\s*await _load\(\);\s*\},",
-                  "onTap: () => _openAfterMaybeReload(() async {\n"
-                  "                                  await Navigator.of(context).push(\n"
-                  "                                    MaterialPageRoute(\n"
-                  "                                      builder: (_) =>\n"
-                  "                                          GoalDetailScreen(goalId: g.id),\n"
-                  "                                    ),\n"
-                  "                                  );\n"
-                  "                                })",
-              ),
-              (
-                  r"onTap: \(\) async \{\s*await Navigator\.of\(context\)\.push\(\s*MaterialPageRoute\(\s*builder: \(_\) =>\s*ProjectDetailScreen\(projectId: p\.id\),\s*\),\s*\);\s*await _load\(\);\s*\},",
-                  "onTap: () => _openAfterMaybeReload(() async {\n"
-                  "                                  await Navigator.of(context).push(\n"
-                  "                                    MaterialPageRoute(\n"
-                  "                                      builder: (_) =>\n"
-                  "                                          ProjectDetailScreen(projectId: p.id),\n"
-                  "                                    ),\n"
-                  "                                  );\n"
-                  "                                })",
-              ),
-              (
-                  r"onTap: \(\) async \{\s*await Navigator\.of\(context\)\.push\(\s*MaterialPageRoute\(\s*builder: \(_\) =>\s*TaskDetailScreen\(taskId: t\.id\),\s*\),\s*\);\s*await _load\(\);\s*\},",
-                  "onTap: () => _openAfterMaybeReload(() async {\n"
-                  "                                  await Navigator.of(context).push(\n"
-                  "                                    MaterialPageRoute(\n"
-                  "                                      builder: (_) =>\n"
-                  "                                          TaskDetailScreen(taskId: t.id),\n"
-                  "                                    ),\n"
-                  "                                  );\n"
-                  "                                })",
-              ),
-          ]
-          for pat, repl in patterns:
-              s2, n = re.subn(pat, repl, s, count=1, flags=re.S)
-              print('lad regex', n)
+              repl = (
+                  f"onTap: () => _openAfterMaybeReload(() async {{\n"
+                  f"                                  await Navigator.of(context).push(\n"
+                  f"                                    MaterialPageRoute(\n"
+                  f"                                      builder: (_) =>\n"
+                  f"                                          {screen}({id_expr}),\n"
+                  f"                                    ),\n"
+                  f"                                  );\n"
+                  f"                                }}"
+              )
+              s2, n = pat.subn(repl, s, count=1)
+              print('lad', screen, n)
               s = s2
           lad.write_text(s)
 
-          # ========== home_shell assistant ==========
+          # assistant
           hs = Path('apps/flutter/lib/ui/home_shell.dart')
           h = hs.read_text()
           old_a = (
@@ -216,15 +166,9 @@ jobs:
               "    await _reload(domains: domains);\n"
               "  }"
           )
-          if old_a in h:
-              h = h.replace(old_a, new_a, 1)
-              print('assistant gated')
-          else:
+          if old_a not in h:
               raise SystemExit('assistant pattern miss')
-          hs.write_text(h)
-
-          # final asserts
-          assert '.then((_) => _load())' not in Path('apps/flutter/lib/ui/screens/goal_detail_screen.dart').read_text()
+          hs.write_text(h.replace(old_a, new_a, 1))
           print('ALL OK')
           PY
           git config user.name "github-actions[bot]"
