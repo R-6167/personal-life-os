@@ -55,14 +55,22 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
   Future<void> _load() async {
     if (mounted && _built == null) setState(() => _loading = true);
-    final built = await _engine.build(day: _day);
-    final open = await _tasks.listOpen();
-    if (!mounted) return;
-    setState(() {
-      _built = built;
-      _open = open;
-      _loading = false;
-    });
+    try {
+      final built = await _engine.build(day: _day);
+      final open = await _tasks.listOpen();
+      if (!mounted) return;
+      setState(() {
+        _built = built;
+        _open = open;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Schedule failed to load: $e')),
+      );
+    }
   }
 
   Future<void> _apply() async {

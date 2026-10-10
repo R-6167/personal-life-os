@@ -63,23 +63,31 @@ class _PlanningScreenState extends State<PlanningScreen> {
 
   Future<void> _load() async {
     if (mounted && _built == null) setState(() => _loading = true);
-    final built = await _engine.build(day: _day);
-    final free = await _plan.availableMinutes(day: _day);
-    final open = await _tasks.listOpen();
-    final scheduledIds = built.timeline
-        .where((s) => s.kind == DaySlotKind.task && s.entityId != null)
-        .map((s) => s.entityId!)
-        .toSet();
-    final unscheduled = open.where((t) => !scheduledIds.contains(t.id)).toList();
-    final ranked = await _dayPlanner.rankForToday();
-    if (!mounted) return;
-    setState(() {
-      _built = built;
-      _freeMin = free;
-      _unscheduled = unscheduled;
-      _ranked = ranked;
-      _loading = false;
-    });
+    try {
+      final built = await _engine.build(day: _day);
+      final free = await _plan.availableMinutes(day: _day);
+      final open = await _tasks.listOpen();
+      final scheduledIds = built.timeline
+          .where((s) => s.kind == DaySlotKind.task && s.entityId != null)
+          .map((s) => s.entityId!)
+          .toSet();
+      final unscheduled = open.where((t) => !scheduledIds.contains(t.id)).toList();
+      final ranked = await _dayPlanner.rankForToday();
+      if (!mounted) return;
+      setState(() {
+        _built = built;
+        _freeMin = free;
+        _unscheduled = unscheduled;
+        _ranked = ranked;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Day plan failed to load: $e')),
+      );
+    }
   }
 
   Future<void> _rebuild() async {

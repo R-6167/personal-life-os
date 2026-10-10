@@ -15,7 +15,7 @@ class AppDatabase {
   static const _uuid = Uuid();
 
   // Bump whenever the database schema/migration contract changes.
-  static const schemaVersion = 25;
+  static const schemaVersion = 26;
 
   Future<Database> get database async {
     if (_db != null) return _db!;
@@ -84,6 +84,7 @@ class AppDatabase {
         await _migrateToV23(db);
         await _migrateToV24(db);
         await _migrateToV25(db);
+        await _migrateToV26(db);
         await _verifySchemaContract(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
@@ -107,6 +108,8 @@ class AppDatabase {
         if (oldVersion < 23) await _migrateToV23(db);
         if (oldVersion < 24) await _migrateToV24(db);
         if (oldVersion < 25) await _migrateToV25(db);
+        if (oldVersion < 26) await _migrateToV26(db);
+        await _migrateToV26(db);
         await _verifySchemaContract(db);
       },
       onOpen: (db) async {
@@ -332,7 +335,7 @@ CREATE TABLE IF NOT EXISTS life_areas (
 
   Future<void> _verifySchemaContract(Database db) async {
     const requiredTables = <String>[
-      'users', 'goals', 'projects', 'tasks', 'life_areas', 'activity_events',
+      'users', 'goals', 'projects', 'tasks', 'life_areas', 'wellness_checkins', 'health_metrics', 'activity_events',
       'error_logs', 'work_sessions',
     ];
     for (final table in requiredTables) {

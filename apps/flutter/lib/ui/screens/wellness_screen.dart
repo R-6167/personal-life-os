@@ -30,22 +30,30 @@ class _WellnessScreenState extends State<WellnessScreen> {
   }
 
   Future<void> _load() async {
-    final today = await _repo.todayCheckin();
-    final week = await _repo.weeklySummary();
-    final recent = await _repo.recentCheckins();
-    if (!mounted) return;
-    setState(() {
-      _today = today;
-      _week = week;
-      _recent = recent;
-      if (today != null) {
-        _mood = (today['mood'] as int?) ?? 3;
-        _energy = (today['energy'] as int?) ?? 3;
-        _stress = (today['stress'] as int?) ?? 3;
-        _sleep = (today['sleep_hours'] as num?)?.toDouble() ?? 7;
-      }
-      _loading = false;
-    });
+    try {
+      final today = await _repo.todayCheckin();
+      final week = await _repo.weeklySummary();
+      final recent = await _repo.recentCheckins();
+      if (!mounted) return;
+      setState(() {
+        _today = today;
+        _week = week;
+        _recent = recent;
+        if (today != null) {
+          _mood = (today['mood'] as int?) ?? 3;
+          _energy = (today['energy'] as int?) ?? 3;
+          _stress = (today['stress'] as int?) ?? 3;
+          _sleep = (today['sleep_hours'] as num?)?.toDouble() ?? 7;
+        }
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Wellness data unavailable: $e')),
+      );
+    }
   }
 
   Future<void> _saveCheckin() async {
