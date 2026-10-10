@@ -17,6 +17,7 @@ import '../screens/practical_life_screen.dart';
 import '../screens/project_detail_screen.dart';
 import '../screens/routine_detail_screen.dart';
 import '../screens/schedule_screen.dart';
+import '../screens/life_areas_screen.dart';
 import '../screens/wellness_screen.dart';
 import '../theme.dart';
 import '../widgets/glass.dart';
@@ -121,6 +122,16 @@ class _LifeHubState extends State<LifeHub> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
       children: [
+        _navCard(
+          icon: Icons.category_outlined,
+          title: 'Life areas',
+          subtitle: 'Configure domains of life',
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const LifeAreasScreen()),
+            );
+          },
+        ),
         _navCard(
           icon: Icons.priority_high,
           title: 'Needs attention',
