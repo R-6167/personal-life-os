@@ -1,0 +1,210 @@
+name: WaveB life area pickers
+on:
+  workflow_dispatch:
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: feat/phase-3-life-area-pickers
+      - name: Add life area pickers to create forms
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          from pathlib import Path
+
+          p = Path('apps/flutter/lib/ui/forms/create_forms.dart')
+          s = p.read_text()
+
+          if "life_area_repository.dart" not in s:
+              s = s.replace(
+                  "import '../../data/goal_repository.dart';",
+                  "import '../../data/goal_repository.dart';\nimport '../../data/life_area_repository.dart';",
+              )
+
+          # Replace goal and project simple forms
+          s = s.replace(
+              """    case AddKind.project:
+      return _simpleText(
+        context,
+        title: 'New project',
+        fields: const ['Title', 'Description (optional)'],
+        onSave: (v) async {
+          await ProjectRepository(AppDatabase.instance).create(title: v[0]);
+        },
+      );
+    case AddKind.goal:
+      return _simpleText(
+        context,
+        title: 'New goal',
+        fields: const ['Title', 'Description (optional)'],
+        onSave: (v) async {
+          await GoalRepository(AppDatabase.instance).create(title: v[0]);
+        },
+      );""",
+              """    case AddKind.project:
+      return _entityWithLifeAreaForm(
+        context,
+        title: 'New project',
+        onSave: (title, description, lifeAreaId) async {
+          await ProjectRepository(AppDatabase.instance).create(
+            title: title,
+            description: description,
+            lifeAreaId: lifeAreaId,
+          );
+        },
+      );
+    case AddKind.goal:
+      return _entityWithLifeAreaForm(
+        context,
+        title: 'New goal',
+        onSave: (title, description, lifeAreaId) async {
+          await GoalRepository(AppDatabase.instance).create(
+            title: title,
+            description: description,
+            lifeAreaId: lifeAreaId,
+          );
+        },
+      );""",
+          )
+
+          # Patch task form: load areas, add dropdown, pass lifeAreaId
+          if 'lifeAreaId' not in s.split('_taskForm')[1][:2500]:
+              s = s.replace(
+                  "Future<bool> _taskForm(BuildContext context) async {\n  final title = TextEditingController();\n  final desc = TextEditingController();\n  var priority = 0;\n  DateTime? due;",
+                  "Future<bool> _taskForm(BuildContext context) async {\n  final title = TextEditingController();\n  final desc = TextEditingController();\n  var priority = 0;\n  DateTime? due;\n  String? lifeAreaId;\n  final areaRepo = LifeAreaRepository(AppDatabase.instance);\n  await areaRepo.seedDefaultsIfEmpty();\n  final areas = await areaRepo.listActive();",
+              )
+              # Insert dropdown before priority field
+              s = s.replace(
+                  "              DropdownButtonFormField<int>(\n                value: priority,\n                dropdownColor: AppTheme.metal,\n                decoration: const InputDecoration(labelText: 'Priority'),",
+                  """              DropdownButtonFormField<String?>(
+                value: lifeAreaId,
+                dropdownColor: AppTheme.metal,
+                decoration: const InputDecoration(labelText: 'Life area (optional)'),
+                items: [
+                  const DropdownMenuItem(value: null, child: Text('None')),
+                  ...areas.map(
+                    (a) => DropdownMenuItem(value: a.id, child: Text(a.title)),
+                  ),
+                ],
+                onChanged: (v) => setLocal(() => lifeAreaId = v),
+              ),
+              const SizedBox(height: 8),
+              DropdownButtonFormField<int>(
+                value: priority,
+                dropdownColor: AppTheme.metal,
+                decoration: const InputDecoration(labelText: 'Priority'),""",
+                  1,
+              )
+              s = s.replace(
+                  """  await TaskRepository(AppDatabase.instance).create(
+    title: title.text.trim(),
+    dueAt: dueMs,
+    priority: priority,
+    description: desc.text.trim().isEmpty ? null : desc.text.trim(),
+  );""",
+                  """  await TaskRepository(AppDatabase.instance).create(
+    title: title.text.trim(),
+    dueAt: dueMs,
+    priority: priority,
+    description: desc.text.trim().isEmpty ? null : desc.text.trim(),
+    lifeAreaId: lifeAreaId,
+  );""",
+                  1,
+              )
+
+          # Append helper form if missing
+          if '_entityWithLifeAreaForm' not in s:
+              helper = r'''
+
+Future<bool> _entityWithLifeAreaForm(
+  BuildContext context, {
+  required String title,
+  required Future<void> Function(String title, String? description, String? lifeAreaId) onSave,
+}) async {
+  final titleCtrl = TextEditingController();
+  final descCtrl = TextEditingController();
+  String? lifeAreaId;
+  final areaRepo = LifeAreaRepository(AppDatabase.instance);
+  await areaRepo.seedDefaultsIfEmpty();
+  final areas = await areaRepo.listActive();
+
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setLocal) => AlertDialog(
+        backgroundColor: AppTheme.metal,
+        title: Text(title, style: const TextStyle(color: AppTheme.silver)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: titleCtrl,
+              autofocus: true,
+              style: const TextStyle(color: AppTheme.silver),
+              decoration: const InputDecoration(labelText: 'Title'),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: descCtrl,
+              style: const TextStyle(color: AppTheme.silver),
+              decoration: const InputDecoration(labelText: 'Description (optional)'),
+            ),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String?>(
+              value: lifeAreaId,
+              dropdownColor: AppTheme.metal,
+              decoration: const InputDecoration(labelText: 'Life area (optional)'),
+              items: [
+                const DropdownMenuItem(value: null, child: Text('None')),
+                ...areas.map(
+                  (a) => DropdownMenuItem(value: a.id, child: Text(a.title)),
+                ),
+              ],
+              onChanged: (v) => setLocal(() => lifeAreaId = v),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              if (titleCtrl.text.trim().isEmpty) return;
+              Navigator.pop(ctx, true);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    ),
+  );
+  if (ok != true) return false;
+  final desc = descCtrl.text.trim();
+  await onSave(
+    titleCtrl.text.trim(),
+    desc.isEmpty ? null : desc,
+    lifeAreaId,
+  );
+  return true;
+}
+'''
+              s = s + helper
+
+          p.write_text(s)
+          print('create_forms patched', '_entityWithLifeAreaForm' in s)
+          # Goal create must accept description - check signature
+          g = Path('apps/flutter/lib/data/goal_repository.dart').read_text()
+          if 'description' not in g.split('Future<Goal> create')[1][:200]:
+              print('WARN goal create may not take description')
+          else:
+              print('goal create has description')
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/flutter/lib/ui/forms/create_forms.dart
+          git diff --cached --stat
+          git commit -m "feat(phase-3): life area picker on goal/project/task create" || echo nochange
+          git push origin HEAD:feat/phase-3-life-area-pickers
