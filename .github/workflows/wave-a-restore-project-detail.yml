@@ -1,0 +1,97 @@
+name: WaveA restore ProjectDetail
+on:
+  workflow_dispatch:
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: feat/phase-2-milestone-deps-polish
+      - name: Patch project detail
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          from pathlib import Path
+          import urllib.request, re
+          p = Path('apps/flutter/lib/ui/screens/project_detail_screen.dart')
+          src = urllib.request.urlopen(
+              'https://raw.githubusercontent.com/R-6167/personal-life-os/main/apps/flutter/lib/ui/screens/project_detail_screen.dart'
+          ).read().decode()
+          if '_moveMilestone' in src:
+              print('already patched')
+              raise SystemExit(0)
+          if "import '../../services/app_data_bus.dart';" not in src:
+              src = src.replace(
+                  "import '../../data/milestone_repository.dart';",
+                  "import '../../data/milestone_repository.dart';\nimport '../../services/app_data_bus.dart';",
+              )
+          method = (
+              "  Future<void> _moveMilestone(List<Map<String, Object?>> milestones, int index, int delta) async {\n"
+              "    final next = index + delta;\n"
+              "    if (next < 0 || next >= milestones.length) return;\n"
+              "    final ids = milestones.map((m) => dbStr(m['id'])).toList();\n"
+              "    final tmp = ids[index];\n"
+              "    ids[index] = ids[next];\n"
+              "    ids[next] = tmp;\n"
+              "    try {\n"
+              "      await _milestonesRepo.reorder(projectId: widget.projectId, orderedIds: ids);\n"
+              "      AppDataBus.instance.publish(['projects', 'tasks']);\n"
+              "      await _load();\n"
+              "    } catch (e) {\n"
+              "      if (!mounted) return;\n"
+              "      ScaffoldMessenger.of(context).showSnackBar(\n"
+              "        SnackBar(content: Text('Could not reorder milestone: $e')),\n"
+              "      );\n"
+              "    }\n"
+              "  }\n\n"
+          )
+          marker = '  @override\n  Widget build(BuildContext context)'
+          assert marker in src
+          src = src.replace(marker, method + marker, 1)
+          m = re.search(r'\.\.\.ws\.milestones\.map\(\(m\)\s*=>', src)
+          assert m, 'milestones map not found'
+          src = (
+              src[:m.start()]
+              + '...ws.milestones.asMap().entries.map((entry) {\n'
+              + '              final index = entry.key;\n'
+              + '              final m = entry.value;\n'
+              + '              return'
+              + src[m.end():]
+          )
+          m2 = re.search(r'(\),\s*\),\),\s*)(//[^\n]*Tasks)', src)
+          if m2:
+              src = src[:m2.start(1)] + ');\n                  }),\n\n            ' + m2.group(2) + src[m2.end(2):]
+          needle = "tooltip: 'Add task to milestone'"
+          assert needle in src
+          ib = src.rfind('IconButton(', 0, src.find(needle))
+          updown = (
+              "IconButton(\n"
+              "                              tooltip: 'Move milestone up',\n"
+              "                              icon: const Icon(Icons.arrow_upward, color: AppTheme.silver, size: 18),\n"
+              "                              onPressed: index == 0\n"
+              "                                  ? null\n"
+              "                                  : () => _moveMilestone(ws.milestones, index, -1),\n"
+              "                            ),\n"
+              "                            IconButton(\n"
+              "                              tooltip: 'Move milestone down',\n"
+              "                              icon: const Icon(Icons.arrow_downward, color: AppTheme.silver, size: 18),\n"
+              "                              onPressed: index == ws.milestones.length - 1\n"
+              "                                  ? null\n"
+              "                                  : () => _moveMilestone(ws.milestones, index, 1),\n"
+              "                            ),\n"
+              "                            "
+          )
+          src = src[:ib] + updown + src[ib:]
+          p.write_text(src)
+          assert '_moveMilestone' in src
+          print('patched', len(src))
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/flutter/lib/ui/screens/project_detail_screen.dart
+          git diff --cached --quiet && echo nochange && exit 0
+          git commit -m "feat(phase-2): milestone up/down reorder UI on project workspace"
+          git push origin HEAD:feat/phase-2-milestone-deps-polish
