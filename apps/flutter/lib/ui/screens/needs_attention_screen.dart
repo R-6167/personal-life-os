@@ -22,6 +22,7 @@ class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
   final _svc = NeedsAttentionService();
   List<AttentionItem> _items = [];
   bool _loading = true;
+  bool _hasLoaded = false;
 
   @override
   void initState() {
@@ -30,13 +31,26 @@ class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
-    final items = await _svc.build();
-    if (!mounted) return;
-    setState(() {
-      _items = items;
-      _loading = false;
-    });
+    // Block only the first load; later refreshes retain the visible feed.
+    if (mounted && !_hasLoaded) setState(() => _loading = true);
+    try {
+      final items = await _svc.build();
+      if (!mounted) return;
+      setState(() {
+        _items = items;
+        _hasLoaded = true;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      final canKeepCurrentFeed = _hasLoaded;
+      setState(() => _loading = false);
+      if (canKeepCurrentFeed) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not refresh attention items. Showing the last loaded version.')),
+        );
+      }
+    }
   }
 
   Color _severityColor(AttentionSeverity s) {
@@ -103,7 +117,7 @@ class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
             IconButton(onPressed: _load, icon: const Icon(Icons.refresh)),
           ],
         ),
-        body: _loading
+        body: (_loading && !_hasLoaded)
             ? const Center(child: CircularProgressIndicator(color: AppTheme.amber))
             : _items.isEmpty
                 ? Center(
