@@ -1,0 +1,130 @@
+name: WaveB overview wire
+on:
+  workflow_dispatch:
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: feat/phase-3-life-area-overview
+      - name: Add listByLifeArea and detail navigation
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          from pathlib import Path
+
+          # Goal repository
+          gp = Path('apps/flutter/lib/data/goal_repository.dart')
+          g = gp.read_text()
+          if 'listByLifeArea' not in g:
+              method = '''
+            Future<List<Goal>> listByLifeArea(String lifeAreaId) async {
+              final ownerId = await _db.requireOwnerId();
+              final rows = await (await _db.database).query(
+                'goals',
+                where: 'owner_id = ? AND life_area_id = ? AND status != ?',
+                whereArgs: [ownerId, lifeAreaId, 'COMPLETED'],
+                orderBy: 'updated_at DESC',
+              );
+              return rows.map(Goal.fromMap).toList();
+            }
+
+          '''
+              g = g.replace('  Future<Goal?> getById', method + '  Future<Goal?> getById', 1)
+              gp.write_text(g)
+              print('goal listByLifeArea')
+
+          # Project repository
+          pp = Path('apps/flutter/lib/data/project_repository.dart')
+          p = pp.read_text()
+          if 'listByLifeArea' not in p:
+              method = '''
+            Future<List<Project>> listByLifeArea(String lifeAreaId) async {
+              final ownerId = await _db.requireOwnerId();
+              final rows = await (await _db.database).query(
+                'projects',
+                where: 'owner_id = ? AND life_area_id = ? AND status != ?',
+                whereArgs: [ownerId, lifeAreaId, 'COMPLETED'],
+                orderBy: 'updated_at DESC',
+              );
+              return rows.map(Project.fromMap).toList();
+            }
+
+          '''
+              # insert after first Future method that is listActive if present
+              if 'Future<List<Project>> listActive' in p:
+                  p = p.replace(
+                      '  Future<List<Project>> listActive',
+                      method + '  Future<List<Project>> listActive',
+                      1,
+                  )
+              else:
+                  p = p.replace(
+                      'class ProjectRepository {',
+                      'class ProjectRepository {' + method,
+                      1,
+                  )
+              pp.write_text(p)
+              print('project listByLifeArea')
+
+          # Task repository
+          tp = Path('apps/flutter/lib/data/task_repository.dart')
+          t = tp.read_text()
+          if 'listByLifeArea' not in t:
+              method = '''
+            Future<List<Task>> listByLifeArea(String lifeAreaId) async {
+              final ownerId = await _db.requireOwnerId();
+              final rows = await (await _db.database).query(
+                'tasks',
+                where: 'owner_id = ? AND life_area_id = ? AND status NOT IN (?, ?) AND archived_at IS NULL',
+                whereArgs: [ownerId, lifeAreaId, EntityStatus.completed, EntityStatus.cancelled],
+                orderBy: 'priority DESC, due_at ASC, updated_at DESC',
+              );
+              return rows.map(Task.fromMap).toList();
+            }
+
+          '''
+              t = t.replace(
+                  '  Future<List<Task>> listOpen() async {',
+                  method + '  Future<List<Task>> listOpen() async {',
+                  1,
+              )
+              tp.write_text(t)
+              print('task listByLifeArea')
+
+          # LifeAreasScreen: open detail on tile tap
+          sp = Path('apps/flutter/lib/ui/screens/life_areas_screen.dart')
+          s = sp.read_text()
+          if 'LifeAreaDetailScreen' not in s:
+              s = s.replace(
+                  "import '../theme.dart';",
+                  "import '../theme.dart';\nimport 'life_area_detail_screen.dart';",
+              )
+              # Make GlassCard tappable to detail
+              s = s.replace(
+                  'child: GlassCard(\n                        child: ListTile(\n                          title: Text(a.title, style: const TextStyle(color: AppTheme.silver)),',
+                  """child: GlassCard(
+                        onTap: () async {
+                          await Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => LifeAreaDetailScreen(lifeAreaId: a.id),
+                            ),
+                          );
+                          await _load();
+                        },
+                        child: ListTile(
+                          title: Text(a.title, style: const TextStyle(color: AppTheme.silver)),""",
+                  1,
+              )
+              sp.write_text(s)
+              print('life areas screen nav')
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --stat
+          git commit -m "feat(phase-3): listByLifeArea + navigate to overview" || echo nochange
+          git push origin HEAD:feat/phase-3-life-area-overview
