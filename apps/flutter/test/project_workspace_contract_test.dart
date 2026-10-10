@@ -682,7 +682,8 @@ void main() {
     await tester.ensureVisible(find.text('Milestones'));
     await tester.pump();
     await tester.tap(find.widgetWithText(TextButton, 'Add').first);
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
     await tester.enterText(find.byType(TextField).last, 'First milestone');
     await tester.tap(find.text('Save'));
     await tester.pump();
