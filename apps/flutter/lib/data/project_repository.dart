@@ -8,6 +8,18 @@ class ProjectRepository {
   ProjectRepository(this._db);
   final AppDatabase _db;
 
+
+  Future<List<Project>> listByLifeArea(String lifeAreaId) async {
+    final ownerId = await _db.requireOwnerId();
+    final rows = await (await _db.database).query(
+      'projects',
+      where: 'owner_id = ? AND life_area_id = ? AND status != ?',
+      whereArgs: [ownerId, lifeAreaId, 'COMPLETED'],
+      orderBy: 'updated_at DESC',
+    );
+    return rows.map(Project.fromMap).toList();
+  }
+
   Future<List<Project>> listActive() async {
     final db = await _db.database;
     final ownerId = await _db.requireOwnerId();
