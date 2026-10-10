@@ -8,6 +8,7 @@ import '../../data/database.dart';
 import '../../data/expense_repository.dart';
 import '../../data/extended_repository.dart';
 import '../../data/goal_repository.dart';
+import '../../data/life_area_repository.dart';
 import '../../data/habit_repository.dart';
 import '../../data/income_repository.dart';
 import '../../data/note_repository.dart';
@@ -105,21 +106,27 @@ Future<bool> showCreateForm(BuildContext context, AddKind kind) async {
     case AddKind.task:
       return _taskForm(context);
     case AddKind.project:
-      return _simpleText(
+      return _entityWithLifeAreaForm(
         context,
         title: 'New project',
-        fields: const ['Title', 'Description (optional)'],
-        onSave: (v) async {
-          await ProjectRepository(AppDatabase.instance).create(title: v[0]);
+        onSave: (title, description, lifeAreaId) async {
+          await ProjectRepository(AppDatabase.instance).create(
+            title: title,
+            description: description,
+            lifeAreaId: lifeAreaId,
+          );
         },
       );
     case AddKind.goal:
-      return _simpleText(
+      return _entityWithLifeAreaForm(
         context,
         title: 'New goal',
-        fields: const ['Title', 'Description (optional)'],
-        onSave: (v) async {
-          await GoalRepository(AppDatabase.instance).create(title: v[0]);
+        onSave: (title, description, lifeAreaId) async {
+          await GoalRepository(AppDatabase.instance).create(
+            title: title,
+            description: description,
+            lifeAreaId: lifeAreaId,
+          );
         },
       );
     case AddKind.habit:
@@ -196,6 +203,10 @@ Future<bool> _taskForm(BuildContext context) async {
   final desc = TextEditingController();
   var priority = 0;
   DateTime? due;
+  String? lifeAreaId;
+  final areaRepo = LifeAreaRepository(AppDatabase.instance);
+  await areaRepo.seedDefaultsIfEmpty();
+  final areas = await areaRepo.listActive();
 
   final ok = await showDialog<bool>(
     context: context,
@@ -219,6 +230,19 @@ Future<bool> _taskForm(BuildContext context) async {
                 style: const TextStyle(color: AppTheme.silver),
                 maxLines: 3,
                 decoration: const InputDecoration(labelText: 'Description'),
+              ),
+              const SizedBox(height: 8),
+              DropdownButtonFormField<String?>(
+                value: lifeAreaId,
+                dropdownColor: AppTheme.metal,
+                decoration: const InputDecoration(labelText: 'Life area (optional)'),
+                items: [
+                  const DropdownMenuItem(value: null, child: Text('None')),
+                  ...areas.map(
+                    (a) => DropdownMenuItem(value: a.id, child: Text(a.title)),
+                  ),
+                ],
+                onChanged: (v) => setLocal(() => lifeAreaId = v),
               ),
               const SizedBox(height: 8),
               DropdownButtonFormField<int>(
@@ -278,6 +302,7 @@ Future<bool> _taskForm(BuildContext context) async {
     dueAt: dueMs,
     priority: priority,
     description: desc.text.trim().isEmpty ? null : desc.text.trim(),
+    lifeAreaId: lifeAreaId,
   );
   return true;
 }
@@ -520,3 +545,75 @@ Future<bool> _simpleText(
   await onSave(ctrls.map((c) => c.text.trim()).toList());
   return true;
 }
+
+Future<bool> _entityWithLifeAreaForm(
+  BuildContext context, {
+  required String title,
+  required Future<void> Function(String title, String? description, String? lifeAreaId) onSave,
+}) async {
+  final titleCtrl = TextEditingController();
+  final descCtrl = TextEditingController();
+  String? lifeAreaId;
+  final areaRepo = LifeAreaRepository(AppDatabase.instance);
+  await areaRepo.seedDefaultsIfEmpty();
+  final areas = await areaRepo.listActive();
+
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setLocal) => AlertDialog(
+        backgroundColor: AppTheme.metal,
+        title: Text(title, style: const TextStyle(color: AppTheme.silver)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: titleCtrl,
+              autofocus: true,
+              style: const TextStyle(color: AppTheme.silver),
+              decoration: const InputDecoration(labelText: 'Title'),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: descCtrl,
+              style: const TextStyle(color: AppTheme.silver),
+              decoration: const InputDecoration(labelText: 'Description (optional)'),
+            ),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String?>(
+              value: lifeAreaId,
+              dropdownColor: AppTheme.metal,
+              decoration: const InputDecoration(labelText: 'Life area (optional)'),
+              items: [
+                const DropdownMenuItem(value: null, child: Text('None')),
+                ...areas.map(
+                  (a) => DropdownMenuItem(value: a.id, child: Text(a.title)),
+                ),
+              ],
+              onChanged: (v) => setLocal(() => lifeAreaId = v),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              if (titleCtrl.text.trim().isEmpty) return;
+              Navigator.pop(ctx, true);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    ),
+  );
+  if (ok != true) return false;
+  final desc = descCtrl.text.trim();
+  await onSave(
+    titleCtrl.text.trim(),
+    desc.isEmpty ? null : desc,
+    lifeAreaId,
+  );
+  return true;
+}
+
