@@ -60,7 +60,9 @@ jobs:
           gradle-version: "8.3"
 
       - name: Get dependencies
-        run: flutter pub get
+        run: |
+          test -s pubspec.lock
+          flutter pub get --enforce-lockfile
 
       - name: Unit & smoke tests
         run: flutter test --reporter expanded
