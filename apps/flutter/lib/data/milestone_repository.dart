@@ -27,6 +27,7 @@ class MilestoneRepository {
     if (cleanTitle.isEmpty) {
       throw ArgumentError.value(title, 'title', 'Milestone title must not be empty.');
     }
+    late final int position;
     await AtomicWrite.run(
       db: _db,
       state: (txn) async {
@@ -40,7 +41,7 @@ class MilestoneRepository {
           'FROM milestones WHERE project_id = ? AND owner_id = ?',
           [projectId, ownerId],
         );
-        final position = ((rows.first['max_position'] as int?) ?? -1) + 1;
+        position = ((rows.first['max_position'] as int?) ?? -1) + 1;
         await txn.insert('milestones', {
           'id': id,
           'owner_id': ownerId,
@@ -62,8 +63,63 @@ class MilestoneRepository {
       projectId: projectId,
       title: cleanTitle,
       status: MilestoneStatus.planned,
+      position: position,
       createdAt: now,
       updatedAt: now,
+    );
+  }
+
+  /// Rewrite positions for [orderedIds] within [projectId] to 0..n-1.
+  /// Every ID must belong to the project and current owner; the list must be complete.
+  Future<void> reorder({
+    required String projectId,
+    required List<String> orderedIds,
+  }) async {
+    if (orderedIds.isEmpty) {
+      throw ArgumentError.value(orderedIds, 'orderedIds', 'Must not be empty.');
+    }
+    if (orderedIds.toSet().length != orderedIds.length) {
+      throw ArgumentError.value(orderedIds, 'orderedIds', 'Duplicate milestone ids.');
+    }
+    final ownerId = await _db.requireOwnerId();
+    final now = AppDatabase.nowMs();
+    await AtomicWrite.run(
+      db: _db,
+      state: (txn) async {
+        await RelationshipValidator.validateProject(
+          txn,
+          ownerId: ownerId,
+          projectId: projectId,
+        );
+        final existing = await txn.query(
+          'milestones',
+          columns: ['id'],
+          where: 'project_id = ? AND owner_id = ?',
+          whereArgs: [projectId, ownerId],
+        );
+        final existingIds = existing.map((r) => r['id'] as String).toSet();
+        if (existingIds.length != orderedIds.length ||
+            !existingIds.containsAll(orderedIds)) {
+          throw StateError(
+            'orderedIds must list every milestone for project $projectId exactly once.',
+          );
+        }
+        for (var i = 0; i < orderedIds.length; i++) {
+          final changed = await txn.update(
+            'milestones',
+            {'position': i, 'updated_at': now},
+            where: 'id = ? AND project_id = ? AND owner_id = ?',
+            whereArgs: [orderedIds[i], projectId, ownerId],
+          );
+          if (changed != 1) {
+            throw StateError('Failed to reorder milestone ${orderedIds[i]}');
+          }
+        }
+      },
+      eventType: 'MILESTONE_REORDERED',
+      entityType: 'PROJECT',
+      entityId: projectId,
+      occurredAt: now,
     );
   }
 
