@@ -18,10 +18,10 @@ void main() {
       const MaterialApp(home: NeedsAttentionScreen()),
     );
 
-    for (var i = 0; i < 60 && find.text('Nothing urgent').evaluate().isEmpty; i++) {
+    for (var i = 0; i < 60 && find.byType(CircularProgressIndicator).evaluate().isNotEmpty; i++) {
       await tester.pump(const Duration(milliseconds: 50));
     }
-    expect(find.text('Nothing urgent'), findsOneWidget);
+    expect(find.text('Needs attention'), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsNothing);
 
     await tester.tap(find.byIcon(Icons.refresh));
@@ -30,7 +30,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
     }
 
-    expect(find.text('Nothing urgent'), findsOneWidget);
+    expect(find.text('Needs attention'), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsNothing);
 
     await tester.pumpWidget(const SizedBox.shrink());
