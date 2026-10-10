@@ -1,0 +1,62 @@
+name: WaveA fix compile errors
+on:
+  workflow_dispatch:
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: feat/phase-2-milestone-deps-polish
+      - name: Fix AppDataBus calls and project_detail braces
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          from pathlib import Path
+          import re
+
+          pd = Path('apps/flutter/lib/ui/screens/project_detail_screen.dart')
+          src = pd.read_text()
+          src = src.replace(
+              "AppDataBus.instance.publish(['projects', 'tasks']);",
+              "AppDataBus.instance.lifeChanged();",
+          )
+          m = re.search(
+              r"(const Icon\(Icons\.flag, color: AppTheme\.amber\),\s*\],\s*\),\s*\),\s*\),\s*),\s*\),\),\s*)(//[^\n]*Tasks)",
+              src,
+              re.S,
+          )
+          if m:
+              src = src[:m.start(1)] + ');\n                  }),\n\n            ' + m.group(2) + src[m.end(2):]
+          else:
+              # simpler replace of the known bad close
+              src2 = src.replace('                  )),\n\n            // —— Tasks', '                  );\n                  }),\n\n            // —— Tasks', 1)
+              if src2 == src:
+                  src2 = src.replace('                  )),\n\n            // -- Tasks', '                  );\n                  }),\n\n            // -- Tasks', 1)
+              src = src2
+          if 'publish(' in src:
+              raise SystemExit('publish still in project detail')
+          if src.count('{') != src.count('}'):
+              raise SystemExit(f"brace mismatch {{ {src.count('{')} }} {src.count('}')}")
+          pd.write_text(src)
+          print('project_detail ok', src.count('{'))
+
+          td = Path('apps/flutter/lib/ui/screens/task_detail_screen.dart')
+          tsrc = td.read_text()
+          tsrc = tsrc.replace(
+              "AppDataBus.instance.publish(['tasks']);",
+              "AppDataBus.instance.tasksChanged();",
+          )
+          if 'publish(' in tsrc:
+              raise SystemExit('publish still in task detail')
+          td.write_text(tsrc)
+          print('task_detail ok')
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/flutter/lib/ui/screens/project_detail_screen.dart apps/flutter/lib/ui/screens/task_detail_screen.dart
+          git diff --cached --quiet && echo nochange && exit 0
+          git commit -m "fix(phase-2): AppDataBus API + project_detail map brace close"
+          git push origin HEAD:feat/phase-2-milestone-deps-polish
