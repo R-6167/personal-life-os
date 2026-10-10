@@ -7,6 +7,7 @@ import '../../data/habit_repository.dart';
 import '../../data/project_repository.dart';
 import '../../data/task_repository.dart';
 import '../../domain/db_map.dart';
+import '../../services/app_data_bus.dart';
 import '../../services/life_thread.dart';
 import '../theme.dart';
 import '../widgets/glass.dart';
@@ -41,6 +42,28 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
     _load();
   }
 
+  Future<void> _openTaskDetails(String taskId) async {
+    final generationBefore = AppDataBus.instance.generation;
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => TaskDetailScreen(taskId: taskId)),
+    );
+    if (!mounted) return;
+    if (AppDataBus.instance.generation != generationBefore) {
+      await _load();
+    }
+  }
+
+  Future<void> _openProjectDetails(String projectId) async {
+    final generationBefore = AppDataBus.instance.generation;
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => ProjectDetailScreen(projectId: projectId)),
+    );
+    if (!mounted) return;
+    if (AppDataBus.instance.generation != generationBefore) {
+      await _load();
+    }
+  }
+
   Future<void> _load() async {
     final t = await _threadSvc.forGoal(widget.goalId);
     if (!mounted) return;
@@ -71,6 +94,7 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
     );
     if (title == null || title.isEmpty) return;
     await _projectsRepo.create(title: title, goalId: widget.goalId);
+    AppDataBus.instance.lifeChanged();
     await _load();
   }
 
@@ -95,6 +119,7 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
     );
     if (title == null || title.isEmpty) return;
     await _tasksRepo.create(title: title, goalId: widget.goalId);
+    AppDataBus.instance.tasksChanged();
     await _load();
   }
 
@@ -120,6 +145,7 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
     if (title == null || title.isEmpty) return;
     final h = await _habitsRepo.create(title: title);
     await _threadSvc.linkHabitToGoal(goalId: widget.goalId, habitId: h.id);
+    AppDataBus.instance.lifeChanged();
     await _load();
   }
 
@@ -135,6 +161,7 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
       id: widget.goalId,
       targetDate: DateTime(picked.year, picked.month, picked.day).millisecondsSinceEpoch,
     );
+    AppDataBus.instance.lifeChanged();
     await _load();
   }
 
@@ -176,6 +203,7 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
                 if (v == 'task') await _addDirectTask();
                 if (v == 'complete') {
                   await _goals.complete(widget.goalId);
+                  AppDataBus.instance.lifeChanged();
                   if (mounted) Navigator.pop(context);
                 }
               },
@@ -265,12 +293,7 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
                     padding: const EdgeInsets.only(bottom: 6),
                     child: GlassCard(
                       onTap: m.kind == 'TASK'
-                          ? () {
-                              Navigator.of(context)
-                                  .push(MaterialPageRoute(
-                                      builder: (_) => TaskDetailScreen(taskId: m.id)))
-                                  .then((_) => _load());
-                            }
+                          ? () => _openTaskDetails(m.id)
                           : null,
                       child: Row(
                         children: [
@@ -325,18 +348,8 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
             else
               ...t.branches.map((b) => _ProjectTreeCard(
                     branch: b,
-                    onOpen: () {
-                      Navigator.of(context)
-                          .push(MaterialPageRoute(
-                              builder: (_) =>
-                                  ProjectDetailScreen(projectId: dbStr(b.project['id']))))
-                          .then((_) => _load());
-                    },
-                    onOpenTask: (id) {
-                      Navigator.of(context)
-                          .push(MaterialPageRoute(builder: (_) => TaskDetailScreen(taskId: id)))
-                          .then((_) => _load());
-                    },
+                    onOpen: () => _openProjectDetails(dbStr(b.project['id'])),
+                    onOpenTask: (id) => _openTaskDetails(id),
                     onCompleteTask: (id) async {
                       await _tasksRepo.complete(id);
                       await _load();
@@ -355,12 +368,7 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
               ...t.directTasks.map((task) => Padding(
                     padding: const EdgeInsets.only(bottom: 6),
                     child: GlassCard(
-                      onTap: () {
-                        Navigator.of(context)
-                            .push(MaterialPageRoute(
-                                builder: (_) => TaskDetailScreen(taskId: dbStr(task['id']))))
-                            .then((_) => _load());
-                      },
+                      onTap: () => _openTaskDetails(dbStr(task['id'])),
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                       child: ListTile(
                         title:
@@ -422,12 +430,7 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
               ...t.scheduled.map((task) => Padding(
                     padding: const EdgeInsets.only(bottom: 6),
                     child: GlassCard(
-                      onTap: () {
-                        Navigator.of(context)
-                            .push(MaterialPageRoute(
-                                builder: (_) => TaskDetailScreen(taskId: dbStr(task['id']))))
-                            .then((_) => _load());
-                      },
+                      onTap: () => _openTaskDetails(dbStr(task['id'])),
                       child: Text(
                         '${_fmtWhen(task['scheduled_start'] as int?)}  ·  ${dbStr(task['title'])}',
                         style: const TextStyle(color: AppTheme.silver),

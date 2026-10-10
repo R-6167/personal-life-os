@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../services/app_data_bus.dart';
+
 import '../../data/database.dart';
 import '../../data/goal_repository.dart';
 import '../../data/life_area_repository.dart';
@@ -38,6 +40,15 @@ class _LifeAreaDetailScreenState extends State<LifeAreaDetailScreen> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  Future<void> _openAfterMaybeReload(Future<void> Function() open) async {
+    final generationBefore = AppDataBus.instance.generation;
+    await open();
+    if (!mounted) return;
+    if (AppDataBus.instance.generation != generationBefore) {
+      await _load();
+    }
   }
 
   Future<void> _load() async {
@@ -94,14 +105,13 @@ class _LifeAreaDetailScreenState extends State<LifeAreaDetailScreen> {
                               (g) => _tile(
                                 title: g.title,
                                 subtitle: g.status,
-                                onTap: () async {
+                                onTap: () => _openAfterMaybeReload(() async {
                                   await Navigator.of(context).push(
                                     MaterialPageRoute(
                                       builder: (_) =>
                                           GoalDetailScreen(goalId: g.id),
                                     ),
                                   );
-                                  await _load();
                                 },
                               ),
                             )
@@ -115,14 +125,13 @@ class _LifeAreaDetailScreenState extends State<LifeAreaDetailScreen> {
                               (p) => _tile(
                                 title: p.title,
                                 subtitle: p.status,
-                                onTap: () async {
+                                onTap: () => _openAfterMaybeReload(() async {
                                   await Navigator.of(context).push(
                                     MaterialPageRoute(
                                       builder: (_) =>
                                           ProjectDetailScreen(projectId: p.id),
                                     ),
                                   );
-                                  await _load();
                                 },
                               ),
                             )
@@ -136,14 +145,13 @@ class _LifeAreaDetailScreenState extends State<LifeAreaDetailScreen> {
                               (t) => _tile(
                                 title: t.title,
                                 subtitle: t.status,
-                                onTap: () async {
+                                onTap: () => _openAfterMaybeReload(() async {
                                   await Navigator.of(context).push(
                                     MaterialPageRoute(
                                       builder: (_) =>
                                           TaskDetailScreen(taskId: t.id),
                                     ),
                                   );
-                                  await _load();
                                 },
                               ),
                             )

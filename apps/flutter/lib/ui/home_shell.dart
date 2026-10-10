@@ -295,17 +295,17 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   Future<void> _openAssistant() async {
+    final generationBefore = AppDataBus.instance.generation;
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const AssistantScreen()),
     );
-    // Assistant may have created/completed tasks, notes, bills — bus also fires,
-    // but ensure tasks+today refresh when returning.
-    await _reload(domains: {
-      DataDomain.tasks,
-      DataDomain.life,
-      DataDomain.finance,
-      DataDomain.today,
-    });
+    if (!mounted) return;
+    if (AppDataBus.instance.generation == generationBefore) return;
+    final dirty = AppDataBus.instance.takeDirty();
+    final domains = dirty.isEmpty
+        ? {DataDomain.tasks, DataDomain.life, DataDomain.finance, DataDomain.today}
+        : dirty;
+    await _reload(domains: domains);
   }
 
   Future<void> _openSettings() async {
