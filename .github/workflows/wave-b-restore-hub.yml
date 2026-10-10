@@ -9,75 +9,169 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: feat/phase-3-life-area-wiring
-      - name: Fix models and life_hub
+          ref: feat/phase-3-life-area-pickers
+      - name: Add life area pickers to create forms
         run: |
           set -euo pipefail
           python3 << 'PY'
           from pathlib import Path
-          import urllib.request
 
-          mp = Path('apps/flutter/lib/domain/models.dart')
-          m = mp.read_text()
-          # Remove duplicate lifeAreaId line in Project.fromMap
-          m = m.replace(
-              "lifeAreaId: dbStrOrNull(m['life_area_id']),\n        title: dbStr(m['title']),\n        status: dbStr(m['status'], 'ACTIVE'),\n        priority: dbIntOr(m['priority']),\n        lifeAreaId: dbStrOrNull(m['life_area_id']),\n",
-              "title: dbStr(m['title']),\n        status: dbStr(m['status'], 'ACTIVE'),\n        priority: dbIntOr(m['priority']),\n        lifeAreaId: dbStrOrNull(m['life_area_id']),\n",
-              1,
-          )
-          # Task.fromMap missing lifeAreaId
-          if "goalId: dbStrOrNull(m['goal_id']),\n        lifeAreaId: dbStrOrNull(m['life_area_id']),\n        title: dbStr(m['title'])," not in m:
-              m = m.replace(
-                  "projectId: dbStrOrNull(m['project_id']),\n        goalId: dbStrOrNull(m['goal_id']),\n        title: dbStr(m['title']),",
-                  "projectId: dbStrOrNull(m['project_id']),\n        goalId: dbStrOrNull(m['goal_id']),\n        lifeAreaId: dbStrOrNull(m['life_area_id']),\n        title: dbStr(m['title']),",
+          p = Path('apps/flutter/lib/ui/forms/create_forms.dart')
+          s = p.read_text()
+
+          if 'life_area_repository.dart' not in s:
+              s = s.replace(
+                  "import '../../data/goal_repository.dart';",
+                  "import '../../data/goal_repository.dart';\nimport '../../data/life_area_repository.dart';",
+              )
+
+          old = """    case AddKind.project:
+      return _simpleText(
+        context,
+        title: 'New project',
+        fields: const ['Title', 'Description (optional)'],
+        onSave: (v) async {
+          await ProjectRepository(AppDatabase.instance).create(title: v[0]);
+        },
+      );
+    case AddKind.goal:
+      return _simpleText(
+        context,
+        title: 'New goal',
+        fields: const ['Title', 'Description (optional)'],
+        onSave: (v) async {
+          await GoalRepository(AppDatabase.instance).create(title: v[0]);
+        },
+      );"""
+          new = """    case AddKind.project:
+      return _entityWithLifeAreaForm(
+        context,
+        title: 'New project',
+        onSave: (title, description, lifeAreaId) async {
+          await ProjectRepository(AppDatabase.instance).create(
+            title: title,
+            description: description,
+            lifeAreaId: lifeAreaId,
+          );
+        },
+      );
+    case AddKind.goal:
+      return _entityWithLifeAreaForm(
+        context,
+        title: 'New goal',
+        onSave: (title, description, lifeAreaId) async {
+          await GoalRepository(AppDatabase.instance).create(
+            title: title,
+            description: description,
+            lifeAreaId: lifeAreaId,
+          );
+        },
+      );"""
+          if old in s:
+              s = s.replace(old, new, 1)
+              print('goal/project cases replaced')
+          else:
+              print('goal/project cases already updated or not found')
+
+          if "String? lifeAreaId;\n  final areaRepo = LifeAreaRepository" not in s:
+              s = s.replace(
+                  "Future<bool> _taskForm(BuildContext context) async {\n  final title = TextEditingController();\n  final desc = TextEditingController();\n  var priority = 0;\n  DateTime? due;",
+                  "Future<bool> _taskForm(BuildContext context) async {\n  final title = TextEditingController();\n  final desc = TextEditingController();\n  var priority = 0;\n  DateTime? due;\n  String? lifeAreaId;\n  final areaRepo = LifeAreaRepository(AppDatabase.instance);\n  await areaRepo.seedDefaultsIfEmpty();\n  final areas = await areaRepo.listActive();",
+              )
+              s = s.replace(
+                  "              DropdownButtonFormField<int>(\n                value: priority,\n                dropdownColor: AppTheme.metal,\n                decoration: const InputDecoration(labelText: 'Priority'),",
+                  "              DropdownButtonFormField<String?>(\n                value: lifeAreaId,\n                dropdownColor: AppTheme.metal,\n                decoration: const InputDecoration(labelText: 'Life area (optional)'),\n                items: [\n                  const DropdownMenuItem(value: null, child: Text('None')),\n                  ...areas.map(\n                    (a) => DropdownMenuItem(value: a.id, child: Text(a.title)),\n                  ),\n                ],\n                onChanged: (v) => setLocal(() => lifeAreaId = v),\n              ),\n              const SizedBox(height: 8),\n              DropdownButtonFormField<int>(\n                value: priority,\n                dropdownColor: AppTheme.metal,\n                decoration: const InputDecoration(labelText: 'Priority'),",
                   1,
               )
-          mp.write_text(m)
-          proj = m.split('class Project')[1].split('class Milestone')[0]
-          assert proj.count("lifeAreaId: dbStrOrNull") == 1
-          print('models ok')
-
-          hub = Path('apps/flutter/lib/ui/hubs/life_hub.dart')
-          hs = urllib.request.urlopen(
-              'https://raw.githubusercontent.com/R-6167/personal-life-os/main/apps/flutter/lib/ui/hubs/life_hub.dart'
-          ).read().decode()
-          if "import '../screens/life_areas_screen.dart';" not in hs:
-              hs = hs.replace(
-                  "import '../screens/wellness_screen.dart';",
-                  "import '../screens/life_areas_screen.dart';\nimport '../screens/wellness_screen.dart';",
-              )
-          if 'Icons.category_outlined' not in hs:
-              card = (
-                  "        _navCard(\n"
-                  "          icon: Icons.category_outlined,\n"
-                  "          title: 'Life areas',\n"
-                  "          subtitle: 'Configure domains of life',\n"
-                  "          onTap: () {\n"
-                  "            Navigator.of(context).push(\n"
-                  "              MaterialPageRoute(builder: (_) => const LifeAreasScreen()),\n"
-                  "            );\n"
-                  "          },\n"
-                  "        ),\n"
-              )
-              marker = (
-                  "      children: [\n"
-                  "        _navCard(\n"
-                  "          icon: Icons.priority_high,"
-              )
-              assert marker in hs, 'marker missing'
-              hs = hs.replace(
-                  marker,
-                  "      children: [\n" + card + "        _navCard(\n          icon: Icons.priority_high,",
+              s = s.replace(
+                  "  await TaskRepository(AppDatabase.instance).create(\n    title: title.text.trim(),\n    dueAt: dueMs,\n    priority: priority,\n    description: desc.text.trim().isEmpty ? null : desc.text.trim(),\n  );",
+                  "  await TaskRepository(AppDatabase.instance).create(\n    title: title.text.trim(),\n    dueAt: dueMs,\n    priority: priority,\n    description: desc.text.trim().isEmpty ? null : desc.text.trim(),\n    lifeAreaId: lifeAreaId,\n  );",
                   1,
               )
-          assert hs.count('Widget _navCard(') == 1
-          assert 'Icons.category_outlined' in hs
-          hub.write_text(hs)
-          print('hub ok')
+              print('task form patched')
+
+          if '_entityWithLifeAreaForm' not in s:
+              s += '''
+
+Future<bool> _entityWithLifeAreaForm(
+  BuildContext context, {
+  required String title,
+  required Future<void> Function(String title, String? description, String? lifeAreaId) onSave,
+}) async {
+  final titleCtrl = TextEditingController();
+  final descCtrl = TextEditingController();
+  String? lifeAreaId;
+  final areaRepo = LifeAreaRepository(AppDatabase.instance);
+  await areaRepo.seedDefaultsIfEmpty();
+  final areas = await areaRepo.listActive();
+
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setLocal) => AlertDialog(
+        backgroundColor: AppTheme.metal,
+        title: Text(title, style: const TextStyle(color: AppTheme.silver)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: titleCtrl,
+              autofocus: true,
+              style: const TextStyle(color: AppTheme.silver),
+              decoration: const InputDecoration(labelText: 'Title'),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: descCtrl,
+              style: const TextStyle(color: AppTheme.silver),
+              decoration: const InputDecoration(labelText: 'Description (optional)'),
+            ),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String?>(
+              value: lifeAreaId,
+              dropdownColor: AppTheme.metal,
+              decoration: const InputDecoration(labelText: 'Life area (optional)'),
+              items: [
+                const DropdownMenuItem(value: null, child: Text('None')),
+                ...areas.map(
+                  (a) => DropdownMenuItem(value: a.id, child: Text(a.title)),
+                ),
+              ],
+              onChanged: (v) => setLocal(() => lifeAreaId = v),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              if (titleCtrl.text.trim().isEmpty) return;
+              Navigator.pop(ctx, true);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    ),
+  );
+  if (ok != true) return false;
+  final desc = descCtrl.text.trim();
+  await onSave(
+    titleCtrl.text.trim(),
+    desc.isEmpty ? null : desc,
+    lifeAreaId,
+  );
+  return true;
+}
+'''
+              print('helper appended')
+
+          p.write_text(s)
+          print('done')
           PY
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add apps/flutter/lib/domain/models.dart apps/flutter/lib/ui/hubs/life_hub.dart
+          git add apps/flutter/lib/ui/forms/create_forms.dart
           git diff --cached --stat
-          git commit -m "fix(phase-3): models lifeAreaId dup + restore LifeHub nav card" || echo nochange
-          git push origin HEAD:feat/phase-3-life-area-wiring
+          git commit -m "feat(phase-3): life area picker on goal/project/task create" || echo nochange
+          git push origin HEAD:feat/phase-3-life-area-pickers
