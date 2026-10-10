@@ -2,7 +2,7 @@ name: WaveB restore hub and models
 on:
   workflow_dispatch:
 jobs:
-  patch:
+  fix:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -10,124 +10,74 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: feat/phase-3-life-area-wiring
-      - name: Restore and patch
+      - name: Fix models and life_hub
         run: |
           set -euo pipefail
-          python3 -c "
+          python3 << 'PY'
           from pathlib import Path
           import urllib.request
-          hub = Path('apps/flutter/lib/ui/hubs/life_hub.dart')
-          hs = urllib.request.urlopen('https://raw.githubusercontent.com/R-6167/personal-life-os/main/apps/flutter/lib/ui/hubs/life_hub.dart').read().decode()
-          assert 'PLACEHOLDER' not in hs
-          if 'LifeAreasScreen' not in hs:
-              hs = hs.replace(\"import '../screens/wellness_screen.dart';\", \"import '../screens/life_areas_screen.dart';\\nimport '../screens/wellness_screen.dart';\")
-              insert = '''_navCard(
-            icon: Icons.category_outlined,
-            title: 'Life areas',
-            subtitle: 'Configure domains of life',
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const LifeAreasScreen()),
-              );
-            },
-          ),
-          '''
-              idx = hs.find('icon: Icons.spa')
-              idx = hs.rfind('_navCard(', 0, idx) if idx >= 0 else hs.find('_navCard(')
-              assert idx >= 0
-              hs = hs[:idx] + insert + hs[idx:]
-          hub.write_text(hs)
-          print('hub', len(hs))
-
-          # goal create param
-          gp = Path('apps/flutter/lib/data/goal_repository.dart')
-          g = gp.read_text()
-          if 'lifeAreaId' not in g:
-              g = g.replace('int priority = 0}) async {', 'int priority = 0, String? lifeAreaId}) async {')
-              g = g.replace('priority: priority,\n      createdAt: now,', 'priority: priority,\n      lifeAreaId: lifeAreaId,\n      createdAt: now,', 1)
-              gp.write_text(g)
-              print('goal')
-
-          pp = Path('apps/flutter/lib/data/project_repository.dart')
-          p = pp.read_text()
-          if 'lifeAreaId' not in p:
-              p = p.replace('String? goalId}) async {', 'String? goalId, String? lifeAreaId}) async {')
-              p = p.replace('status: EntityStatus.active,\n      createdAt: now,', 'status: EntityStatus.active,\n      lifeAreaId: lifeAreaId,\n      createdAt: now,', 1)
-              pp.write_text(p)
-              print('project')
-
-          tp = Path('apps/flutter/lib/data/task_repository.dart')
-          t = tp.read_text()
-          if 'String? lifeAreaId' not in t:
-              t = t.replace('String? parentTaskId,\n    String? assistantActionPreview,', 'String? parentTaskId,\n    String? lifeAreaId,\n    String? assistantActionPreview,')
-              t = t.replace('goalId: goalId,\n      title: title,\n      status: status,', 'goalId: goalId,\n      lifeAreaId: lifeAreaId,\n      title: title,\n      status: status,', 1)
-              tp.write_text(t)
-              print('task')
 
           mp = Path('apps/flutter/lib/domain/models.dart')
           m = mp.read_text()
-          if m.count('lifeAreaId') < 3:
+          # Remove duplicate lifeAreaId line in Project.fromMap
+          m = m.replace(
+              "lifeAreaId: dbStrOrNull(m['life_area_id']),\n        title: dbStr(m['title']),\n        status: dbStr(m['status'], 'ACTIVE'),\n        priority: dbIntOr(m['priority']),\n        lifeAreaId: dbStrOrNull(m['life_area_id']),\n",
+              "title: dbStr(m['title']),\n        status: dbStr(m['status'], 'ACTIVE'),\n        priority: dbIntOr(m['priority']),\n        lifeAreaId: dbStrOrNull(m['life_area_id']),\n",
+              1,
+          )
+          # Task.fromMap missing lifeAreaId
+          if "goalId: dbStrOrNull(m['goal_id']),\n        lifeAreaId: dbStrOrNull(m['life_area_id']),\n        title: dbStr(m['title'])," not in m:
               m = m.replace(
-                  '  final int priority;\n  final int createdAt;\n  final int updatedAt;\n\n  const Goal({',
-                  '  final int priority;\n  final String? lifeAreaId;\n  final int createdAt;\n  final int updatedAt;\n\n  const Goal({',
+                  "projectId: dbStrOrNull(m['project_id']),\n        goalId: dbStrOrNull(m['goal_id']),\n        title: dbStr(m['title']),",
+                  "projectId: dbStrOrNull(m['project_id']),\n        goalId: dbStrOrNull(m['goal_id']),\n        lifeAreaId: dbStrOrNull(m['life_area_id']),\n        title: dbStr(m['title']),",
                   1,
               )
-              m = m.replace(
-                  '    this.priority = 0,\n    required this.createdAt,\n    required this.updatedAt,\n  });\n\n  factory Goal.fromMap',
-                  '    this.priority = 0,\n    this.lifeAreaId,\n    required this.createdAt,\n    required this.updatedAt,\n  });\n\n  factory Goal.fromMap',
+          mp.write_text(m)
+          proj = m.split('class Project')[1].split('class Milestone')[0]
+          assert proj.count("lifeAreaId: dbStrOrNull") == 1
+          print('models ok')
+
+          hub = Path('apps/flutter/lib/ui/hubs/life_hub.dart')
+          hs = urllib.request.urlopen(
+              'https://raw.githubusercontent.com/R-6167/personal-life-os/main/apps/flutter/lib/ui/hubs/life_hub.dart'
+          ).read().decode()
+          if "import '../screens/life_areas_screen.dart';" not in hs:
+              hs = hs.replace(
+                  "import '../screens/wellness_screen.dart';",
+                  "import '../screens/life_areas_screen.dart';\nimport '../screens/wellness_screen.dart';",
+              )
+          if 'Icons.category_outlined' not in hs:
+              card = (
+                  "        _navCard(\n"
+                  "          icon: Icons.category_outlined,\n"
+                  "          title: 'Life areas',\n"
+                  "          subtitle: 'Configure domains of life',\n"
+                  "          onTap: () {\n"
+                  "            Navigator.of(context).push(\n"
+                  "              MaterialPageRoute(builder: (_) => const LifeAreasScreen()),\n"
+                  "            );\n"
+                  "          },\n"
+                  "        ),\n"
+              )
+              marker = (
+                  "      children: [\n"
+                  "        _navCard(\n"
+                  "          icon: Icons.priority_high,"
+              )
+              assert marker in hs, 'marker missing'
+              hs = hs.replace(
+                  marker,
+                  "      children: [\n" + card + "        _navCard(\n          icon: Icons.priority_high,",
                   1,
               )
-              m = m.replace(
-                  \"priority: dbIntOr(m['priority']),\\n        createdAt: dbIntOr(m['created_at']),\\n        updatedAt: dbIntOr(m['updated_at']),\\n      );\\n\\n  /// Columns that exist in schema.sql only.\",
-                  \"priority: dbIntOr(m['priority']),\\n        lifeAreaId: dbStrOrNull(m['life_area_id']),\\n        createdAt: dbIntOr(m['created_at']),\\n        updatedAt: dbIntOr(m['updated_at']),\\n      );\\n\\n  /// Columns that exist in schema.sql only.\",
-                  1,
-              )
-              m = m.replace(
-                  \"'status': status,\\n        'created_at': createdAt,\\n        'updated_at': updatedAt,\\n      };\\n}\\n\\nclass Project\",
-                  \"'status': status,\\n        'life_area_id': lifeAreaId,\\n        'created_at': createdAt,\\n        'updated_at': updatedAt,\\n      };\\n}\\n\\nclass Project\",
-                  1,
-              )
-              m = m.replace(
-                  '  final int priority;\n  final int createdAt;\n  final int updatedAt;\n\n  const Project({',
-                  '  final int priority;\n  final String? lifeAreaId;\n  final int createdAt;\n  final int updatedAt;\n\n  const Project({',
-                  1,
-              )
-              m = m.replace(
-                  '    this.priority = 0,\n    required this.createdAt,\n    required this.updatedAt,\n  });\n\n  factory Project.fromMap',
-                  '    this.priority = 0,\n    this.lifeAreaId,\n    required this.createdAt,\n    required this.updatedAt,\n  });\n\n  factory Project.fromMap',
-                  1,
-              )
-              m = m.replace(
-                  \"goalId: dbStrOrNull(m['goal_id']),\\n        title: dbStr(m['title']),\\n        status: dbStr(m['status'], 'ACTIVE'),\\n        priority: dbIntOr(m['priority']),\\n        createdAt: dbIntOr(m['created_at']),\\n        updatedAt: dbIntOr(m['updated_at']),\\n      );\\n\\n  Map<String, Object?> toInsertMap() => {\\n        'id': id,\\n        'owner_id': ownerId,\\n        'goal_id': goalId,\\n        'title': title,\\n        'status': status,\\n        'created_at': createdAt,\\n        'updated_at': updatedAt,\\n      };\\n}\\n\\nclass Milestone\",
-                  \"goalId: dbStrOrNull(m['goal_id']),\\n        title: dbStr(m['title']),\\n        status: dbStr(m['status'], 'ACTIVE'),\\n        priority: dbIntOr(m['priority']),\\n        lifeAreaId: dbStrOrNull(m['life_area_id']),\\n        createdAt: dbIntOr(m['created_at']),\\n        updatedAt: dbIntOr(m['updated_at']),\\n      );\\n\\n  Map<String, Object?> toInsertMap() => {\\n        'id': id,\\n        'owner_id': ownerId,\\n        'goal_id': goalId,\\n        'title': title,\\n        'status': status,\\n        'life_area_id': lifeAreaId,\\n        'created_at': createdAt,\\n        'updated_at': updatedAt,\\n      };\\n}\\n\\nclass Milestone\",
-                  1,
-              )
-              m = m.replace(
-                  '  final String? projectId;\n  final String? goalId;\n  final String title;',
-                  '  final String? projectId;\n  final String? goalId;\n  final String? lifeAreaId;\n  final String title;',
-                  1,
-              )
-              m = m.replace(
-                  '    this.projectId,\n    this.goalId,\n    required this.title,',
-                  '    this.projectId,\n    this.goalId,\n    this.lifeAreaId,\n    required this.title,',
-                  1,
-              )
-              m = m.replace(
-                  \"goalId: dbStrOrNull(m['goal_id']),\\n        title: dbStr(m['title']),\",
-                  \"goalId: dbStrOrNull(m['goal_id']),\\n        lifeAreaId: dbStrOrNull(m['life_area_id']),\\n        title: dbStr(m['title']),\",
-                  1,
-              )
-              m = m.replace(
-                  \"'goal_id': goalId,\\n        'title': title,\\n        'status': status,\\n        'priority': priority,\",
-                  \"'goal_id': goalId,\\n        'life_area_id': lifeAreaId,\\n        'title': title,\\n        'status': status,\\n        'priority': priority,\",
-                  1,
-              )
-              mp.write_text(m)
-              print('models', m.count('lifeAreaId'))
-          "
+          assert hs.count('Widget _navCard(') == 1
+          assert 'Icons.category_outlined' in hs
+          hub.write_text(hs)
+          print('hub ok')
+          PY
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git diff --cached --quiet && echo nochange && exit 0
-          git commit -m "feat(phase-3): restore LifeHub + wire lifeAreaId on models and repos"
+          git add apps/flutter/lib/domain/models.dart apps/flutter/lib/ui/hubs/life_hub.dart
+          git diff --cached --stat
+          git commit -m "fix(phase-3): models lifeAreaId dup + restore LifeHub nav card" || echo nochange
           git push origin HEAD:feat/phase-3-life-area-wiring
