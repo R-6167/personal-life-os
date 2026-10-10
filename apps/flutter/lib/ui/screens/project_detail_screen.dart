@@ -42,6 +42,17 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
     _load();
   }
 
+  Future<void> _openGoalDetails(String goalId) async {
+    final generationBefore = AppDataBus.instance.generation;
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => GoalDetailScreen(goalId: goalId)),
+    );
+    if (!mounted) return;
+    if (AppDataBus.instance.generation != generationBefore) {
+      await _load();
+    }
+  }
+
   Future<void> _openTaskDetails(String taskId) async {
     final generationBefore = AppDataBus.instance.generation;
     await Navigator.of(context).push(
@@ -450,9 +461,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
               const SizedBox(height: 10),
               GlassCard(
                 onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => GoalDetailScreen(goalId: goalId)),
-                  );
+                  _openGoalDetails(goalId);
                 },
                 child: Row(
                   children: [
