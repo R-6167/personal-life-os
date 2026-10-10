@@ -50,7 +50,11 @@ class _HabitDetailScreenState extends State<HabitDetailScreen> {
 
   Future<void> _setFreq(String freq) async {
     await _repo.setSchedule(habitId: widget.habitId, frequency: freq);
-    await _load();
+    final schedule = await _repo.scheduleOf(widget.habitId);
+    if (!mounted) return;
+    // A schedule chip only changes the schedule. Keep the current screen and
+    // scroll position mounted instead of reloading unrelated habit history.
+    setState(() => _schedule = schedule);
   }
 
   @override
