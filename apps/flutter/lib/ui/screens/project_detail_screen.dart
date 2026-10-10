@@ -248,7 +248,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
     ids[next] = tmp;
     try {
       await _milestonesRepo.reorder(projectId: widget.projectId, orderedIds: ids);
-      AppDataBus.instance.publish(['projects', 'tasks']);
+      AppDataBus.instance.lifeChanged();
       await _load();
     } catch (e) {
       if (!mounted) return;
@@ -528,7 +528,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                         ),
                       ),
                     ),
-                  )),
+                  );
+                  }),
 
             // —— Tasks + subtasks ——
             const SizedBox(height: 12),

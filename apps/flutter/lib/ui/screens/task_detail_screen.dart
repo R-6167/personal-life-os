@@ -447,7 +447,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
     if (chosen == null) return;
     try {
       await _tasks.addDependency(taskId: widget.taskId, dependsOnTaskId: chosen.id);
-      AppDataBus.instance.publish(['tasks']);
+      AppDataBus.instance.tasksChanged();
       await _load();
     } catch (e) {
       if (!mounted) return;
@@ -460,7 +460,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
   Future<void> _removeDependency(String dependsOnTaskId) async {
     try {
       await _tasks.removeDependency(taskId: widget.taskId, dependsOnTaskId: dependsOnTaskId);
-      AppDataBus.instance.publish(['tasks']);
+      AppDataBus.instance.tasksChanged();
       await _load();
     } catch (e) {
       if (!mounted) return;
