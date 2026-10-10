@@ -287,10 +287,11 @@ class _HomeShellState extends State<HomeShell> {
       _reload(domains: {DataDomain.tasks, DataDomain.today});
 
   Future<void> _openTask(Task t) async {
+    // TaskDetailScreen publishes task mutations through AppDataBus. Merely
+    // viewing a task should not reload the Tasks/Today feeds on return.
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => TaskDetailScreen(taskId: t.id)),
     );
-    await _reloadTasks();
   }
 
   Future<void> _openAssistant() async {
