@@ -32,8 +32,15 @@ jobs:
       - name: Flutter version
         run: flutter --version
 
+      # Prefer lockfile when present (commit apps/flutter/pubspec.lock to clear Sonar S4790).
       - name: Get dependencies
-        run: flutter pub get
+        run: |
+          if [ -f pubspec.lock ]; then
+            flutter pub get --enforce-lockfile
+          else
+            echo "::warning::pubspec.lock missing — run flutter pub get locally and commit the lockfile"
+            flutter pub get
+          fi
 
       - name: Unit, smoke & integration tests
         run: flutter test --reporter expanded
