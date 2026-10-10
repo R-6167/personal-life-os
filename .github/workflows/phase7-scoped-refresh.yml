@@ -9,14 +9,10 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: fix/phase-7-refresh-v2
-      - name: Apply phase-7 fixes and remove temp workflows
+          ref: fix/phase-7-refresh-v3
+      - name: Dart-only phase-7 scoped navigation
         run: |
           set -euo pipefail
-          cd .github/workflows
-          rm -f wave-a-*.yml wave-b-*.yml cleanup-temp-workflows.yml phase7-scoped-refresh.yml
-          ls -la
-          cd ../..
           python3 << 'PY'
           from pathlib import Path
 
@@ -43,7 +39,7 @@ jobs:
               hs.write_text(s.replace(old_hs, repl_hs, 1))
               print('home_shell fixed')
           else:
-              print('home_shell already ok or pattern missing')
+              print('home_shell skip')
 
           pd = Path('apps/flutter/lib/ui/screens/project_detail_screen.dart')
           t = pd.read_text()
@@ -52,7 +48,6 @@ jobs:
                   "import '../../services/project_workspace.dart';",
                   "import '../../services/app_data_bus.dart';\nimport '../../services/project_workspace.dart';",
               )
-
           if '_openTaskDetails' not in t:
               helpers = (
                   "  Future<void> _openGoalDetails(String goalId) async {\n"
@@ -64,8 +59,7 @@ jobs:
                   "    if (AppDataBus.instance.generation != generationBefore) {\n"
                   "      await _load();\n"
                   "    }\n"
-                  "  }\n"
-                  "\n"
+                  "  }\n\n"
                   "  Future<void> _openTaskDetails(String taskId) async {\n"
                   "    final generationBefore = AppDataBus.instance.generation;\n"
                   "    await Navigator.of(context).push(\n"
@@ -75,13 +69,11 @@ jobs:
                   "    if (AppDataBus.instance.generation != generationBefore) {\n"
                   "      await _load();\n"
                   "    }\n"
-                  "  }\n"
-                  "\n"
+                  "  }\n\n"
               )
               t = t.replace('  Future<void> _load() async {', helpers + '  Future<void> _load() async {', 1)
-              print('helpers inserted')
 
-          replacements = [
+          for old, repl in [
               (
                   "                          onPressed: () {\n"
                   "                            Navigator.of(context)\n"
@@ -127,21 +119,15 @@ jobs:
                   "                      },",
                   "                      onTap: () => _openTaskDetails(dbStr(t['id'])),",
               ),
-          ]
-          for old, repl in replacements:
+          ]:
               if old in t:
                   t = t.replace(old, repl, 1)
-                  print('replaced nav')
-              else:
-                  print('nav block skip')
-
+                  print('nav ok')
           pd.write_text(t)
-          print('then_load', t.count('.then((_) => _load())'))
-          print('openTask', t.count('_openTaskDetails'))
+          print('done', t.count('_openTaskDetails'), t.count('.then((_) => _load())'))
           PY
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git status
-          git commit -m "fix(phase-7): scoped refresh + remove temp workflows" || echo nochange
-          git push origin HEAD:fix/phase-7-refresh-v2
+          git add apps/flutter/lib/ui/home_shell.dart apps/flutter/lib/ui/screens/project_detail_screen.dart
+          git commit -m "fix(phase-7): generation-gated project/task navigation" || echo nochange
+          git push origin HEAD:fix/phase-7-refresh-v3
