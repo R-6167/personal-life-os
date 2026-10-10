@@ -10,27 +10,97 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: feat/phase-3-life-area-pickers
-      - name: Append helper via heredoc file
+      - name: Write and append helper
         run: |
           set -euo pipefail
-          python3 -c '
+          cat > /tmp/helper.dart << 'HELPER'
+          Future<bool> _entityWithLifeAreaForm(
+            BuildContext context, {
+            required String title,
+            required Future<void> Function(String title, String? description, String? lifeAreaId) onSave,
+          }) async {
+            final titleCtrl = TextEditingController();
+            final descCtrl = TextEditingController();
+            String? lifeAreaId;
+            final areaRepo = LifeAreaRepository(AppDatabase.instance);
+            await areaRepo.seedDefaultsIfEmpty();
+            final areas = await areaRepo.listActive();
+
+            final ok = await showDialog<bool>(
+              context: context,
+              builder: (ctx) => StatefulBuilder(
+                builder: (ctx, setLocal) => AlertDialog(
+                  backgroundColor: AppTheme.metal,
+                  title: Text(title, style: const TextStyle(color: AppTheme.silver)),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextField(
+                        controller: titleCtrl,
+                        autofocus: true,
+                        style: const TextStyle(color: AppTheme.silver),
+                        decoration: const InputDecoration(labelText: 'Title'),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: descCtrl,
+                        style: const TextStyle(color: AppTheme.silver),
+                        decoration: const InputDecoration(labelText: 'Description (optional)'),
+                      ),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<String?>(
+                        value: lifeAreaId,
+                        dropdownColor: AppTheme.metal,
+                        decoration: const InputDecoration(labelText: 'Life area (optional)'),
+                        items: [
+                          const DropdownMenuItem(value: null, child: Text('None')),
+                          ...areas.map(
+                            (a) => DropdownMenuItem(value: a.id, child: Text(a.title)),
+                          ),
+                        ],
+                        onChanged: (v) => setLocal(() => lifeAreaId = v),
+                      ),
+                    ],
+                  ),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                    FilledButton(
+                      onPressed: () {
+                        if (titleCtrl.text.trim().isEmpty) return;
+                        Navigator.pop(ctx, true);
+                      },
+                      child: const Text('Save'),
+                    ),
+                  ],
+                ),
+              ),
+            );
+            if (ok != true) return false;
+            final desc = descCtrl.text.trim();
+            await onSave(
+              titleCtrl.text.trim(),
+              desc.isEmpty ? null : desc,
+              lifeAreaId,
+            );
+            return true;
+          }
+          HELPER
+          # dedent helper (strip 2-space indent from cat)
+          python3 -c "
           from pathlib import Path
-          p = Path("apps/flutter/lib/ui/forms/create_forms.dart")
+          import textwrap
+          helper = textwrap.dedent(Path('/tmp/helper.dart').read_text())
+          p = Path('apps/flutter/lib/ui/forms/create_forms.dart')
           s = p.read_text()
-          if "Future<bool> _entityWithLifeAreaForm(" in s:
-              print("already")
+          if 'Future<bool> _entityWithLifeAreaForm(' in s:
+              print('already defined')
           else:
-              helper = Path("/tmp/helper.dart").read_text()
-              p.write_text(s + "\n" + helper)
-              print("appended", len(helper))
-          assert "Future<bool> _entityWithLifeAreaForm(" in p.read_text()
-          '
+              p.write_text(s.rstrip() + '\n\n' + helper + '\n')
+              print('appended')
+          assert 'Future<bool> _entityWithLifeAreaForm(' in p.read_text()
+          "
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add apps/flutter/lib/ui/forms/create_forms.dart
           git commit -m "fix(phase-3): define _entityWithLifeAreaForm helper" || echo nochange
           git push origin HEAD:feat/phase-3-life-area-pickers
-        # Write helper file before python step needs it - use prior step
-      - name: Write helper snippet
-        if: false
-        run: echo skip
