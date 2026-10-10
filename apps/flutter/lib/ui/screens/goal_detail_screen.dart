@@ -7,6 +7,7 @@ import '../../data/habit_repository.dart';
 import '../../data/project_repository.dart';
 import '../../data/task_repository.dart';
 import '../../domain/db_map.dart';
+import '../../services/app_data_bus.dart';
 import '../../services/life_thread.dart';
 import '../theme.dart';
 import '../widgets/glass.dart';
@@ -71,6 +72,7 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
     );
     if (title == null || title.isEmpty) return;
     await _projectsRepo.create(title: title, goalId: widget.goalId);
+    AppDataBus.instance.lifeChanged();
     await _load();
   }
 
@@ -95,6 +97,12 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
     );
     if (title == null || title.isEmpty) return;
     await _tasksRepo.create(title: title, goalId: widget.goalId);
+    AppDataBus.instance.notifyDomains({
+      DataDomain.tasks,
+      DataDomain.life,
+      DataDomain.today,
+      DataDomain.timeline,
+    });
     await _load();
   }
 
@@ -120,6 +128,7 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
     if (title == null || title.isEmpty) return;
     final h = await _habitsRepo.create(title: title);
     await _threadSvc.linkHabitToGoal(goalId: widget.goalId, habitId: h.id);
+    AppDataBus.instance.lifeChanged();
     await _load();
   }
 
@@ -135,6 +144,7 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
       id: widget.goalId,
       targetDate: DateTime(picked.year, picked.month, picked.day).millisecondsSinceEpoch,
     );
+    AppDataBus.instance.lifeChanged();
     await _load();
   }
 
@@ -176,6 +186,7 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
                 if (v == 'task') await _addDirectTask();
                 if (v == 'complete') {
                   await _goals.complete(widget.goalId);
+                  AppDataBus.instance.lifeChanged();
                   if (mounted) Navigator.pop(context);
                 }
               },

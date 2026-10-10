@@ -6,6 +6,7 @@ import '../../data/milestone_repository.dart';
 import '../../data/project_repository.dart';
 import '../../data/task_repository.dart';
 import '../../domain/db_map.dart';
+import '../../services/app_data_bus.dart';
 import '../../services/project_workspace.dart';
 import '../theme.dart';
 import '../widgets/glass.dart';
@@ -39,6 +40,28 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  Future<void> _openGoalDetails(String goalId) async {
+    final generationBefore = AppDataBus.instance.generation;
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => GoalDetailScreen(goalId: goalId)),
+    );
+    if (!mounted) return;
+    if (AppDataBus.instance.generation != generationBefore) {
+      await _load();
+    }
+  }
+
+  Future<void> _openTaskDetails(String taskId) async {
+    final generationBefore = AppDataBus.instance.generation;
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => TaskDetailScreen(taskId: taskId)),
+    );
+    if (!mounted) return;
+    if (AppDataBus.instance.generation != generationBefore) {
+      await _load();
+    }
   }
 
   Future<void> _load() async {
@@ -111,6 +134,12 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
       parentTaskId: parentTaskId,
     );
     HapticFeedback.lightImpact();
+    AppDataBus.instance.notifyDomains({
+      DataDomain.tasks,
+      DataDomain.life,
+      DataDomain.today,
+      DataDomain.timeline,
+    });
     await _load();
   }
 
@@ -135,7 +164,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
     );
     if (title == null || title.isEmpty) return;
     await _milestonesRepo.create(projectId: widget.projectId, title: title);
-    await _load();
+                                   AppDataBus.instance.lifeChanged();
+                                   await _load();
   }
 
   Future<void> _setDeadline() async {
@@ -150,7 +180,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
       id: widget.projectId,
       targetDate: DateTime(picked.year, picked.month, picked.day).millisecondsSinceEpoch,
     );
-    await _load();
+                                   AppDataBus.instance.lifeChanged();
+                                   await _load();
   }
 
   Future<void> _addNote() async {
@@ -174,7 +205,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
     );
     if (ok != true || c.text.trim().isEmpty) return;
     await _workspace.attachNote(projectId: widget.projectId, content: c.text.trim());
-    await _load();
+                                   AppDataBus.instance.lifeChanged();
+                                   await _load();
   }
 
   Future<void> _addResource() async {
@@ -197,7 +229,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
     );
     if (ok != true || c.text.trim().isEmpty) return;
     await _workspace.attachResource(projectId: widget.projectId, title: c.text.trim());
-    await _load();
+                                   AppDataBus.instance.lifeChanged();
+                                   await _load();
   }
 
   Future<void> _scheduleNext() async {
@@ -212,7 +245,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
     if (day == null) return;
     final start = DateTime(day.year, day.month, day.day, 9);
     await _tasksRepo.scheduleSession(taskId: na.taskId, start: start, durationMinutes: 45);
-    await _load();
+                                     AppDataBus.instance.tasksChanged();
+                                     await _load();
   }
 
   String? _milestoneTitle(ProjectWorkspace workspace, Object? milestoneId) {
@@ -286,6 +320,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                 if (v == 'resource') await _addResource();
                 if (v == 'complete') {
                   await _projects.complete(widget.projectId);
+                  AppDataBus.instance.lifeChanged();
                   if (mounted) Navigator.pop(context);
                 }
               },
@@ -365,18 +400,14 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                           onPressed: () async {
                             await _tasksRepo.complete(ws.nextAction!.taskId);
                             HapticFeedback.selectionClick();
-                            await _load();
+                                     AppDataBus.instance.tasksChanged();
+                                     await _load();
                           },
                           icon: const Icon(Icons.check, size: 18),
                           label: const Text('Done'),
                         ),
                         OutlinedButton(
-                          onPressed: () {
-                            Navigator.of(context)
-                                .push(MaterialPageRoute(
-                                    builder: (_) => TaskDetailScreen(taskId: ws.nextAction!.taskId)))
-                                .then((_) => _load());
-                          },
+                          onPressed: () => _openTaskDetails(ws.nextAction!.taskId),
                           child: const Text('Open'),
                         ),
                         OutlinedButton(
@@ -430,9 +461,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
               const SizedBox(height: 10),
               GlassCard(
                 onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => GoalDetailScreen(goalId: goalId)),
-                  );
+                  _openGoalDetails(goalId);
                 },
                 child: Row(
                   children: [
@@ -482,7 +511,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                                 icon: const Icon(Icons.flag, color: AppTheme.amber),
                                 onPressed: () async {
                                   await _milestonesRepo.complete(dbStr(m['id']));
-                                  await _load();
+                                   AppDataBus.instance.lifeChanged();
+                                   await _load();
                                 },
                               )
                             else
@@ -511,12 +541,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                     Padding(
                       padding: const EdgeInsets.only(bottom: 6),
                       child: GlassCard(
-                        onTap: () async {
-                          await Navigator.of(context).push(
-                            MaterialPageRoute(builder: (_) => TaskDetailScreen(taskId: id)),
-                          );
-                          await _load();
-                        },
+                        onTap: () => _openTaskDetails(id),
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                         child: ListTile(
                           title: Text(dbStr(task['title']), style: const TextStyle(color: AppTheme.silver)),
@@ -544,7 +569,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                                   icon: const Icon(Icons.check_circle_outline, color: AppTheme.amber),
                                   onPressed: () async {
                                     await _tasksRepo.complete(id);
-                                    await _load();
+                                     AppDataBus.instance.tasksChanged();
+                                     await _load();
                                   },
                                 )
                               else
@@ -557,13 +583,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                     ...children.map((s) => Padding(
                           padding: const EdgeInsets.only(left: 20, bottom: 6),
                           child: GlassCard(
-                            onTap: () async {
-                              await Navigator.of(context).push(
-                                MaterialPageRoute(
-                                    builder: (_) => TaskDetailScreen(taskId: dbStr(s['id']))),
-                              );
-                              await _load();
-                            },
+                            onTap: () => _openTaskDetails(dbStr(s['id'])),
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                             child: ListTile(
                               dense: true,
@@ -577,7 +597,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                                           color: AppTheme.amber, size: 20),
                                       onPressed: () async {
                                         await _tasksRepo.complete(dbStr(s['id']));
-                                        await _load();
+                                     AppDataBus.instance.tasksChanged();
+                                     await _load();
                                       },
                                     )
                                   : const Icon(Icons.check_circle, color: AppTheme.amber, size: 18),
@@ -615,10 +636,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                     padding: const EdgeInsets.only(bottom: 6),
                     child: GlassCard(
                       onTap: () {
-                        Navigator.of(context)
-                            .push(MaterialPageRoute(
-                                builder: (_) => TaskDetailScreen(taskId: dbStr(t['id']))))
-                            .then((_) => _load());
+                        _openTaskDetails(dbStr(t['id']));
                       },
                       child: Text(
                         '${_fmtTime(t['scheduled_start'] as int?)}  ·  ${dbStr(t['title'])}',
