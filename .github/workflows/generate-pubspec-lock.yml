@@ -4,13 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       target_branch:
-        description: Branch to update with pubspec.lock
+        description: Branch to verify pubspec.lock on
         required: true
         default: main
-      regenerate:
-        description: "true = refresh lock from pubspec.yaml; false = enforce existing lock"
-        required: true
-        default: "false"
 
 jobs:
   lock:
@@ -30,24 +26,10 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Sync lockfile
+      - name: Enforce committed lockfile
         working-directory: apps/flutter
         run: |
           set -euo pipefail
           test -s pubspec.lock
-          if [ "${{ github.event.inputs.regenerate }}" = "true" ]; then
-            # Intentional unlock only when operator requests a lock refresh after pubspec.yaml changes.
-            flutter pub get
-          else
-            flutter pub get --enforce-lockfile
-          fi
-          test -s pubspec.lock
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pubspec.lock
-          if git diff --cached --quiet; then
-            echo "pubspec.lock already up to date"
-            exit 0
-          fi
-          git commit -m "security: update pubspec.lock"
-          git push origin "HEAD:${{ github.event.inputs.target_branch }}"
+          flutter pub get --enforce-lockfile
+          echo "pubspec.lock is present and enforced"
